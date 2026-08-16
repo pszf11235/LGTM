@@ -64,16 +64,38 @@ async function main() {
       return;
     }
 
-    // Profile complete — show TUI placeholder (will become real TUI in Task 8)
-    console.log(
-      `\n${chalk.bold("🦬 Yak")} — TUI launching soon!\n`
-    );
-    console.log(
-      chalk.gray(
-        `  In a future version, bare ${chalk.cyan("yak")} opens the interactive TUI.\n` +
-          `  For now, use ${chalk.cyan("yak --help")} to see available commands.\n`
-      )
-    );
+    // Profile complete — launch TUI
+    const { launchTUI } = await import("./tui/render.js");
+    const { QueuePage } = await import("../../plugins/review/src/pages/QueuePage.js");
+    const path = await import("path");
+
+    const repoName = path.default.basename(ctx.repoRoot);
+    const repoPath = ctx.repoRoot;
+
+    await launchTUI({
+      tabs: [
+        {
+          name: "review",
+          label: "Review",
+          enabled: ctx.config.plugins.review?.enabled !== false,
+          component: QueuePage,
+        },
+        {
+          name: "specify",
+          label: "Specify",
+          enabled: ctx.config.plugins.specify?.enabled === true,
+          component: () => null, // stub
+        },
+        {
+          name: "learn",
+          label: "Learn",
+          enabled: ctx.config.plugins.learn?.enabled === true,
+          component: () => null, // stub
+        },
+      ],
+      repoName,
+      repoPath,
+    });
     return;
   }
 
@@ -82,13 +104,37 @@ async function main() {
   // `yak tui [plugin]` → opens TUI on specific tab
   program
     .command("tui [plugin]")
-    .description("Open the interactive TUI (default when running bare `yak`)")
-    .action((plugin?: string) => {
-      console.log(
-        chalk.yellow(
-          `🦬 TUI coming in Task 8! (requested tab: ${plugin ?? "default"})`
-        )
-      );
+    .description("Open the interactive TUI (same as bare `yak`)")
+    .action(async (plugin?: string) => {
+      const { launchTUI } = await import("./tui/render.js");
+      const { QueuePage } = await import("../../plugins/review/src/pages/QueuePage.js");
+      const path = await import("path");
+
+      await launchTUI({
+        tabs: [
+          {
+            name: "review",
+            label: "Review",
+            enabled: ctx.config.plugins.review?.enabled !== false,
+            component: QueuePage,
+          },
+          {
+            name: "specify",
+            label: "Specify",
+            enabled: ctx.config.plugins.specify?.enabled === true,
+            component: () => null,
+          },
+          {
+            name: "learn",
+            label: "Learn",
+            enabled: ctx.config.plugins.learn?.enabled === true,
+            component: () => null,
+          },
+        ],
+        initialTab: plugin,
+        repoName: path.default.basename(ctx.repoRoot),
+        repoPath: ctx.repoRoot,
+      });
     });
 
   // `yak plugins` → list all plugins with status

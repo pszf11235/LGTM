@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "bun run packages/core/src/index.ts",
-    "build": "bun build packages/core/src/index.ts --outdir dist --target node",
+    "build": "bun build packages/core/src/index.ts --outdir dist --target node --external react-devtools-core --external yoga-wasm-web",
     "test": "bun test",
     "lint": "tsc --noEmit",
     "yak": "bun run packages/core/src/index.ts"
