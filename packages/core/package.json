@@ -1,0 +1,27 @@
+{
+  "name": "@yak/core",
+  "version": "0.1.0",
+  "description": "Core framework for Yak — CLI, TUI, plugin system, LLM, storage",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "cosmiconfig": "^9.0.0",
+    "gray-matter": "^4.0.3",
+    "ink": "^5.1.0",
+    "ink-text-input": "^6.0.0",
+    "minimatch": "^10.0.1",
+    "react": "^18.3.1",
+    "simple-git": "^3.27.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "typescript": "^5.6.0"
+  }
+}

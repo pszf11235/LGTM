@@ -1,0 +1,10 @@
+{
+  "name": "@yak/plugin-specify",
+  "version": "0.1.0",
+  "description": "Yak Specify Plugin — codebase intelligence and agent handoff (stub)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@yak/core": "workspace:*"
+  }
+}

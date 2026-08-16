@@ -1,0 +1,17 @@
+{
+  "name": "@yak/plugin-review",
+  "version": "0.1.0",
+  "description": "Yak Review Plugin — structured PR review with rules, grouping, and TUI",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@yak/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "typescript": "^5.6.0"
+  }
+}
