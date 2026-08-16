@@ -136,6 +136,66 @@ export function registerAICommands(program: Command, ctx: YakContext) {
 
       console.log(chalk.bold(`\n  ${chalk.green("✓")} AI connection working!\n`));
     });
+
+  ai
+    .command("model [name]")
+    .description("Show or set the AI model")
+    .action(async (name?: string) => {
+      if (!name) {
+        // Show current model + suggestions
+        const aiConfig = ctx.config.ai;
+        const provider = aiConfig.provider ?? "not set";
+        const model = aiConfig.model ?? "(default)";
+        console.log(chalk.bold("\n🦬 AI Model\n"));
+        console.log(`  Provider: ${chalk.cyan(provider)}`);
+        console.log(`  Model:    ${chalk.cyan(model)}`);
+
+        // Show suggestions
+        const suggestions: Record<string, string[]> = {
+          openai: ["gpt-4o-mini", "gpt-4o", "o3-mini"],
+          anthropic: ["claude-sonnet-4-20250514", "claude-opus-4-20250514"],
+          ollama: ["llama3.2", "codellama", "qwen2.5-coder", "deepseek-coder-v2"],
+        };
+        const providerSuggestions = suggestions[provider];
+        if (providerSuggestions) {
+          console.log(chalk.gray(`\n  Available: ${providerSuggestions.join(", ")}`));
+          console.log(chalk.gray(`  Set with: ${chalk.cyan("yak ai model <name>")}`));
+        }
+        console.log();
+        return;
+      }
+
+      // Set model in profile
+      try {
+        const { loadBootstrap, resolveYakDir } = await import("../../config/loader.js");
+        const { findGitRoot } = await import("../../store/paths.js");
+        const { createOKFStore } = await import("../../store/okf.js");
+
+        const repoRoot = findGitRoot();
+        const bootstrap = loadBootstrap();
+        const yakDir = resolveYakDir(bootstrap, repoRoot);
+        const store = createOKFStore(yakDir);
+
+        const doc = await store.read("profile.md");
+        if (!doc) {
+          console.log(chalk.red("\n  No profile found. Run `yak init` first.\n"));
+          return;
+        }
+
+        // Update AI model in frontmatter
+        const data = { ...doc.data };
+        if (typeof data.ai === "object" && data.ai !== null) {
+          (data.ai as Record<string, unknown>).model = name;
+        } else {
+          data.ai = { enabled: true, model: name };
+        }
+
+        await store.write("profile.md", data, doc.content);
+        console.log(chalk.green(`\n  ✓ Model set to: ${chalk.cyan(name)}\n`));
+      } catch (err) {
+        console.log(chalk.red(`\n  Failed: ${(err as Error).message}\n`));
+      }
+    });
 }
 
 function getEnvKeyName(provider?: string): string | null {
