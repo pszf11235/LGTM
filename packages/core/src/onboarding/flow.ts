@@ -274,7 +274,8 @@ function selectWithArrows(
     const cleanup = () => {
       stdin.setRawMode(wasRaw ?? false);
       stdin.removeListener("data", onData);
-      stdin.pause();
+      // Don't pause stdin — readline needs it to remain active
+      stdin.resume();
     };
 
     const onData = (key: string) => {
