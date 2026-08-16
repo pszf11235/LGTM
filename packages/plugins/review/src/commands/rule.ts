@@ -109,4 +109,40 @@ export function registerRuleCommand(program: Command, ctx: YakContext) {
       await engine.setEnabled(id, false);
       console.log(chalk.gray(`  ○ Rule ${id} disabled\n`));
     });
+
+  rule
+    .command("import [file]")
+    .description("Import rules from a file (CLAUDE.md, .cursorrules, etc.)")
+    .option("--discover", "Auto-discover rule source files in the repo")
+    .action(async (file: string | undefined, opts: { discover?: boolean }) => {
+      const { discoverRuleSources, importRulesFromFile } = await import("../domain/rules-import.js");
+
+      if (opts.discover || !file) {
+        // Auto-discover
+        const sources = discoverRuleSources(ctx.repoRoot);
+        if (sources.length === 0) {
+          console.log(chalk.gray("\n  No rule source files found (CLAUDE.md, .cursorrules, .kiro/steering, etc.)\n"));
+          return;
+        }
+        console.log(chalk.bold("\n🦬 Discovered rule sources:\n"));
+        for (const s of sources) {
+          console.log(`  📄 ${s}`);
+        }
+        console.log(chalk.gray(`\n  Import with: ${chalk.cyan(`yak review rule import <file>`)}\n`));
+        return;
+      }
+
+      // Import from specific file
+      console.log(chalk.gray(`\n  Importing rules from ${file}...\n`));
+      try {
+        const rules = await importRulesFromFile(file, ctx.repoRoot, ctx.store, ctx.llm);
+        console.log(chalk.bold(`  🦬 Imported ${rules.length} rule(s):\n`));
+        for (const r of rules) {
+          console.log(`  ${chalk.green("+")} ${r.id}: ${r.description} [${r.enforcement}]`);
+        }
+        console.log();
+      } catch (err) {
+        ctx.logger.error(`Failed to import: ${(err as Error).message}`);
+      }
+    });
 }
