@@ -42,8 +42,9 @@ export function ReviewPage({
   onExit,
 }: ReviewPageProps) {
   const { stdout } = useStdout();
-  const termHeight = (stdout?.rows ?? 24) - 8; // reserve for header/footer/summary/comments
-  const [scrollOffset, setScrollOffset] = useState(0);
+  const termHeight = (stdout?.rows ?? 24) - 8; // reserve for header/footer/summary
+  const [cursorLine, setCursorLine] = useState(0); // which flat line the cursor is on
+  const [scrollOffset, setScrollOffset] = useState(0); // viewport start
   const [currentFileIdx, setCurrentFileIdx] = useState(0);
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [isCommenting, setIsCommenting] = useState(false);
@@ -69,34 +70,28 @@ export function ReviewPage({
     return starts;
   }, [flatLines]);
 
+  // Auto-scroll viewport to keep cursor visible
   useEffect(() => {
-    updateStatusHint();
-  }, [isCommenting, showComments, comments.length]);
-
-  function updateStatusHint() {
-    if (isCommenting) {
-      onStatusHint("typing comment... enter submit · escape cancel");
-    } else if (showComments) {
-      onStatusHint("l hide comments  c comment  a approve  f flag  q back");
-    } else {
-      const commentCount = comments.length > 0 ? `  💬${comments.length}` : "";
-      onStatusHint(`j/k scroll  n/N file  h/H hunk  c comment  l comments  a approve  f flag  q back${commentCount}`);
+    if (cursorLine < scrollOffset) {
+      setScrollOffset(cursorLine);
+    } else if (cursorLine >= scrollOffset + termHeight) {
+      setScrollOffset(cursorLine - termHeight + 1);
     }
-  }
+  }, [cursorLine, termHeight]);
 
-  // Update current file index based on scroll
+  // Update current file index based on cursor position
   useEffect(() => {
     for (let i = fileStarts.length - 1; i >= 0; i--) {
-      if (fileStarts[i] <= scrollOffset) {
+      if (fileStarts[i] <= cursorLine) {
         setCurrentFileIdx(i);
         break;
       }
     }
-  }, [scrollOffset, fileStarts]);
+  }, [cursorLine, fileStarts]);
 
-  // Get current line info (for commenting)
+  // Get current line info (for commenting) based on cursor
   function getCurrentLineInfo(): { file: string; line: number } | null {
-    const currentLine = flatLines[scrollOffset];
+    const currentLine = flatLines[cursorLine];
     if (!currentLine) return null;
     if (currentLine.type !== "diff-line" || !currentLine.diffLine) return null;
 
@@ -114,51 +109,52 @@ export function ReviewPage({
     if (process.env.YAK_DEBUG) {
       const fs = require("fs");
       fs.appendFileSync("/tmp/yak-debug.log",
-        `[ReviewPage] input="${input}" keys=${JSON.stringify(key)} scrollOffset=${scrollOffset} flatLines=${flatLines.length} termHeight=${termHeight}\n`
+        `[ReviewPage] input="${input}" cursor=${cursorLine} scroll=${scrollOffset} total=${flatLines.length} termH=${termHeight}\n`
       );
     }
 
-    // Scroll
+    // Move cursor down
     if (key.downArrow || input === "j") {
-      setScrollOffset((prev) => Math.min(prev + 1, Math.max(0, flatLines.length - termHeight)));
+      setCursorLine((prev) => Math.min(prev + 1, flatLines.length - 1));
       return;
     }
+    // Move cursor up
     if (key.upArrow || input === "k") {
-      setScrollOffset((prev) => Math.max(prev - 1, 0));
+      setCursorLine((prev) => Math.max(prev - 1, 0));
       return;
     }
 
-    // Page scroll
+    // Page down/up (move cursor by half page)
     if (input === "d") {
-      setScrollOffset((prev) => Math.min(prev + Math.floor(termHeight / 2), Math.max(0, flatLines.length - termHeight)));
+      setCursorLine((prev) => Math.min(prev + Math.floor(termHeight / 2), flatLines.length - 1));
       return;
     }
     if (input === "u") {
-      setScrollOffset((prev) => Math.max(prev - Math.floor(termHeight / 2), 0));
+      setCursorLine((prev) => Math.max(prev - Math.floor(termHeight / 2), 0));
       return;
     }
 
-    // Next/prev file
+    // Next/prev file (move cursor to file header)
     if (input === "n") {
-      const next = fileStarts.find((s) => s > scrollOffset);
-      if (next !== undefined) setScrollOffset(next);
+      const next = fileStarts.find((s) => s > cursorLine);
+      if (next !== undefined) setCursorLine(next);
       return;
     }
     if (input === "N") {
-      const prev = [...fileStarts].reverse().find((s) => s < scrollOffset);
-      if (prev !== undefined) setScrollOffset(prev);
+      const prev = [...fileStarts].reverse().find((s) => s < cursorLine);
+      if (prev !== undefined) setCursorLine(prev);
       return;
     }
 
     // Next/prev hunk
     if (input === "h" && !showComments) {
-      const next = hunkStarts.find((s) => s > scrollOffset);
-      if (next !== undefined) setScrollOffset(next);
+      const next = hunkStarts.find((s) => s > cursorLine);
+      if (next !== undefined) setCursorLine(next);
       return;
     }
     if (input === "H") {
-      const prev = [...hunkStarts].reverse().find((s) => s < scrollOffset);
-      if (prev !== undefined) setScrollOffset(prev);
+      const prev = [...hunkStarts].reverse().find((s) => s < cursorLine);
+      if (prev !== undefined) setCursorLine(prev);
       return;
     }
 
@@ -216,7 +212,18 @@ export function ReviewPage({
     setIsCommenting(false);
   }
 
-  // Visible lines
+  useEffect(() => {
+    if (isCommenting) {
+      onStatusHint("typing comment... enter submit · escape cancel");
+    } else if (showComments) {
+      onStatusHint("l hide comments  c comment  a approve  f flag  q back");
+    } else {
+      const commentCount = comments.length > 0 ? `  💬${comments.length}` : "";
+      onStatusHint(`j/k move  n/N file  h/H hunk  c comment  l comments  a approve  f flag  q back${commentCount}`);
+    }
+  }, [isCommenting, showComments, comments.length]);
+
+  // Visible lines (viewport slice)
   const visibleLines = flatLines.slice(scrollOffset, scrollOffset + termHeight);
 
   // Stats
@@ -251,7 +258,7 @@ export function ReviewPage({
       <Box>
         <Text color="gray">
           File {currentFileIdx + 1}/{diff.files.length}: {diff.files[currentFileIdx]?.path ?? ""}
-          {"  "}(line {scrollOffset + 1}/{flatLines.length}, showing {termHeight} rows)
+          {"  "}(cursor {cursorLine + 1}/{flatLines.length})
         </Text>
       </Box>
 
@@ -265,6 +272,7 @@ export function ReviewPage({
         <Box flexDirection="column">
           {visibleLines.map((line, i) => {
             const globalIdx = scrollOffset + i;
+            const isCursor = globalIdx === cursorLine;
             const hasComment = comments.some(
               (c) => line.diffLine && c.file === line.filePath &&
                 c.line === (line.diffLine.newLine ?? line.diffLine.oldLine)
@@ -272,7 +280,7 @@ export function ReviewPage({
 
             return (
               <Box key={globalIdx} flexDirection="column">
-                <DiffRenderLine line={line} isCurrentLine={i === 0} hasComment={hasComment} />
+                <DiffRenderLine line={line} isCurrentLine={isCursor} hasComment={hasComment} />
               </Box>
             );
           })}
