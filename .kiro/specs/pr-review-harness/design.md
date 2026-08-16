@@ -9,15 +9,17 @@ PRR follows a **layered architecture** with clear separation between CLI/TUI pre
 │                    Presentation Layer                         │
 │                                                              │
 │  ┌──────────────┐    ┌──────────────────────────────────┐   │
-│  │   CLI        │    │            TUI (Ink)              │   │
-│  │ (Commander)  │    │  ┌────────────┐ ┌─────────────┐  │   │
-│  │              │    │  │ Diff Pane  │ │Comment Pane │  │   │
-│  │ add/status/  │    │  │ (scrollable│ │(linked to   │  │   │
-│  │ approve/flag │    │  │  diff view)│ │ line nums)  │  │   │
-│  │ rule/history │    │  └────────────┘ └─────────────┘  │   │
-│  └──────┬───────┘    │  ┌────────────────────────────┐  │   │
-│         │            │  │      Status Bar             │  │   │
-│         │            │  └────────────────────────────┘  │   │
+│  │   CLI        │    │       TUI (OpenCode-style)        │   │
+│  │ (Commander)  │    │  ┌────────────────────────────┐   │   │
+│  │              │    │  │      Main Content Area      │   │   │
+│  │ add/status/  │    │  │  (diff view / PR list /     │   │   │
+│  │ approve/flag │    │  │   review details)           │   │   │
+│  │ rule/history │    │  ├────────────────────────────┤   │   │
+│  └──────┬───────┘    │  │      Input / Command Bar    │   │   │
+│         │            │  └────────────────────────────┘   │   │
+│         │            │  ┌────────────────────────────┐   │   │
+│         │            │  │      Status / Breadcrumb    │   │   │
+│         │            │  └────────────────────────────┘   │   │
 │         │            └──────────────┬───────────────────┘   │
 │         │                           │                        │
 └─────────┼───────────────────────────┼────────────────────────┘
@@ -44,7 +46,7 @@ PRR follows a **layered architecture** with clear separation between CLI/TUI pre
 │                                                              │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
 │  │   Git    │  │  GitHub  │  │   LLM    │  │  Store   │   │
-│  │ Adapter  │  │ Adapter  │  │ Adapter  │  │(fs/yaml) │   │
+│  │ Adapter  │  │ Adapter  │  │ Adapter  │  │(OKF/md)  │   │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
@@ -56,19 +58,529 @@ PRR follows a **layered architecture** with clear separation between CLI/TUI pre
 
 | Layer | Choice | Rationale |
 |-------|--------|-----------|
-| Language | TypeScript (strict mode) | Type safety, good for CLI tools, user wants to learn TS |
-| Runtime | Node.js 22 | LTS, stable, good ecosystem |
-| Package manager | pnpm | Fast, disk-efficient, lockfile is reliable |
+| Language | TypeScript (strict mode) | Type safety, user wants to learn TS |
+| Runtime | Bun | Fast startup, built-in TS execution, test runner, great DX |
+| Package manager | Bun (built-in) | No separate package manager needed |
 | CLI framework | Commander.js | Simple, well-documented, zero magic |
-| TUI framework | Ink 5 (React for CLI) | Component-based, testable, handles layout/input well |
-| Diff parsing | diff2html / parse-diff | Structured diff parsing from git output |
+| TUI framework | OpenTUI (Zig core + TS bindings) | OpenCode-style UX, high performance, React component model. Fallback: Ink 5 if OpenTUI proves too bleeding-edge |
+| Diff parsing | parse-diff | Structured diff parsing from git output |
 | Git operations | simple-git | Lightweight git wrapper, no binary deps |
 | GitHub API | Octokit (REST) | Official, typed, well-maintained |
-| LLM integration | Custom provider abstraction | Keep it simple — just HTTP calls, no heavy SDK |
+| LLM integration | Custom provider abstraction (raw fetch) | Token-efficient, no heavy SDK deps |
 | Config | cosmiconfig | Standard `.prrrc` / `prr.config.yaml` pattern |
-| Storage | YAML (config/rules) + Markdown (reviews) | Human-readable, git-friendly, no DB needed |
-| Build | tsup | Fast TS bundler, zero-config for CLIs |
-| Testing | Vitest | Fast, TS-native, compatible with Ink testing |
+| Storage | **OKF-inspired** (Markdown + YAML frontmatter) | Human-readable, agent-readable, git-friendly — see Storage section |
+| Build | Bun (native bundler) | Zero-config for CLIs, fast |
+| Testing | Bun test (built-in) | Fast, TS-native, no extra deps |
+
+### Why Bun over Node/pnpm?
+- Native TypeScript execution (no build step for dev)
+- Built-in test runner (no Vitest/Jest dependency)
+- Built-in bundler for production
+- Faster dependency install
+- Single tool instead of Node + pnpm + tsup + vitest
+
+### TUI Framework Decision: OpenTUI vs Ink
+
+OpenCode uses [OpenTUI](https://github.com/anomalyco/opentui) — a Zig-powered core with TypeScript bindings that provides the polished, responsive feel we want. Key advantages:
+
+- React component model (familiar, composable)
+- High performance rendering (native Zig core)
+- Runs on Bun natively
+- Powers OpenCode in production (proven)
+
+**Risk:** OpenTUI is relatively new. If integration proves problematic in the hackathon timeframe, we fall back to Ink 5 (React for CLI) which has the same component model but is pure JS.
+
+---
+
+## TUI Design: OpenCode-Style
+
+Inspired by OpenCode's clean, minimal terminal UI:
+
+### Main Layout
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  PRR ─ review session                              pr-review-harness │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  📋 PR #101: Add OAuth2 PKCE flow                                   │
+│  ──────────────────────────────────────────────────────────────────  │
+│                                                                      │
+│  Summary: Adds OAuth2 PKCE flow to auth module. Touches 4 files.    │
+│  ⚠️  No tests added. 1 rule violation (security).                    │
+│                                                                      │
+│  ── src/auth/oauth.ts ──────────────────────────────────────────── │
+│                                                                      │
+│   12 │   import { generateCodeVerifier } from './crypto';            │
+│   13 │                                                               │
+│   14 │ + export async function initiateOAuth(                        │
+│   15 │ +   clientId: string,                                         │
+│   16 │ +   redirectUri: string,                                      │
+│   17 │ +   clientSecret: string = "sk_live_abc123"  ⚠️ [r-001]       │
+│   18 │ + ) {                                                         │
+│   19 │ +   const verifier = generateCodeVerifier();                  │
+│   20 │ +   const challenge = await sha256(verifier);                 │
+│                                                                      │
+│  💬 Comments (2)                                                     │
+│  ├─ L14: Why not use passport.js? Reinventing auth here.            │
+│  └─ L17: MUST be env var. Never hardcode secrets. → rule created    │
+│                                                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│  > c comment  r rule  n next file  a approve  f flag  ? help   1/4  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key UI Principles (from OpenCode):
+1. **Full-screen, single-page focus** — one PR at a time, no split panes fighting for space
+2. **Content flows vertically** — summary → diff → comments, natural reading order
+3. **Command bar at bottom** — keyboard shortcuts always visible
+4. **Minimal chrome** — header shows context, footer shows actions, middle is content
+5. **Scrollable body** — entire middle area scrolls as one unit
+6. **Inline decorations** — rule violations, comments shown in-context, not in separate panes
+
+### Navigation Model
+
+| Mode | What's Shown | How to Enter |
+|------|---|---|
+| **Queue** | List of all PRs with states, summaries | `prr tui` or default on launch |
+| **Review** | Single PR: summary → diff → comments | Select PR from queue or `prr review <n>` |
+| **Comment** | Text input overlay | `c` in review mode |
+| **Rule** | Rule creation form | `r` in review mode |
+| **History** | Past sessions, searchable | `h` from queue |
+
+---
+
+## Storage Format: OKF-Inspired
+
+### Why OKF over YAML?
+
+After evaluating [Google's Open Knowledge Format](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing):
+
+| Factor | Plain YAML | OKF-Inspired (Markdown + YAML frontmatter) |
+|--------|-----------|----------------------------------------------|
+| Human-readable | 🟡 Okay for simple data | 🟢 Excellent — it's just markdown |
+| Agent-readable | 🟡 Needs YAML parser | 🟢 Any LLM can read it raw |
+| Git-friendly | 🟢 Yes | 🟢 Yes, even better diffs |
+| Rich content (comments, analysis) | 🔴 Awkward in YAML | 🟢 Natural in markdown body |
+| Structured metadata | 🟢 Native | 🟢 YAML frontmatter |
+| Cross-linking | 🔴 Manual references | 🟢 Markdown links between files |
+| Tool ecosystem | 🟡 Custom parsers | 🟢 Any markdown renderer, Obsidian, GitHub, etc. |
+
+### Decision: **Markdown files with YAML frontmatter (OKF-style)**
+
+This means:
+- Each PR review = one `.md` file with structured frontmatter
+- Queue state = one index file with frontmatter listing PRs
+- Rules = one file per rule OR one consolidated rules file with frontmatter
+- Everything is browsable in GitHub, Obsidian, any markdown viewer
+- LLMs can consume the entire `.prr/` directory without parsing
+
+### Storage Structure
+
+```
+.prr/
+├── index.md                          # session index (OKF-style)
+├── config.md                         # configuration with frontmatter
+├── rules/
+│   ├── index.md                      # rule registry
+│   └── r-001-no-hardcoded-secrets.md # individual rule files
+├── sessions/
+│   └── 2026-08-15/
+│       ├── index.md                  # session summary + queue state
+│       ├── pr-101.md                 # review for PR #101
+│       ├── pr-102.md                 # review for PR #102
+│       └── analysis.md              # cross-PR analysis (feature grouping)
+└── learnings/                        # (future) learnify notes
+    └── ...
+```
+
+### File Formats
+
+#### Session Index (`sessions/2026-08-15/index.md`)
+
+```markdown
+---
+type: prr/session
+date: 2026-08-15
+status: in-progress
+prs:
+  - number: 101
+    title: "Add OAuth2 PKCE flow"
+    state: approved
+    files_changed: 4
+    group: auth-feature
+  - number: 102
+    title: "Fix rate limiter edge case"
+    state: reviewing
+    files_changed: 2
+    group: performance
+  - number: 103
+    title: "Add /users endpoint"
+    state: queued
+    files_changed: 3
+    group: auth-feature
+feature_groups:
+  - id: auth-feature
+    label: "Authentication overhaul"
+    prs: [101, 103]
+    reason: "Both touch src/auth/ and /users endpoint depends on OAuth"
+  - id: performance
+    label: "Performance fixes"
+    prs: [102]
+---
+
+# Review Session: August 15, 2026
+
+## Feature Groups
+
+PRs #101 and #103 both modify the authentication subsystem and share the 
+`/users` endpoint. Recommend reviewing together for the next release.
+
+## Progress
+
+- ✅ PR #101 — Approved (3 comments, 1 rule violation fixed)
+- 🔄 PR #102 — In review
+- ⏳ PR #103 — Queued
+```
+
+#### PR Review (`sessions/2026-08-15/pr-101.md`)
+
+```markdown
+---
+type: prr/review
+pr: 101
+title: "Add OAuth2 PKCE flow"
+state: approved
+reviewed_at: "2026-08-15T10:15:00Z"
+files_changed: 4
+comments_count: 3
+rule_violations: 1
+feature_group: auth-feature
+---
+
+# PR #101: Add OAuth2 PKCE flow
+
+## Summary
+
+Adds OAuth2 PKCE flow to auth module. New `initiateOAuth()` function handles
+code verifier generation and token exchange. Touches auth controller, routes,
+and adds new OAuth service module. No tests included.
+
+## Feature Context
+
+This PR is part of the **auth-feature** group along with PR #103 (Add /users 
+endpoint). Both touch `src/auth/` — review for interactions.
+
+## Rule Violations
+
+- ⚠️ **[r-001 / security / error]** `src/auth/oauth.ts:17`
+  Pattern matched: `clientSecret = "sk_live_abc123"`
+  Rule: Always use environment variables for secrets, never hardcode
+
+## Comments
+
+### src/auth/oauth.ts
+
+- **L14:** Why not use passport.js? Reinventing auth here.
+- **L17:** MUST be env var. Never hardcode secrets. → Created rule r-001
+- **L52:** Always validate redirect_uri against allowlist.
+
+### src/routes/auth.ts
+
+- **L8:** Missing rate limiting on this endpoint.
+
+## Decision
+
+✅ **Approved** — Issues noted are non-blocking. Rules created for future enforcement.
+```
+
+#### Rule File (`rules/r-001-no-hardcoded-secrets.md`)
+
+```markdown
+---
+type: prr/rule
+id: r-001
+description: "Always use environment variables for secrets, never hardcode"
+category: security
+severity: error
+enforcement: llm
+pattern: null
+file_pattern: "**/*.{ts,js,py}"
+examples:
+  bad:
+    - 'const apiKey = "sk_live_abc123"'
+    - 'password: "hunter2"'
+  good:
+    - 'const apiKey = process.env.API_KEY'
+    - 'password: process.env.DB_PASSWORD'
+created_at: "2026-08-15T10:15:00Z"
+created_from: pr-101
+enabled: true
+times_triggered: 0
+---
+
+# Rule: No Hardcoded Secrets
+
+## Description
+
+Always use environment variables for secrets, API keys, tokens, and passwords.
+Never hardcode sensitive values in source code.
+
+## Examples
+
+### ❌ Bad
+
+```typescript
+const apiKey = "sk_live_abc123";
+const dbPassword = "hunter2";
+```
+
+### ✅ Good
+
+```typescript
+const apiKey = process.env.API_KEY;
+const dbPassword = process.env.DB_PASSWORD;
+```
+
+## Enforcement
+
+This rule uses **LLM-based enforcement** — the diff is sent to the LLM with this
+rule description and examples to identify violations. This catches patterns that
+simple regex cannot (e.g., secrets assigned via function calls, template literals).
+
+## Origin
+
+Created during review of PR #101 (Add OAuth2 PKCE flow) on 2026-08-15.
+```
+
+---
+
+## Rule Enforcement: Hybrid Approach
+
+### Two Enforcement Modes
+
+| Mode | When Used | Token Cost | Accuracy |
+|------|-----------|-----------|----------|
+| **Regex** | Rule has an obvious pattern (e.g., `console.log`) | 0 tokens | Lower (false positives) |
+| **LLM** | Rule is conceptual or needs context (e.g., "new endpoints need tests") | ~200-500 tokens per file | Higher (understands intent) |
+
+### LLM Enforcement Design
+
+```typescript
+interface RuleEnforcementResult {
+  ruleId: string;
+  violations: {
+    file: string;
+    line: number;
+    explanation: string;      // why this violates the rule
+    suggestion?: string;      // how to fix it
+  }[];
+}
+```
+
+**LLM prompt structure for enforcement:**
+
+```
+You are reviewing code changes for rule violations.
+
+Rule: {rule.description}
+Examples of violations: {rule.examples.bad}
+Examples of correct code: {rule.examples.good}
+
+Changed files (diff):
+{diff of changed files only}
+
+Identify any violations of this rule. For each violation, specify:
+- File path and line number
+- Brief explanation of why it violates the rule
+- Suggested fix
+
+If no violations found, respond with empty array.
+Respond in JSON format only.
+```
+
+### Scope Strategy
+
+| Scope | When | What's scanned | Token budget |
+|-------|------|---------------|--------------|
+| **Direct** (changed files only) | During review | Only files in the PR diff | ~200-500 tokens per rule per PR |
+| **Repo-wide** (alerting) | On-demand (`prr scan`) | Whole repo, but user-triggered | Higher budget, with user consent |
+
+**Direct scope:** For immediate review feedback. Fast, cheap, focused.
+**Repo-wide scope:** When a rule is created and user wants to check existing code. Results in:
+- Alert to user: "Found 12 existing violations of rule r-001 in the repo"
+- Option to: file as issue, create new PR to fix, or acknowledge and move on
+
+---
+
+## PR Ingestion & Feature Grouping
+
+### Automatic Feature Analysis
+
+When PRs are added to the queue, PRR performs a lightweight analysis to group related PRs:
+
+```typescript
+interface FeatureGroup {
+  id: string;
+  label: string;                    // human-readable: "Authentication overhaul"
+  prs: number[];                    // which PRs belong
+  reason: string;                   // why grouped: "Both touch src/auth/ and share /users endpoint"
+  reviewTogether: boolean;          // recommendation
+}
+```
+
+### Grouping Signals (Algorithmic, No LLM)
+
+1. **Shared file paths** — PRs modifying same files/directories
+2. **Endpoint overlap** — Detected via route file patterns (e.g., both touch `routes/auth.ts`)
+3. **Import chain** — If PR #1 modifies module A and PR #2 imports from module A
+4. **Branch naming** — `feature/auth-*` branches grouped together
+
+### Enhancement (LLM, optional)
+
+If AI is enabled, a short prompt analyzes PR titles + changed file lists:
+
+```
+Given these PRs queued for review:
+- #101: "Add OAuth2 PKCE flow" (files: src/auth/oauth.ts, src/routes/auth.ts, ...)
+- #103: "Add /users endpoint" (files: src/routes/users.ts, src/auth/middleware.ts, ...)
+
+Which PRs should be reviewed together and why? 
+Consider: shared subsystems, data dependencies, release readiness.
+```
+
+**Token budget:** ~300 tokens total for grouping analysis (runs once on `prr add`)
+
+### Output in Session
+
+Feature groups are:
+- Shown in `prr status` output
+- Displayed in TUI queue view
+- Written to session index.md
+- Used to suggest review order
+
+---
+
+## Ruleify: Pattern Analysis from Comments
+
+### Automatic Rule Suggestions (from reviewer behavior)
+
+PRR tracks all comments across sessions. When patterns emerge, it suggests rules:
+
+**Trigger:** After 3+ reviews, OR on `prr rules suggest`
+
+**Analysis (LLM-powered):**
+
+```
+Here are the last 20 review comments made across different PRs:
+
+PR #101 L17: "MUST be env var. Never hardcode secrets."
+PR #103 L44: "This API key should come from environment"
+PR #107 L8: "Don't put credentials in code, use env"
+PR #102 L55: "Missing error handling for this async call"
+PR #104 L22: "No try/catch around this API call"
+PR #108 L19: "Wrap external calls in try/catch"
+
+Identify patterns where the reviewer made essentially the same comment 3+ times.
+For each pattern, suggest a rule with:
+- description
+- category 
+- example violations and corrections
+- suggested enforcement type (regex or llm)
+```
+
+**Token budget:** ~500 tokens per suggestion run
+
+**User flow:**
+1. PRR notices pattern after several reviews
+2. Prompts user: "You've commented about error handling 3 times. Create a rule?"
+3. User confirms/edits → rule created with examples from their actual comments
+4. Future reviews auto-flag this pattern
+
+---
+
+## Learnify (Follow-up Feature — Post-Hackathon)
+
+> **Note:** This is documented as a future feature, not MVP.
+
+### Concept
+
+When a reviewer makes a comment based on a wrong assumption and the LLM (or later, the PR author) corrects them, PRR offers to create a **learning note**.
+
+### Example Flow
+
+```
+Reviewer comments: "This should use useState, React re-renders on prop changes"
+LLM/correction: "Actually this is a server component — no useState here. 
+                  Server components don't re-render, they only run on the server."
+
+PRR prompt: "💡 Learning opportunity detected. Create a note about 
+             Server Components vs Client Components?"
+
+User: "yes"
+
+PRR creates: .prr/learnings/react-server-components.md
+  - What I assumed vs what's correct
+  - Links to relevant docs (React Server Components RFC, Next.js docs)
+  - Example code showing the difference
+```
+
+### Learning Note Format
+
+```markdown
+---
+type: prr/learning
+topic: "React Server Components"
+created_at: "2026-08-20T14:30:00Z"
+context: "PR #205 — assumed useState works in server components"
+confidence_before: low
+tags: [react, server-components, nextjs]
+---
+
+# Learning: React Server Components vs Client Components
+
+## What I Assumed
+
+Server components re-render like client components when props change,
+so they need `useState` for local state.
+
+## What's Actually True
+
+Server components only execute on the server and never re-render on the client.
+They cannot use hooks like `useState` or `useEffect`. For interactive state,
+you need to mark a component as `"use client"`.
+
+## Resources
+
+- [React Server Components RFC](https://github.com/reactjs/rfcs/pull/188)
+- [Next.js Server Components docs](https://nextjs.org/docs/app/building-your-application/rendering/server-components)
+
+## Example
+
+```tsx
+// ❌ Won't work — server component can't use hooks
+export default function UserList({ users }) {
+  const [filter, setFilter] = useState('');  // ERROR
+  ...
+}
+
+// ✅ Correct — separate into server + client components
+// ServerComponent.tsx (data fetching)
+export default async function UserList() {
+  const users = await db.users.findMany();
+  return <UserFilter users={users} />;  
+}
+
+// ClientComponent.tsx (interactivity)
+"use client"
+export function UserFilter({ users }) {
+  const [filter, setFilter] = useState('');
+  ...
+}
+```
+```
+
+### Status: 📋 Documented for V2 (post-hackathon feature)
 
 ---
 
@@ -78,61 +590,69 @@ PRR follows a **layered architecture** with clear separation between CLI/TUI pre
 pr-review-harness/
 ├── package.json
 ├── tsconfig.json
-├── tsup.config.ts
-├── .prrrc.yaml.example          # example config
+├── bunfig.toml                      # Bun configuration
+├── .prrrc.yaml.example              # example config
 ├── src/
-│   ├── index.ts                 # entry point — CLI setup
+│   ├── index.ts                     # entry point — CLI setup
 │   ├── cli/
 │   │   ├── commands/
-│   │   │   ├── init.ts          # prr init
-│   │   │   ├── add.ts           # prr add <PRs>
-│   │   │   ├── status.ts        # prr status
-│   │   │   ├── review.ts        # prr review <PR> → launches TUI
-│   │   │   ├── approve.ts       # prr approve <PR>
-│   │   │   ├── flag.ts          # prr flag <PR>
-│   │   │   ├── rule.ts          # prr rule add/list/export
-│   │   │   └── history.ts       # prr history
-│   │   └── index.ts             # commander program setup
+│   │   │   ├── init.ts              # prr init
+│   │   │   ├── add.ts              # prr add <PRs>
+│   │   │   ├── status.ts           # prr status
+│   │   │   ├── review.ts           # prr review <PR> → launches TUI
+│   │   │   ├── approve.ts          # prr approve <PR>
+│   │   │   ├── flag.ts             # prr flag <PR>
+│   │   │   ├── rule.ts             # prr rule add/list/export/suggest
+│   │   │   ├── scan.ts             # prr scan (repo-wide rule check)
+│   │   │   └── history.ts          # prr history
+│   │   └── index.ts                # commander program setup
 │   ├── tui/
-│   │   ├── App.tsx              # root Ink component
+│   │   ├── App.tsx                  # root TUI component
+│   │   ├── pages/
+│   │   │   ├── QueuePage.tsx        # PR list view
+│   │   │   ├── ReviewPage.tsx       # single PR review
+│   │   │   └── HistoryPage.tsx      # past sessions
 │   │   ├── components/
-│   │   │   ├── DiffPane.tsx     # left pane: scrollable diff
-│   │   │   ├── CommentPane.tsx  # right pane: comments
-│   │   │   ├── StatusBar.tsx    # bottom bar: keybindings, position
-│   │   │   ├── SummaryHeader.tsx# AI summary at top
-│   │   │   └── RuleWarning.tsx  # inline rule violation warnings
+│   │   │   ├── DiffView.tsx         # scrollable diff with line numbers
+│   │   │   ├── CommentList.tsx      # comments section
+│   │   │   ├── CommentInput.tsx     # text input overlay
+│   │   │   ├── SummaryBanner.tsx    # AI summary + rule violations
+│   │   │   ├── StatusBar.tsx        # bottom bar: keybindings, position
+│   │   │   ├── FeatureGroups.tsx    # grouped PR display
+│   │   │   └── RuleViolation.tsx    # inline rule violation marker
 │   │   ├── hooks/
-│   │   │   ├── useKeyboard.ts   # keyboard navigation logic
-│   │   │   ├── useScroll.ts     # scroll state management
-│   │   │   └── useComments.ts   # comment CRUD
-│   │   └── theme.ts             # colors, styles
+│   │   │   ├── useNavigation.ts     # page/scroll navigation
+│   │   │   ├── useKeyboard.ts       # keyboard shortcut handling
+│   │   │   └── useComments.ts       # comment CRUD state
+│   │   └── theme.ts                 # colors, borders, spacing
 │   ├── domain/
-│   │   ├── queue.ts             # QueueManager: add, remove, get, state transitions
-│   │   ├── review.ts            # ReviewSession: create, add comment, finalize
-│   │   ├── rules.ts             # RulesEngine: load, match, create, export
-│   │   ├── correlation.ts       # cross-PR file overlap detection
-│   │   └── types.ts             # shared domain types
+│   │   ├── queue.ts                 # QueueManager
+│   │   ├── review.ts               # ReviewSession
+│   │   ├── rules.ts                # RulesEngine (regex + LLM hybrid)
+│   │   ├── grouping.ts             # FeatureGrouping (PR analysis)
+│   │   ├── patterns.ts             # PatternAnalysis (comment mining)
+│   │   └── types.ts                # shared domain types
 │   ├── infra/
-│   │   ├── git.ts               # GitAdapter: get diff, branches, log
-│   │   ├── github.ts            # GitHubAdapter: fetch PR, post review
+│   │   ├── git.ts                   # GitAdapter: get diff, branches, log
+│   │   ├── github.ts               # GitHubAdapter: fetch PR, post review
 │   │   ├── llm/
-│   │   │   ├── provider.ts      # LLMProvider interface
-│   │   │   ├── openai.ts        # OpenAI implementation
-│   │   │   ├── anthropic.ts     # Anthropic implementation
-│   │   │   └── ollama.ts        # Ollama implementation
-│   │   ├── store.ts             # FileStore: read/write YAML, markdown
-│   │   └── config.ts            # ConfigLoader (cosmiconfig)
+│   │   │   ├── provider.ts         # LLMProvider interface + factory
+│   │   │   ├── openai.ts           # OpenAI implementation
+│   │   │   ├── anthropic.ts        # Anthropic implementation
+│   │   │   └── ollama.ts           # Ollama implementation
+│   │   ├── store.ts                # FileStore: OKF-style markdown read/write
+│   │   └── config.ts               # ConfigLoader (cosmiconfig)
 │   └── utils/
-│       ├── diff-parser.ts       # parse unified diff into structured data
-│       ├── markdown.ts          # generate review markdown
-│       └── logger.ts            # structured logging
+│       ├── diff-parser.ts           # parse unified diff → structured data
+│       ├── markdown.ts              # generate/parse OKF markdown files
+│       └── logger.ts                # structured logging
 ├── tests/
 │   ├── domain/
 │   │   ├── queue.test.ts
 │   │   ├── rules.test.ts
-│   │   └── review.test.ts
+│   │   └── grouping.test.ts
 │   └── fixtures/
-│       └── sample-diffs/        # test diff files
+│       └── sample-diffs/            # test diff files
 └── .kiro/
     └── specs/
         └── pr-review-harness/
@@ -149,16 +669,30 @@ pr-review-harness/
 
 ```typescript
 interface QueuedPR {
-  number: number;                    // PR number or local branch ID
-  title: string;                     // PR title
+  number: number;
+  title: string;
   state: 'queued' | 'reviewing' | 'approved' | 'flagged';
   addedAt: string;                   // ISO timestamp
-  reviewedAt?: string;               // when review was completed
-  flagReason?: string;               // if flagged, why
-  summary?: string;                  // AI-generated summary (cached)
-  summaryHash?: string;              // commit SHA used for summary (cache key)
-  filesChanged: number;              // count of files in diff
-  source: 'github' | 'local';       // where the diff comes from
+  reviewedAt?: string;
+  flagReason?: string;
+  summary?: string;                  // AI-generated (cached)
+  summaryHash?: string;              // commit SHA for cache invalidation
+  filesChanged: string[];            // list of file paths (not just count)
+  source: 'github' | 'local';
+  featureGroup?: string;             // group ID if grouped
+}
+```
+
+### Feature Group
+
+```typescript
+interface FeatureGroup {
+  id: string;                        // e.g., "auth-feature"
+  label: string;                     // "Authentication overhaul"
+  prs: number[];
+  reason: string;                    // why they're grouped
+  sharedPaths: string[];             // files/dirs they have in common
+  reviewTogether: boolean;
 }
 ```
 
@@ -166,30 +700,13 @@ interface QueuedPR {
 
 ```typescript
 interface ReviewComment {
-  id: string;                        // uuid
-  file: string;                      // relative file path
-  line: number;                      // line number in diff
-  side: 'added' | 'removed' | 'context'; // which side of the diff
-  text: string;                      // comment content
-  createdAt: string;                 // ISO timestamp
-  ruleId?: string;                   // if this was auto-generated from a rule
-}
-```
-
-### Review Session
-
-```typescript
-interface ReviewSession {
-  id: string;                        // uuid
-  date: string;                      // YYYY-MM-DD
-  prNumber: number;
-  prTitle: string;
-  state: 'in-progress' | 'approved' | 'flagged';
-  comments: ReviewComment[];
-  ruleViolations: RuleViolation[];
-  summary?: string;
-  startedAt: string;
-  completedAt?: string;
+  id: string;
+  file: string;
+  line: number;
+  side: 'added' | 'removed' | 'context';
+  text: string;
+  createdAt: string;
+  ruleId?: string;                   // if auto-generated from rule enforcement
 }
 ```
 
@@ -197,22 +714,30 @@ interface ReviewSession {
 
 ```typescript
 interface Rule {
-  id: string;                        // uuid
-  description: string;               // human-readable description
-  category: 'security' | 'style' | 'testing' | 'architecture' | 'general';
+  id: string;
+  description: string;
+  category: 'security' | 'style' | 'testing' | 'architecture' | 'performance' | 'general';
   severity: 'warn' | 'error';
-  pattern?: string;                  // regex to match in diff lines
-  filePattern?: string;              // glob for which files this applies to
+  enforcement: 'regex' | 'llm';     // how to check violations
+  pattern?: string;                  // regex (only for enforcement: 'regex')
+  filePattern?: string;              // glob for which files to check
+  examples: {
+    bad: string[];                   // code that violates
+    good: string[];                  // code that's correct
+  };
   createdAt: string;
-  createdFrom?: string;              // PR number where this rule originated
+  createdFrom?: string;              // PR number where originated
   enabled: boolean;
+  timesTriggered: number;
 }
 
 interface RuleViolation {
   ruleId: string;
   file: string;
   line: number;
-  matchedText: string;
+  explanation: string;               // why this is a violation
+  suggestion?: string;               // how to fix
+  matchedText?: string;              // for regex matches
 }
 ```
 
@@ -224,344 +749,83 @@ interface PRRConfig {
   github?: {
     owner: string;
     repo: string;
-    // token auto-detected from gh CLI or GITHUB_TOKEN env
   };
   ai?: {
     enabled: boolean;
     provider: 'openai' | 'anthropic' | 'ollama';
-    model?: string;                  // defaults per provider
-    baseUrl?: string;                // for ollama or custom endpoints
-    apiKey?: string;                 // or use env vars
+    model?: string;
+    baseUrl?: string;
+    apiKey?: string;                 // prefer env vars
   };
   rules?: {
     enabled: boolean;
-    autoSuggest: boolean;            // AI suggests rules after review
+    enforcement: 'regex-only' | 'hybrid';  // hybrid = regex + LLM
+    autoSuggest: boolean;
+    repoScanOnNewRule: boolean;      // scan whole repo when new rule created?
+  };
+  grouping?: {
+    enabled: boolean;
+    aiEnhanced: boolean;             // use LLM for grouping analysis
   };
 }
 ```
 
 ---
 
-## Key Data Flows
+## LLM Integration: Token Budget
 
-### Flow 1: Add PRs to Queue
+| Operation | Scope | Max Tokens | Trigger |
+|-----------|-------|-----------|---------|
+| PR Summary | Per PR | ~1000 | On `prr add --ai` |
+| Rule Enforcement (LLM rules) | Changed files only | ~500/rule/PR | On review start |
+| Feature Grouping | PR metadata only | ~300 | On `prr add` (batch) |
+| Rule Suggestions | Last N comments | ~500 | On `prr rules suggest` or after 5+ reviews |
+| Repo-wide Scan | Whole repo files matching rule pattern | ~2000/rule | On `prr scan` (user-triggered) |
 
-```
-User runs: prr add 101 102 103
-    │
-    ▼
-CLI (add.ts) parses args
-    │
-    ▼
-ConfigLoader resolves mode (local/github)
-    │
-    ├─── GitHub mode ──► GitHubAdapter.fetchPR(101) → title, files count
-    │
-    └─── Local mode ──► GitAdapter.getBranchInfo() → title, files count
-    │
-    ▼
-QueueManager.add(pr) → validates, deduplicates
-    │
-    ▼
-[Optional] If AI enabled: LLMProvider.summarize(diff) → cache summary
-    │
-    ▼
-FileStore.saveQueue(session/queue.yaml)
-```
+**Total per typical review session (5 PRs, AI enabled):**
+- Summaries: ~5000 tokens
+- Rule enforcement (3 LLM rules): ~7500 tokens  
+- Grouping: ~300 tokens
+- **Total: ~12,800 tokens ≈ $0.02-0.05**
 
-### Flow 2: Enter Review (TUI)
-
-```
-User runs: prr review 101
-    │
-    ▼
-CLI (review.ts) resolves PR from queue
-    │
-    ▼
-GitAdapter.getDiff(101) or GitHubAdapter.getDiff(101)
-    │
-    ▼
-DiffParser.parse(rawDiff) → structured: files[], hunks[], lines[]
-    │
-    ▼
-RulesEngine.check(parsedDiff) → violations[]
-    │
-    ▼
-Ink render: App.tsx
-    ├── SummaryHeader (cached AI summary)
-    ├── DiffPane (parsed diff, violations inline)
-    ├── CommentPane (empty initially)
-    └── StatusBar (keybindings, position)
-    │
-    ▼
-User navigates, adds comments, creates rules
-    │
-    ▼
-On exit (q): ReviewSession.finalize()
-    │
-    ▼
-FileStore.saveReview(session/pr-101.review.md)
-    │
-    ▼
-Prompt: [a]pprove / [f]lag / [s]kip
-    │
-    ▼
-QueueManager.updateState(101, 'approved'|'flagged')
-```
-
-### Flow 3: Rule Enforcement
-
-```
-New PR queued or review started
-    │
-    ▼
-RulesEngine.loadRules(.prr/rules/rules.yaml)
-    │
-    ▼
-For each rule with pattern:
-    │
-    ├── regex.test(line.content) for each diff line
-    │
-    └── If filePattern: glob.match(file.path)
-    │
-    ▼
-Violations collected → displayed inline in TUI as ⚠️ warnings
-    │
-    ▼
-Violations also written to review markdown
-```
-
-### Flow 4: Rule Export
-
-```
-User runs: prr rule export --format hook
-    │
-    ▼
-RulesEngine.loadRules()
-    │
-    ▼
-For each rule with regex pattern:
-    │
-    ▼
-Generate git hook script:
-    #!/bin/sh
-    # Rule: {description}
-    if git diff --cached | grep -qE '{pattern}'; then
-      echo "Rule violation: {description}"
-      exit 1
-    fi
-    │
-    ▼
-Write to .git/hooks/pre-commit (or .prr/exports/pre-commit.sh)
-```
+**Without AI:** Tool is fully functional. Rules use regex-only, no summaries, grouping is algorithmic.
 
 ---
 
-## LLM Integration Design
-
-### Provider Interface
-
-```typescript
-interface LLMProvider {
-  summarize(diff: string, context?: string): Promise<string>;
-  suggestRules(comments: ReviewComment[]): Promise<SuggestedRule[]>;
-}
-```
-
-### Token Efficiency Strategy
-
-| Operation | Max Input | Max Output | Strategy |
-|-----------|-----------|-----------|----------|
-| PR Summary | Diff truncated to 4000 chars | 200 tokens | One-shot, cached by commit SHA |
-| Rule Suggestion | Last N comments (not full diff) | 300 tokens | Triggered manually, uses comments only |
-
-### Caching
-
-```typescript
-// Cache key = SHA of PR head commit + diff content hash
-const cacheKey = `${prNumber}-${commitSha}`;
-const cached = store.getSummaryCache(cacheKey);
-if (cached) return cached; // no LLM call
-```
-
-### Provider Selection
-
-```typescript
-// Factory pattern — no heavy SDKs, just fetch()
-function createProvider(config: AIConfig): LLMProvider {
-  switch (config.provider) {
-    case 'openai': return new OpenAIProvider(config);
-    case 'anthropic': return new AnthropicProvider(config);
-    case 'ollama': return new OllamaProvider(config);
-  }
-}
-```
-
-All providers use raw `fetch()` to their respective APIs — no `openai` or `@anthropic-ai/sdk` packages needed. Keeps dependencies minimal.
-
----
-
-## TUI Component Design (Ink)
-
-### Layout
-
-```tsx
-// App.tsx — root component
-<Box flexDirection="column" height="100%">
-  <SummaryHeader summary={summary} violations={violations.length} />
-  <Box flexDirection="row" flexGrow={1}>
-    <DiffPane 
-      diff={parsedDiff} 
-      scrollOffset={scroll} 
-      violations={violations}
-      width="60%" 
-    />
-    <CommentPane 
-      comments={comments} 
-      currentLine={currentLine}
-      width="40%" 
-    />
-  </Box>
-  <StatusBar 
-    prTitle={pr.title} 
-    position={`${currentFile}/${totalFiles}`}
-    keys={keybindings} 
-  />
-</Box>
-```
-
-### Keyboard Handling
-
-| Key | Action |
-|-----|--------|
-| `j` / `↓` | Scroll down one line |
-| `k` / `↑` | Scroll up one line |
-| `n` | Next file |
-| `N` | Previous file |
-| `h` | Next hunk |
-| `H` | Previous hunk |
-| `c` | Add comment at current line |
-| `r` | Create rule from current context |
-| `a` | Approve PR and exit |
-| `f` | Flag PR (prompts for reason) and exit |
-| `q` | Exit (prompts: approve/flag/skip) |
-| `?` | Show help |
-
----
-
-## Storage Format
-
-### Queue File (`.prr/sessions/2026-08-15/queue.yaml`)
-
-```yaml
-session: 2026-08-15
-prs:
-  - number: 101
-    title: "Add OAuth2 PKCE flow"
-    state: approved
-    addedAt: "2026-08-15T10:00:00Z"
-    reviewedAt: "2026-08-15T10:15:00Z"
-    filesChanged: 4
-    source: github
-  - number: 102
-    title: "Fix rate limiter edge case"
-    state: reviewing
-    addedAt: "2026-08-15T10:00:00Z"
-    filesChanged: 2
-    source: github
-```
-
-### Review File (`.prr/sessions/2026-08-15/pr-101.review.md`)
-
-```markdown
-# Review: PR #101 — Add OAuth2 PKCE flow
-
-**Reviewed:** 2026-08-15T10:15:00Z
-**State:** Approved
-**Files:** 4 changed
-
-## AI Summary
-
-Adds OAuth2 PKCE flow to auth module. New `initiateOAuth()` function handles
-code verifier generation and token exchange. Touches auth controller, routes,
-and adds new OAuth service module. No tests included.
-
-## Rule Violations
-
-- ⚠️ **[security]** src/auth/oauth.ts:38 — "Always use environment variables for secrets" (matched: `clientSecret = "sk_live_..."`)
-
-## Comments
-
-### src/auth/oauth.ts
-
-- **L14:** Why not use passport.js here? Seems like reinventing the wheel.
-- **L38:** This should be an env var, not hardcoded. Security risk.
-- **L52:** Always validate redirect_uri against allowlist. → Created rule #r-003.
-
-### src/routes/auth.ts
-
-- **L8:** Missing rate limiting on this endpoint.
-
-## Decision
-
-✅ Approved — issues noted are non-blocking for this PR, rules created for future enforcement.
-```
-
-### Rules File (`.prr/rules/rules.yaml`)
-
-```yaml
-rules:
-  - id: r-001
-    description: "Always use environment variables for secrets, never hardcode"
-    category: security
-    severity: error
-    pattern: "(api[_-]?key|secret|token|password)\\s*[=:]\\s*[\"'][^\"']{8,}"
-    filePattern: "**/*.{ts,js}"
-    createdAt: "2026-08-15T10:15:00Z"
-    createdFrom: "101"
-    enabled: true
-    
-  - id: r-002
-    description: "New API endpoints require integration tests"
-    category: testing
-    severity: warn
-    pattern: "router\\.(get|post|put|delete|patch)\\("
-    filePattern: "**/routes/**"
-    createdAt: "2026-08-15T10:20:00Z"
-    enabled: true
-```
-
----
-
-## Error Handling Strategy
+## Error Handling
 
 | Scenario | Handling |
 |----------|----------|
 | GitHub API rate limit | Graceful message, suggest local mode |
-| LLM unavailable/timeout | Skip summary, show "AI unavailable", continue without |
-| PR not found | Clear error: "PR #X not found. Is the repo configured?" |
-| Invalid diff | Show raw text fallback instead of structured view |
+| LLM unavailable/timeout | Skip AI features, show "AI unavailable", continue |
+| PR not found | Clear error: "PR #X not found. Check repo config?" |
+| Invalid diff | Show raw text fallback |
 | Rule regex invalid | Warn on creation, skip during enforcement |
 | No git repo | Error on init: "Not in a git repository" |
+| OpenTUI not available | Fall back to Ink renderer |
+| OKF parse error | Reconstruct from raw markdown content |
 
 ---
 
 ## Security Considerations
 
-- **No secrets in storage:** API keys only in env vars or OS keychain, never in `.prr/` files
-- **Config gitignore:** `.prrrc.yaml` should NOT contain secrets; document that keys go in env vars
-- **Local mode default:** Never sends code externally unless explicitly configured
-- **GitHub token:** Auto-detected from `gh auth` or `GITHUB_TOKEN` env — never stored in config files
+- **No secrets in storage** — API keys only in env vars, never in `.prr/` files
+- **LLM scope limits** — only changed files sent for direct enforcement, never entire repo unless user explicitly triggers `prr scan`
+- **Local mode default** — never sends code externally unless configured
+- **GitHub token** — auto-detected from `gh auth` or `GITHUB_TOKEN` env
+- **Rule examples** — sanitized (no real secrets in example code)
 
 ---
 
-## MVP Build Order (Maps to tasks.md)
+## MVP Build Order
 
-1. **Project scaffold** — package.json, tsconfig, tsup, folder structure
-2. **Domain types + store** — data models, YAML/MD read/write
+1. **Project scaffold** — Bun, TypeScript, folder structure
+2. **Domain types + OKF store** — data models, markdown read/write with frontmatter
 3. **Git adapter + diff parser** — fetch diffs, parse into structured data
 4. **Queue manager + CLI commands** — add, status, approve, flag
-5. **TUI (Ink)** — split pane, diff rendering, scroll, comment input
-6. **Rules engine** — create, load, match against diffs
-7. **GitHub adapter** — fetch PR metadata, post reviews (nice-to-have)
-8. **LLM integration** — summary on queue (nice-to-have)
+5. **Feature grouping** — algorithmic PR analysis on ingestion
+6. **TUI (OpenCode-style)** — full-screen review interface
+7. **Rules engine (hybrid)** — regex + LLM enforcement
+8. **Rule suggestions from comments** — pattern mining
+9. **GitHub adapter** — fetch PRs, post reviews
+10. **AI summary** — optional enhancement on queue

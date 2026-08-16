@@ -1,431 +1,431 @@
 # Tasks: PR Review Harness (PRR)
 
-## Implementation Plan
+## Implementation Plan (Revised)
 
-Tasks are ordered by dependency and priority. Each task is self-contained and results in a working (if incomplete) tool. MVP tasks are marked with 🏆.
+Reflects design changes: Bun runtime, OKF-style storage, OpenCode-style TUI, hybrid rule enforcement (regex + LLM), feature grouping on ingestion, and comment pattern analysis.
+
+Tasks are ordered by dependency. MVP tasks marked 🏆.
 
 ---
 
 ## Phase 1: Foundation (Day 1-2)
 
 ### Task 1: Project Scaffold 🏆
-**Implements:** Infrastructure setup
-**Depends on:** Nothing
+**Branch:** `feat/task-01-scaffold`
 
-- [ ] Initialize npm project with `pnpm init`
-- [ ] Configure `tsconfig.json` (strict mode, ES2022 target, NodeNext module)
-- [ ] Configure `tsup.config.ts` (bundle to `dist/`, CLI entry point)
+- [ ] Initialize Bun project: `bun init`
+- [ ] Configure `tsconfig.json` (strict, ES2022, NodeNext)
+- [ ] Add `bunfig.toml` for Bun-specific config
 - [ ] Add dependencies:
-  - `commander` (CLI framework)
-  - `ink` + `ink-text-input` + `react` (TUI)
+  - `commander` (CLI)
+  - `ink` + `react` (TUI — start with Ink, evaluate OpenTUI later)
   - `simple-git` (git operations)
-  - `yaml` (YAML read/write)
-  - `chalk` (terminal colors)
-  - `uuid` (ID generation)
-  - `cosmiconfig` (config loading)
+  - `yaml` (YAML frontmatter parsing)
+  - `chalk` (colors)
+  - `gray-matter` (markdown frontmatter parse/stringify — OKF support)
   - `minimatch` (glob matching for rules)
-- [ ] Add dev dependencies: `typescript`, `tsup`, `vitest`, `@types/react`, `@types/node`
-- [ ] Create folder structure per design.md
-- [ ] Add `bin` field in package.json pointing to `dist/index.js`
-- [ ] Add scripts: `build`, `dev`, `test`, `lint`
-- [ ] Create `.gitignore` (node_modules, dist, .prr cache)
-- [ ] Verify: `pnpm build` succeeds with empty entry point
+  - `uuid` (or `crypto.randomUUID()` via Bun)
+- [ ] Create full folder structure per design.md
+- [ ] Add `bin` field in package.json → `./src/index.ts` (Bun runs TS directly)
+- [ ] Add scripts: `dev`, `build`, `test`, `lint`
+- [ ] Create `.gitignore` (node_modules, dist, .prr/sessions)
+- [ ] Create README.md stub with project description
+- [ ] Verify: `bun run src/index.ts --help` shows CLI help
 
-**Output:** Buildable TypeScript project with all dependencies, folder structure, and CLI entry point.
+**PR deliverable:** Buildable project, all deps installed, folder structure, CLI prints help.
 
 ---
 
-### Task 2: Domain Types & Config 🏆
-**Implements:** Data models, config loading
-**Depends on:** Task 1
+### Task 2: Domain Types & OKF Store 🏆
+**Branch:** `feat/task-02-types-store`
 
-- [ ] Create `src/domain/types.ts` with all interfaces:
-  - `QueuedPR`, `ReviewComment`, `ReviewSession`, `Rule`, `RuleViolation`, `PRRConfig`
+- [ ] Create `src/domain/types.ts` — all TypeScript interfaces:
+  - `QueuedPR`, `FeatureGroup`, `ReviewComment`, `ReviewSession`
+  - `Rule`, `RuleViolation`, `PRRConfig`
+- [ ] Create `src/infra/store.ts` — OKF-style markdown persistence:
+  - `ensureDir(path)` — create `.prr/` structure
+  - `writeOKF(path, frontmatter, body)` — write markdown with YAML frontmatter
+  - `readOKF(path)` → `{ frontmatter, body }` — parse using gray-matter
+  - `saveSession(session)` — writes session index.md
+  - `loadSession(date)` — reads session
+  - `saveReview(review)` — writes pr-{n}.md
+  - `loadReview(date, prNumber)` — reads review
+  - `saveRules(rules)` — writes rule files
+  - `loadRules()` — reads all rule .md files from rules/
 - [ ] Create `src/infra/config.ts`:
-  - `loadConfig()` — uses cosmiconfig to find `.prrrc.yaml` or `.prr/config.yaml`
-  - `getDefaultConfig()` — sensible defaults (local mode, AI disabled)
-  - `resolveConfig(cliFlags, fileConfig)` — merges CLI overrides
-- [ ] Create `.prrrc.yaml.example` with documented options
-- [ ] Verify: types compile cleanly, config loads from example file
+  - `loadConfig()` — cosmiconfig for `.prrrc.yaml`
+  - `getDefaultConfig()` — sensible defaults
+- [ ] Create `.prrrc.yaml.example`
+- [ ] Write tests: OKF round-trip (write → read → verify)
+- [ ] Verify: can write and read OKF-style markdown files correctly
 
-**Output:** All TypeScript types defined, config loading works.
-
----
-
-### Task 3: File Store (YAML + Markdown) 🏆
-**Implements:** Persistence layer
-**Depends on:** Task 2
-
-- [ ] Create `src/infra/store.ts`:
-  - `ensureSessionDir(date)` — creates `.prr/sessions/YYYY-MM-DD/`
-  - `saveQueue(session, queue)` — writes queue.yaml
-  - `loadQueue(session)` — reads queue.yaml
-  - `saveReview(session, review)` — writes pr-{n}.review.md
-  - `loadReview(session, prNumber)` — reads review markdown
-  - `saveRules(rules)` — writes `.prr/rules/rules.yaml`
-  - `loadRules()` — reads rules
-- [ ] Create `src/utils/markdown.ts`:
-  - `generateReviewMarkdown(session: ReviewSession)` — produces the review.md format
-  - `parseReviewMarkdown(content: string)` — reads back (for history search)
-- [ ] Write tests: `tests/domain/store.test.ts` — round-trip save/load
-- [ ] Verify: can write and read queue, review, and rules files
-
-**Output:** Complete persistence layer — data survives across sessions.
+**PR deliverable:** All types defined, OKF store reads/writes correctly, config loads.
 
 ---
 
-## Phase 2: Git & Diff (Day 2-3)
-
-### Task 4: Git Adapter 🏆
-**Implements:** Fetch diffs from local git
-**Depends on:** Task 2
+### Task 3: Git Adapter & Diff Parser 🏆
+**Branch:** `feat/task-03-git-diff`
 
 - [ ] Create `src/infra/git.ts`:
-  - `getDiff(prNumber | branchName)` — runs `git diff` or `git log --patch`
+  - `getDiff(target)` — `git diff main...<branch>` or fetch from ref
   - `getBranches()` — list local branches
-  - `getCurrentRepo()` — returns owner/repo from remote URL
-  - `isGitRepo(path)` — validates we're in a git repo
-  - `getMergeBase(branch, target)` — find common ancestor for proper diff
-- [ ] Handle: detached HEAD, no remote, uncommitted changes
-- [ ] Verify: can extract diff for a branch vs main
-
-**Output:** Can fetch raw unified diffs from any local git repo.
-
----
-
-### Task 5: Diff Parser 🏆
-**Implements:** Structured diff parsing
-**Depends on:** Task 4
-
+  - `getCurrentRepo()` — parse owner/repo from git remote URL
+  - `isGitRepo(path)` — validates git repo
+  - `getChangedFiles(branch)` — just file paths (for grouping)
 - [ ] Create `src/utils/diff-parser.ts`:
   - `parseDiff(raw: string): ParsedDiff`
-  - `ParsedDiff` = `{ files: DiffFile[] }`
-  - `DiffFile` = `{ path, hunks: DiffHunk[] }`
-  - `DiffHunk` = `{ header, startLine, lines: DiffLine[] }`
-  - `DiffLine` = `{ type: 'add'|'remove'|'context', content, lineNumber }`
-- [ ] Handle edge cases: binary files, renames, new files, deleted files
-- [ ] Add line numbering (both old and new line numbers)
-- [ ] Write tests with fixture diffs: `tests/fixtures/sample-diffs/`
-- [ ] Verify: complex multi-file diffs parse correctly
+  - Types: `ParsedDiff`, `DiffFile`, `DiffHunk`, `DiffLine`
+  - Each line has: type (add/remove/context), content, oldLine, newLine
+  - Handle: binary files, renames, new/deleted files
+- [ ] Create test fixtures: `tests/fixtures/sample-diffs/` (3-4 sample diffs)
+- [ ] Write tests: multi-file diff parsing, edge cases
+- [ ] Verify: can fetch diff for a local branch and parse it structurally
 
-**Output:** Raw diff strings become structured, navigable data.
+**PR deliverable:** Can extract and parse diffs from any branch.
 
 ---
 
-## Phase 3: Queue & CLI (Day 3-4)
+## Phase 2: Queue & Grouping (Day 2-3)
 
-### Task 6: Queue Manager 🏆
-**Implements:** PR queue lifecycle
-**Depends on:** Task 3, Task 4
+### Task 4: Queue Manager 🏆
+**Branch:** `feat/task-04-queue`
 
 - [ ] Create `src/domain/queue.ts`:
-  - `addToQueue(prNumbers[], config)` — validate, fetch metadata, add
-  - `getQueue(session)` — return current queue state
-  - `updateState(prNumber, newState, reason?)` — state transitions
-  - `removeFromQueue(prNumber)` — remove a PR
+  - `createSession(date)` — initializes session directory + index.md
+  - `addToQueue(prNumbers[], config)` — validate, fetch metadata, persist
+  - `getQueue(date)` — load current queue from session index
+  - `updateState(prNumber, newState, reason?)` — state machine transitions
+  - `removeFromQueue(prNumber)`
 - [ ] State machine: `queued` → `reviewing` → `approved` | `flagged`
-- [ ] Validation: no duplicates, PR must exist (git branch or GH PR)
-- [ ] Auto-create session directory if first operation of the day
-- [ ] Write tests: state transitions, duplicate handling, persistence
+- [ ] Auto-create today's session on first operation
+- [ ] Write tests: state transitions, duplicates, persistence round-trip
 
-**Output:** Queue management with state machine and persistence.
-
----
-
-### Task 7: CLI Commands (Core) 🏆
-**Implements:** `prr init`, `prr add`, `prr status`, `prr approve`, `prr flag`
-**Depends on:** Task 6
-
-- [ ] Create `src/cli/index.ts` — Commander program setup with version, description
-- [ ] Create `src/cli/commands/init.ts`:
-  - Creates `.prr/` directory structure
-  - Writes default config from template
-  - Detects GitHub remote and pre-fills owner/repo
-- [ ] Create `src/cli/commands/add.ts`:
-  - Parses PR numbers from args
-  - Calls QueueManager.addToQueue()
-  - Prints confirmation with PR titles
-- [ ] Create `src/cli/commands/status.ts`:
-  - Loads queue, displays table (chalk-formatted)
-  - Columns: #, Title, State, Files, Summary (truncated)
-  - Color-coded states: queued=grey, reviewing=yellow, approved=green, flagged=red
-- [ ] Create `src/cli/commands/approve.ts`:
-  - Validates PR is in queue and state is reviewing
-  - Updates state to approved
-- [ ] Create `src/cli/commands/flag.ts`:
-  - `--reason` flag required
-  - Updates state to flagged with reason
-- [ ] Wire up `src/index.ts` entry point
-- [ ] Verify: `pnpm build && node dist/index.js status` works end-to-end
-
-**Output:** Working CLI — can init, add PRs, check status, approve/flag.
+**PR deliverable:** Queue lifecycle works, sessions persist as OKF markdown.
 
 ---
 
-## Phase 4: TUI (Day 4-6)
+### Task 5: Feature Grouping (PR Analysis) 🏆
+**Branch:** `feat/task-05-grouping`
 
-### Task 8: TUI Shell & Layout 🏆
-**Implements:** Basic Ink app with split panes
-**Depends on:** Task 5, Task 7
+- [ ] Create `src/domain/grouping.ts`:
+  - `analyzeGroups(prs: QueuedPR[], fileLists: Map<number, string[]>): FeatureGroup[]`
+  - Grouping signals (no LLM):
+    - Shared directory paths (e.g., both touch `src/auth/`)
+    - Shared file modifications (same file in multiple PRs)
+    - Route/endpoint detection (grep for route patterns in changed files)
+  - `formatGroupReason(group)` — human-readable explanation
+- [ ] Integrate into `addToQueue()` — groups computed on ingestion
+- [ ] Groups written to session index.md frontmatter
+- [ ] Write tests: various overlap scenarios
 
-- [ ] Create `src/tui/App.tsx` — root component, accepts ReviewSession data
+**PR deliverable:** PRs auto-grouped on add, groups shown in session.
+
+---
+
+### Task 6: CLI Commands (Core) 🏆
+**Branch:** `feat/task-06-cli`
+
+- [ ] Create `src/cli/index.ts` — Commander program
+- [ ] `src/cli/commands/init.ts`:
+  - Creates `.prr/` structure (rules/, sessions/, config)
+  - Detects git remote, pre-fills config
+  - Writes default `.prrrc.yaml`
+- [ ] `src/cli/commands/add.ts`:
+  - Parse PR numbers from args
+  - Fetch metadata (title, file list) from git or GitHub
+  - Run feature grouping
+  - Print: "Added 3 PRs. Grouped: #101 + #103 (both touch auth)"
+- [ ] `src/cli/commands/status.ts`:
+  - Table: #, Title, State, Group, Files
+  - Show feature groups with rationale
+  - Color-coded states
+- [ ] `src/cli/commands/approve.ts` / `flag.ts`:
+  - State transitions + persist
+- [ ] Wire entry point `src/index.ts`
+- [ ] Verify: full CLI flow works (init → add → status → approve)
+
+**PR deliverable:** Working CLI — init, add (with grouping), status, approve, flag.
+
+---
+
+## Phase 3: TUI (Day 3-5)
+
+### Task 7: TUI Shell (OpenCode-style) 🏆
+**Branch:** `feat/task-07-tui-shell`
+
+- [ ] Create `src/tui/App.tsx` — root component with page routing
+- [ ] Create `src/tui/pages/QueuePage.tsx`:
+  - Lists queued PRs with states, feature groups
+  - Arrow keys to select, Enter to open review
+  - Shows group badges next to related PRs
 - [ ] Create `src/tui/components/StatusBar.tsx`:
-  - Shows: PR title, current file, position (1/N), keybinding hints
-  - Fixed at bottom
-- [ ] Create layout: `<Box flexDirection="row">` with two panes
-- [ ] Left pane placeholder (will become DiffPane)
-- [ ] Right pane placeholder (will become CommentPane)
-- [ ] Wire `prr review <n>` command to launch Ink app with diff data
-- [ ] Handle terminal resize gracefully
-- [ ] Verify: `prr review 1` opens a split-pane TUI that can be exited with `q`
+  - Bottom bar with keybindings, current context
+- [ ] Create `src/tui/theme.ts` — OpenCode-inspired colors:
+  - Minimal borders, clean layout
+  - Accent colors for states (green=approved, red=flagged, yellow=reviewing)
+- [ ] Wire `prr review <n>` → launches TUI in review mode
+- [ ] Wire `prr tui` → launches TUI in queue mode
+- [ ] Handle terminal resize
+- [ ] Verify: TUI launches, shows queue, can select a PR, exits with `q`
 
-**Output:** TUI launches, shows layout structure, exits cleanly.
-
----
-
-### Task 9: Diff Pane (Scrollable) 🏆
-**Implements:** Left pane — scrollable, syntax-colored diff display
-**Depends on:** Task 8
-
-- [ ] Create `src/tui/components/DiffPane.tsx`:
-  - Receives `ParsedDiff` and `scrollOffset`
-  - Renders file headers (bold, with path)
-  - Renders hunk headers (@@...@@) in cyan
-  - Renders lines: green (+), red (-), grey (context)
-  - Shows line numbers in gutter
-  - Clips to visible terminal height
-- [ ] Create `src/tui/hooks/useScroll.ts`:
-  - Tracks scroll position (line index)
-  - Exposes: `scrollUp()`, `scrollDown()`, `jumpToFile(n)`, `jumpToHunk(n)`
-  - Bounds checking (can't scroll past start/end)
-- [ ] Create `src/tui/hooks/useKeyboard.ts`:
-  - Maps `j/k/↑/↓` to scroll
-  - Maps `n/N` to next/prev file
-  - Maps `h/H` to next/prev hunk
-  - Maps `q` to exit
-- [ ] Verify: can scroll through a multi-file diff smoothly
-
-**Output:** Fully navigable diff viewer in the terminal.
+**PR deliverable:** TUI shell with queue page, clean OpenCode-style layout.
 
 ---
 
-### Task 10: Comment Pane & Input 🏆
-**Implements:** Right pane — add/view comments linked to lines
-**Depends on:** Task 9
+### Task 8: Review Page (Diff View) 🏆
+**Branch:** `feat/task-08-diff-view`
 
-- [ ] Create `src/tui/components/CommentPane.tsx`:
-  - Shows list of comments for current file
-  - Each comment shows: line number, text (truncated to pane width)
-  - Highlights comment for current line (if any)
-  - Scrolls to follow the diff pane's current position
-- [ ] Create `src/tui/hooks/useComments.ts`:
-  - `addComment(file, line, text)` — creates ReviewComment
-  - `editComment(id, newText)` — updates
-  - `deleteComment(id)` — removes
-  - `getCommentsForFile(file)` — filtered list
-- [ ] Implement comment input:
-  - `c` key enters comment mode (shows text input at bottom of right pane)
+- [ ] Create `src/tui/pages/ReviewPage.tsx`:
+  - Full-screen layout: header → summary → diff → comments → status bar
+  - Vertically scrollable (entire page scrolls, not split panes)
+- [ ] Create `src/tui/components/DiffView.tsx`:
+  - File headers (bold path)
+  - Hunk headers (@@...@@ in cyan)
+  - Lines: green (+), red (-), grey (context)
+  - Line numbers in gutter
+  - Inline rule violations (⚠️ markers)
+- [ ] Create `src/tui/components/SummaryBanner.tsx`:
+  - PR title, AI summary (if available), rule violation count
+  - Feature group info: "Part of: auth-feature (with PR #103)"
+- [ ] Create `src/tui/hooks/useNavigation.ts`:
+  - `j/k` scroll, `n/N` next/prev file, `h/H` next/prev hunk
+  - Tracks current position (file index, line index)
+- [ ] Verify: can scroll through a multi-file diff in the TUI
+
+**PR deliverable:** Full diff viewing experience in TUI.
+
+---
+
+### Task 9: Comments & Review Finalization 🏆
+**Branch:** `feat/task-09-comments`
+
+- [ ] Create `src/tui/components/CommentList.tsx`:
+  - Shows comments for current file below the diff section
+  - Format: `L{line}: {comment text}`
+- [ ] Create `src/tui/components/CommentInput.tsx`:
+  - Overlay text input triggered by `c`
   - Auto-fills file and line from current scroll position
   - Enter submits, Escape cancels
-  - Comment immediately appears in right pane
-- [ ] Verify: can add comments, see them in right pane, they persist to review markdown on exit
+- [ ] Create `src/tui/hooks/useComments.ts`:
+  - `addComment(file, line, text)`, `editComment()`, `deleteComment()`
+- [ ] Review finalization:
+  - `a` → approve (saves + updates queue state)
+  - `f` → flag (prompts reason, saves + updates)
+  - `q` → prompts: approve/flag/save-for-later
+  - Generates OKF review markdown on exit
+- [ ] Verify: full review flow — open → scroll → comment → approve → saved as markdown
 
-**Output:** Full review flow — read diff, add comments, save on exit.
-
----
-
-### Task 11: Review Finalization 🏆
-**Implements:** Save review on TUI exit, prompt for decision
-**Depends on:** Task 10
-
-- [ ] On `q` or `a` or `f` keypress, exit TUI and prompt:
-  - `a` → approve immediately
-  - `f` → prompt for flag reason (text input), then flag
-  - `q` → ask: "[a]pprove / [f]lag / [s]kip for later"
-- [ ] Call `ReviewSession.finalize()`:
-  - Set completedAt timestamp
-  - Generate review markdown via `generateReviewMarkdown()`
-  - Save to `.prr/sessions/<date>/pr-<n>.review.md`
-  - Update queue state
-- [ ] Print summary to terminal after exit:
-  - "✅ PR #101 approved (3 comments)"
-  - "🚩 PR #103 flagged: breaks API contract (5 comments)"
-- [ ] Verify: full flow from `prr add` → `prr review` → exit → markdown saved
-
-**Output:** Complete review lifecycle works end-to-end.
+**PR deliverable:** Complete review lifecycle with comments and persistence.
 
 ---
 
-## Phase 5: Rules Engine (Day 6-7)
+## Phase 4: Rules Engine (Day 5-6)
 
-### Task 12: Rules Engine (Create & Match) 🏆
-**Implements:** Rule CRUD and pattern matching against diffs
-**Depends on:** Task 5, Task 3
+### Task 10: Rules Engine — Regex Mode 🏆
+**Branch:** `feat/task-10-rules-regex`
 
 - [ ] Create `src/domain/rules.ts`:
-  - `createRule(description, options)` — generates Rule object, saves
-  - `loadRules()` — reads from `.prr/rules/rules.yaml`
-  - `matchRules(rules, parsedDiff)` → `RuleViolation[]`
-  - Matching logic: for each rule with `pattern`, test regex against each added line
-  - Respect `filePattern` (minimatch glob)
+  - `createRule(opts)` — generates rule, writes OKF rule file
+  - `loadRules()` — reads all `.prr/rules/*.md` files
+  - `matchRegex(rules, parsedDiff)` → `RuleViolation[]`
+  - Only matches against rules with `enforcement: 'regex'`
+  - Respects `filePattern` (minimatch glob on file paths)
 - [ ] Create `src/cli/commands/rule.ts`:
-  - `prr rule add "description" [--pattern "regex"] [--category security] [--severity warn] [--file-pattern "**/*.ts"]`
-  - `prr rule list` — table of all rules
-  - `prr rule disable <id>` — toggles enabled
-  - `prr rule delete <id>` — removes rule
-- [ ] Write tests: rule matching against sample diffs, glob filtering
-- [ ] Verify: create rule → add PR → violations detected in TUI
+  - `prr rule add "desc" [--pattern "regex"] [--category security] [--enforcement regex]`
+  - `prr rule list` — table of rules
+  - `prr rule disable/enable <id>`
+- [ ] Integrate into review flow: violations shown in TUI diff view
+- [ ] `r` key in TUI: create rule from current line context
+- [ ] Write tests: regex matching against sample diffs
+- [ ] Verify: create regex rule → review PR → violations flagged inline
 
-**Output:** Rules can be created, persisted, and enforced against diffs.
-
----
-
-### Task 13: Rules in TUI 🏆
-**Implements:** Show rule violations inline in diff pane
-**Depends on:** Task 12, Task 9
-
-- [ ] Create `src/tui/components/RuleWarning.tsx`:
-  - Inline warning rendered after the violating line in diff pane
-  - Format: `⚠️ [category] rule description`
-  - Colored: yellow for warn, red for error
-- [ ] Run `RulesEngine.matchRules()` when review starts
-- [ ] Violations passed to DiffPane as overlay data
-- [ ] `r` key in TUI: create new rule from current context
-  - Pre-fills the matched line as suggested pattern
-  - Prompts: description, category, severity
-  - Saves rule immediately
-- [ ] Verify: violations appear inline, new rules can be created during review
-
-**Output:** Rules are visible during review, new rules created from context.
+**PR deliverable:** Regex-based rules with TUI integration.
 
 ---
 
-### Task 14: Rule Export
-**Implements:** Export rules as hooks/steering/eslint config
-**Depends on:** Task 12
+### Task 11: Rules Engine — LLM Mode 🏆
+**Branch:** `feat/task-11-rules-llm`
 
-- [ ] Add `prr rule export --format <hook|steering|eslint>`:
-  - **hook**: Generates shell script that greps staged changes for rule patterns
-  - **steering**: Generates `.kiro/steering/prr-rules.md` with rules as guidelines
-  - **eslint**: Generates JSON config with `no-restricted-syntax` rules (where applicable)
-- [ ] Each export format includes rule description as comments
-- [ ] Export to stdout by default, `--output <file>` to write to file
-- [ ] Verify: exported hook actually catches violations on `git commit`
+- [ ] Create `src/infra/llm/provider.ts`:
+  - `LLMProvider` interface: `checkRule(rule, diff): Promise<RuleViolation[]>`
+  - `createProvider(config)` — factory
+- [ ] Create `src/infra/llm/openai.ts` — raw fetch implementation
+- [ ] Create `src/infra/llm/anthropic.ts` — raw fetch implementation  
+- [ ] Create `src/infra/llm/ollama.ts` — raw fetch implementation
+- [ ] Implement LLM rule enforcement:
+  - Sends: rule description + examples + changed files (scope: diff only)
+  - Expects: JSON array of violations with file, line, explanation
+  - Scope limit: only files in the PR diff (direct enforcement)
+  - Timeout: 30s with graceful fallback
+- [ ] Cache enforcement results by `{ruleId}-{diffHash}`
+- [ ] Integrate into review flow alongside regex rules
+- [ ] Verify: LLM rule detects conceptual violations (e.g., "endpoints need tests")
 
-**Output:** Rules become upstream enforcement mechanisms.
-
----
-
-## Phase 6: Enhancements (Day 7-8)
-
-### Task 15: GitHub Adapter
-**Implements:** Fetch PR metadata and post reviews via GitHub API
-**Depends on:** Task 7
-
-- [ ] Create `src/infra/github.ts`:
-  - `fetchPR(owner, repo, number)` — returns title, body, files, diff URL
-  - `fetchDiff(owner, repo, number)` — returns raw unified diff
-  - `postReview(owner, repo, number, review)` — posts APPROVE or REQUEST_CHANGES
-  - `postComments(owner, repo, number, comments[])` — inline review comments
-- [ ] Auth: auto-detect from `GITHUB_TOKEN` env or `gh auth token`
-- [ ] Error handling: 404 (PR not found), 401 (bad token), 403 (rate limit)
-- [ ] Wire into `prr add` (GitHub mode) and `prr approve/flag` (post review)
-- [ ] Verify: can fetch a real PR diff and post a review comment
-
-**Output:** Full GitHub integration — fetch PRs, post structured reviews.
+**PR deliverable:** LLM-powered rule enforcement scoped to changed files.
 
 ---
 
-### Task 16: Cross-PR File Overlap
-**Implements:** Detect shared files between queued PRs
-**Depends on:** Task 6, Task 5
+### Task 12: Repo-Wide Scan (Alerting)
+**Branch:** `feat/task-12-repo-scan`
 
-- [ ] Add `correlation.ts` to domain:
-  - `detectOverlap(queue: QueuedPR[], diffs: Map<number, ParsedDiff>)` → overlap report
-  - Returns: pairs of PRs with shared file paths
-- [ ] Add to `prr status` output: `⚠️ PR #101 and #103 both modify src/auth/`
-- [ ] Add `prr compare <PR1> <PR2>`:
-  - Shows files that appear in both diffs
-  - Highlights conflicting changes to same lines
-- [ ] No LLM needed — pure file path comparison
-- [ ] Verify: queuing 2 PRs that touch same file shows warning
+- [ ] Create `src/cli/commands/scan.ts`:
+  - `prr scan` — runs all enabled rules against entire repo
+  - `prr scan --rule <id>` — single rule check
+  - Scope: files matching rule's `filePattern` in whole repo
+  - Uses LLM for `enforcement: 'llm'` rules, regex for regex rules
+- [ ] Output: alert with violation count and options
+  - "Found 12 violations of r-001 in the repo. [f]ile issue / [p]r to fix / [i]gnore"
+- [ ] For LLM rules: processes files in batches to manage token budget
+  - Progress indicator: "Scanning... 15/47 files checked"
+- [ ] Results saved to `.prr/scans/scan-{date}.md`
+- [ ] Verify: scan finds violations across repo, presents options
 
-**Output:** Automatic conflict detection between queued PRs.
+**PR deliverable:** On-demand repo-wide rule scanning with user-controlled actions.
 
 ---
 
-### Task 17: AI Summary Integration
-**Implements:** Optional LLM-generated PR summary on queue
-**Depends on:** Task 7
+### Task 13: Rule Export
+**Branch:** `feat/task-13-rule-export`
 
-- [ ] Create `src/infra/llm/provider.ts` — interface + factory
-- [ ] Create `src/infra/llm/openai.ts` — raw fetch to OpenAI API
-- [ ] Create `src/infra/llm/anthropic.ts` — raw fetch to Anthropic API
-- [ ] Create `src/infra/llm/ollama.ts` — raw fetch to local Ollama
-- [ ] Implement summary prompt:
+- [ ] `prr rule export --format hook` → git pre-commit hook script
+  - For regex rules: grep-based checks
+  - For LLM rules: generates a hook that calls `prr scan --rule <id> --staged`
+- [ ] `prr rule export --format steering` → `.kiro/steering/prr-rules.md`
+  - Formats rules as AI-agent-readable guidelines with examples
+- [ ] `prr rule export --format eslint` → JSON config (where applicable)
+- [ ] Each export includes rule description + examples as comments
+- [ ] Verify: exported hook catches violations on commit
+
+**PR deliverable:** Rules become upstream enforcement mechanisms.
+
+---
+
+## Phase 5: Pattern Intelligence (Day 6-7)
+
+### Task 14: Comment Pattern Analysis (Ruleify from Behavior) 🏆
+**Branch:** `feat/task-14-pattern-analysis`
+
+- [ ] Create `src/domain/patterns.ts`:
+  - `analyzeComments(sessions: ReviewSession[]): SuggestedRule[]`
+  - Collects all comments from last N sessions
+  - Sends to LLM: "find repeated themes, suggest rules with examples"
+  - Returns: suggested rules (description, category, examples)
+- [ ] Create `prr rules suggest` command:
+  - Runs pattern analysis on review history
+  - Presents suggestions one by one
+  - User: confirm (create rule) / edit / skip
+- [ ] Trigger condition: after 5+ reviews, offer to run suggestions
+- [ ] Token budget: ~500 tokens per analysis
+- [ ] Verify: after several reviews with repeated comments, suggestions appear
+
+**PR deliverable:** AI mines your review patterns and proposes rules.
+
+---
+
+### Task 15: AI Summary on Queue
+**Branch:** `feat/task-15-ai-summary`
+
+- [ ] Implement summary generation in LLM provider:
   - Input: truncated diff (max 4000 chars), file list
   - Output: 2-3 sentence summary + risk flags
-  - System prompt emphasizes brevity and token efficiency
-- [ ] Cache: store summary keyed by `{prNumber}-{commitSha}`
-- [ ] Wire into `prr add --ai` — generates summary after adding
-- [ ] Display in `prr status` and TUI SummaryHeader
-- [ ] Graceful fallback: if LLM fails, show "Summary unavailable" and continue
-- [ ] Verify: summary appears in status and TUI, is cached on second view
+  - System prompt: brief, actionable, highlight risks
+- [ ] Cache by `{prNumber}-{commitSha}` — never regenerate
+- [ ] Wire into `prr add --ai`:
+  - Generates summary for each PR on add
+  - Summary stored in session index frontmatter
+- [ ] Show in: `prr status`, TUI queue page, TUI review summary banner
+- [ ] Graceful fallback: "Summary unavailable" if LLM fails
+- [ ] Verify: summaries appear in status and TUI
 
-**Output:** AI summaries available with minimal token usage.
+**PR deliverable:** Optional AI summaries on PR ingestion.
 
 ---
 
-### Task 18: Review History & Search
-**Implements:** Search past reviews
-**Depends on:** Task 3
+## Phase 6: GitHub Integration (Day 7)
+
+### Task 16: GitHub Adapter
+**Branch:** `feat/task-16-github`
+
+- [ ] Create `src/infra/github.ts`:
+  - `fetchPR(owner, repo, number)` — title, body, files, diff
+  - `fetchDiff(owner, repo, number)` — raw unified diff
+  - `postReview(owner, repo, number, state, body)` — APPROVE/REQUEST_CHANGES
+  - `postInlineComments(owner, repo, number, comments[])` — line-level comments
+- [ ] Auth: `GITHUB_TOKEN` env or `gh auth token` detection
+- [ ] Wire into existing commands:
+  - `prr add` (GitHub mode) → fetches from API
+  - `prr approve/flag` (GitHub mode) → posts review to PR
+- [ ] Error handling: 404, 401, 403, rate limits
+- [ ] Verify: can fetch real PR and post a review
+
+**PR deliverable:** Full GitHub read/write integration.
+
+---
+
+### Task 17: Cross-PR Overlap Detection
+**Branch:** `feat/task-17-overlap`
+
+- [ ] Enhance `src/domain/grouping.ts`:
+  - `detectConflicts(prs, diffs)` — same line modified in multiple PRs
+  - `suggestReviewOrder(groups)` — dependency-based ordering
+- [ ] Add to `prr status`: "⚠️ PR #101 and #103 modify src/auth/middleware.ts L15-30"
+- [ ] Add `prr compare <PR1> <PR2>`:
+  - Side-by-side display of conflicting changes
+  - Algorithmic (no LLM) — file path + line range comparison
+- [ ] Verify: overlapping PRs show warnings
+
+**PR deliverable:** Automatic conflict detection between queued PRs.
+
+---
+
+## Phase 7: Polish & Submit (Day 8)
+
+### Task 18: History & Search
+**Branch:** `feat/task-18-history`
 
 - [ ] Create `src/cli/commands/history.ts`:
-  - `prr history` — lists sessions (date, PR count, approved/flagged counts)
-  - `prr history --search "keyword"` — greps through review markdown files
-  - `prr history --pr <n>` — finds all reviews for a specific PR
-- [ ] Build index from session directories (scan `.prr/sessions/*/`)
-- [ ] Output: table with date, PR#, title, state, comment count
+  - `prr history` — list past sessions
+  - `prr history --search "keyword"` — grep through OKF review files
+  - `prr history --pr <n>` — all reviews for a specific PR
+- [ ] Scan `.prr/sessions/*/` directories
+- [ ] Parse frontmatter for quick metadata without reading full files
 - [ ] Verify: can find past reviews by keyword
 
-**Output:** Searchable review archive.
+**PR deliverable:** Searchable review archive.
 
 ---
-
-## Phase 7: Polish (Day 8)
 
 ### Task 19: README & Documentation
-**Implements:** User-facing docs for hackathon submission
-**Depends on:** All above
+**Branch:** `feat/task-19-docs`
 
-- [ ] Write comprehensive README.md:
-  - Problem statement (the review bottleneck)
-  - Demo GIF or screenshots of TUI
-  - Installation instructions
-  - Quick start guide
-  - Full command reference
-  - Configuration docs
-  - Rules system explanation
-  - Architecture overview (brief)
-- [ ] Add CONTRIBUTING.md (for post-hackathon)
-- [ ] Add LICENSE (MIT)
-- [ ] Ensure `npm install -g prr` works (package.json bin config)
+- [ ] Comprehensive README.md:
+  - Problem statement + positioning
+  - Screenshots/GIF of TUI
+  - Quick start (install → init → add → review)
+  - Command reference
+  - Rules system explanation (regex vs LLM, ruleify)
+  - Configuration guide
+  - Storage format explanation (OKF-inspired)
+  - Architecture overview
+- [ ] LICENSE (MIT)
+- [ ] CONTRIBUTING.md
+- [ ] ROADMAP.md (learnify, team sharing, etc.)
+- [ ] Verify: fresh clone → bun install → bun run src/index.ts works
 
-**Output:** Hackathon-ready repo with clear docs.
+**PR deliverable:** Hackathon-ready documentation.
 
 ---
 
-### Task 20: Demo & Submission Prep
-**Implements:** Hackathon deliverables
-**Depends on:** Task 19
+### Task 20: Demo & Submission
+**Branch:** `feat/task-20-demo`
 
-- [ ] Create sample demo scenario (seed PRs for demo)
-- [ ] Record terminal session or create GIF showing full flow
-- [ ] Write hackathon submission description (concise, compelling)
-- [ ] Verify: fresh `git clone` → `pnpm install` → `pnpm build` → works
-- [ ] Tag release: `v0.1.0`
+- [ ] Create demo scenario: seed a repo with branches that produce interesting diffs
+- [ ] Record terminal session / create demo GIF
+- [ ] Write submission description (hackathon-specific)
+- [ ] Tag release `v0.1.0`
+- [ ] Verify everything end-to-end
 
-**Output:** Submitted to hackathon.
+**PR deliverable:** Submission-ready.
 
 ---
 
@@ -433,34 +433,57 @@ Tasks are ordered by dependency and priority. Each task is self-contained and re
 
 ```
 Task 1 (scaffold)
-  └── Task 2 (types/config)
-       ├── Task 3 (store)
-       │    ├── Task 6 (queue) ──► Task 7 (CLI) ──► Task 15 (GitHub)
-       │    │                                   ──► Task 16 (overlap)
-       │    │                                   ──► Task 17 (AI)
-       │    ├── Task 12 (rules) ──► Task 13 (rules TUI) ──► Task 14 (export)
-       │    └── Task 18 (history)
-       └── Task 4 (git adapter)
-            └── Task 5 (diff parser)
-                 └── Task 8 (TUI shell)
-                      └── Task 9 (diff pane)
-                           └── Task 10 (comment pane)
-                                └── Task 11 (finalization)
+  └── Task 2 (types + OKF store)
+       ├── Task 3 (git + diff parser)
+       │    └── Task 4 (queue manager)
+       │         ├── Task 5 (feature grouping)
+       │         │    └── Task 6 (CLI commands)
+       │         │         └── Task 7 (TUI shell)
+       │         │              └── Task 8 (diff view)
+       │         │                   └── Task 9 (comments + finalization)
+       │         │
+       │         └── Task 16 (GitHub adapter)
+       │              └── Task 17 (overlap detection)
+       │
+       ├── Task 10 (rules - regex)
+       │    └── Task 11 (rules - LLM)
+       │         ├── Task 12 (repo scan)
+       │         └── Task 13 (rule export)
+       │
+       ├── Task 14 (pattern analysis from comments)
+       │
+       └── Task 15 (AI summary)
+
+Task 18 (history) — independent, needs store only
+Task 19 (docs) — after all features
+Task 20 (demo) — final
 ```
 
 ---
 
-## Day-by-Day Schedule (Aggressive but achievable)
+## Day-by-Day Schedule
 
 | Day | Date | Tasks | Milestone |
 |-----|------|-------|-----------|
-| 1 | Aug 15 | 1, 2 | Project builds, types defined |
-| 2 | Aug 16 | 3, 4, 5 | Can fetch and parse diffs |
-| 3 | Aug 17 | 6, 7 | CLI works: add, status, approve, flag |
-| 4 | Aug 18 | 8, 9 | TUI shows scrollable diff |
-| 5 | Aug 19 | 10, 11 | Full review flow works end-to-end |
-| 6 | Aug 20 | 12, 13 | Rules engine with TUI integration |
-| 7 | Aug 21 | 14, 15, 16 | Rule export, GitHub mode, overlap |
-| 8 | Aug 22 | 17, 18, 19, 20 | AI, history, docs, submission |
+| 1 | Aug 15-16 | 1, 2 | Project builds, OKF store works |
+| 2 | Aug 16-17 | 3, 4 | Can fetch diffs, queue PRs |
+| 3 | Aug 17-18 | 5, 6 | CLI works with feature grouping |
+| 4 | Aug 18-19 | 7, 8 | TUI shows diff in OpenCode style |
+| 5 | Aug 19-20 | 9, 10 | Full review flow + regex rules |
+| 6 | Aug 20-21 | 11, 14 | LLM rules + comment pattern analysis |
+| 7 | Aug 21-22 | 12, 13, 15, 16 | Scan, export, AI summary, GitHub |
+| 8 | Aug 22-23 | 17, 18, 19, 20 | Overlap, history, docs, submit |
 
-**Hard deadline:** August 23 (submissions close)
+---
+
+## Post-Hackathon Backlog
+
+| Feature | Description | Effort |
+|---------|-------------|--------|
+| **Learnify** | Learning notes from wrong assumptions corrected during review | 2 weeks |
+| **Team rules sharing** | Sync rules across team members | 1 week |
+| **OpenTUI migration** | Move from Ink to OpenTUI for better perf | 1 week |
+| **PR dependency graph** | Visual graph of PR relationships | 1 week |
+| **AI-enhanced grouping** | LLM analyzes PR semantics for better groups | 3 days |
+| **Webhook mode** | Auto-add PRs when they're opened | 1 week |
+| **VS Code extension** | Review from editor sidebar | 2-3 weeks |
