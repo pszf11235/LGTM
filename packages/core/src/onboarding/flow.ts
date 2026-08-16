@@ -213,14 +213,14 @@ async function askQuestion(
 
   if (q.type === "text") {
     // Skip model question if AI is disabled
-    if (q.id === "aiModel" && (!answers.aiProvider || answers.aiProvider === "none")) {
+    if (q.id === "aiModel" && (!answers?.aiProvider || answers.aiProvider === "none")) {
       return null;
     }
 
     // Show model suggestions based on provider
     let hint = currentValue ? chalk.gray(` (current: ${currentValue})`) : "";
     if (q.id === "aiModel" && !currentValue) {
-      const suggestions = getModelSuggestions(answers.aiProvider);
+      const suggestions = getModelSuggestions(answers?.aiProvider);
       if (suggestions) {
         hint = chalk.gray(`\n  Suggestions: ${suggestions}`);
       }
