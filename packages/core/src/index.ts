@@ -101,6 +101,10 @@ async function main() {
 
   // ─── Core Commands ─────────────────────────────────────────────────────
 
+  // `yak ai` — AI connection management
+  const { registerAICommands } = await import("./cli/commands/ai.js");
+  registerAICommands(program, ctx);
+
   // `yak tui [plugin]` → opens TUI on specific tab
   program
     .command("tui [plugin]")
