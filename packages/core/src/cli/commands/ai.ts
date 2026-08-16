@@ -42,14 +42,24 @@ export function registerAICommands(program: Command, ctx: YakContext) {
 
       // Quick availability check
       console.log(chalk.gray("\n  Checking connection..."));
-      const llm = createLLMProvider(aiConfig as LLMConfig);
-      const available = await llm.isAvailable();
 
-      if (available) {
+      // Auto-start Ollama if needed
+      if (aiConfig.provider === "ollama") {
+        const running = await ensureOllamaRunning();
+        if (!running) {
+          console.log(`  Connection: ${chalk.red("✗ unreachable")}\n`);
+          return;
+        }
         console.log(`  Connection: ${chalk.green("✓ reachable")}`);
       } else {
-        console.log(`  Connection: ${chalk.red("✗ unreachable")}`);
-        printTroubleshooting(aiConfig.provider);
+        const llm = createLLMProvider(aiConfig as LLMConfig);
+        const available = await llm.isAvailable();
+        if (available) {
+          console.log(`  Connection: ${chalk.green("✓ reachable")}`);
+        } else {
+          console.log(`  Connection: ${chalk.red("✗ unreachable")}`);
+          printTroubleshooting(aiConfig.provider);
+        }
       }
       console.log();
     });
@@ -72,13 +82,18 @@ export function registerAICommands(program: Command, ctx: YakContext) {
 
       const llm = createLLMProvider(aiConfig as LLMConfig);
 
-      // Step 1: Availability check
+      // Step 1: Availability check (auto-start Ollama if needed)
       console.log(chalk.gray("\n  1. Checking availability..."));
-      const available = await llm.isAvailable();
-      if (!available) {
-        console.log(`     ${chalk.red("✗ Provider not reachable")}`);
-        printTroubleshooting(aiConfig.provider);
-        return;
+      if (aiConfig.provider === "ollama") {
+        const running = await ensureOllamaRunning();
+        if (!running) return;
+      } else {
+        const available = await llm.isAvailable();
+        if (!available) {
+          console.log(`     ${chalk.red("✗ Provider not reachable")}`);
+          printTroubleshooting(aiConfig.provider);
+          return;
+        }
       }
       console.log(`     ${chalk.green("✓ Provider reachable")}`);
 
@@ -129,6 +144,65 @@ function getEnvKeyName(provider?: string): string | null {
     case "anthropic": return "ANTHROPIC_API_KEY";
     case "ollama": return null; // no key needed
     default: return null;
+  }
+}
+
+/**
+ * Check if Ollama is running, offer to start it in background if not.
+ * Returns true if Ollama is available after this call.
+ */
+async function ensureOllamaRunning(): Promise<boolean> {
+  try {
+    const res = await fetch("http://localhost:11434/api/tags", {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (res.ok) return true;
+  } catch {
+    // Not running
+  }
+
+  console.log(chalk.yellow("  Ollama is not running."));
+
+  // Check if ollama binary exists
+  const { execSync } = await import("child_process");
+  try {
+    execSync("which ollama", { stdio: "ignore" });
+  } catch {
+    console.log(chalk.red("  Ollama not found. Install from: https://ollama.com"));
+    return false;
+  }
+
+  // Start ollama serve in background
+  console.log(chalk.gray("  Starting ollama serve in background..."));
+  try {
+    const { spawn } = await import("child_process");
+    const child = spawn("ollama", ["serve"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+
+    // Wait for it to come up (max 5 seconds)
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        const res = await fetch("http://localhost:11434/api/tags", {
+          signal: AbortSignal.timeout(1000),
+        });
+        if (res.ok) {
+          console.log(chalk.green("  ✓ Ollama started (PID " + child.pid + ")"));
+          return true;
+        }
+      } catch {
+        // Still starting...
+      }
+    }
+
+    console.log(chalk.yellow("  Ollama started but not responding yet. Try again in a moment."));
+    return false;
+  } catch (err) {
+    console.log(chalk.red(`  Failed to start Ollama: ${(err as Error).message}`));
+    return false;
   }
 }
 
