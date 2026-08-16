@@ -117,13 +117,21 @@ async function main() {
       console.log(chalk.yellow(`○ Plugin '${name}' disabled`));
     });
 
-  // `yak init` → onboarding (placeholder until Task 4)
+  // `yak init` → onboarding
   program
     .command("init")
     .description("Initialize Yak in this project (runs onboarding)")
-    .action(() => {
-      console.log(chalk.yellow("🦬 Onboarding flow coming in Task 4!"));
-      console.log(chalk.gray("  Will ask about project goals, tech stack, quality references, etc.\n"));
+    .option("--skip-onboarding", "Skip interactive questions, use defaults")
+    .action(async (opts: { skipOnboarding?: boolean }) => {
+      if (opts.skipOnboarding) {
+        ctx.logger.info("Skipping onboarding — using defaults.");
+        ctx.logger.info("Run `yak init` again without --skip-onboarding to configure.");
+        return;
+      }
+
+      // Dynamic import to avoid loading readline on every CLI invocation
+      const { runOnboarding } = await import("../onboarding/flow.js");
+      await runOnboarding();
     });
 
   // `yak config` → view config (placeholder until Task 3)
