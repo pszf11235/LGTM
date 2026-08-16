@@ -169,31 +169,35 @@ function selectWithArrows(
 ): Promise<string | null> {
   return new Promise((resolve) => {
     let selectedIdx = defaultIdx;
+    let firstRender = true;
 
-    const render = () => {
-      // Move cursor up to overwrite previous render (except first time)
-      const lines = options.length + 3; // question + blank + options + blank
-      process.stdout.write(`\x1b[${lines}A\x1b[0J`);
-      draw();
-    };
+    // Number of lines the options + help text occupy
+    const optionLines = options.length + 1; // options + help line
 
-    const draw = () => {
-      console.log(`  ${chalk.bold(question)}`);
-      console.log();
+    const drawOptions = () => {
       options.forEach((opt, i) => {
         const marker = i === selectedIdx ? chalk.green("❯") : " ";
         const label =
           i === selectedIdx ? chalk.cyan(opt.label) : opt.label;
         const desc = opt.description ? chalk.gray(` — ${opt.description}`) : "";
-        console.log(`  ${marker} ${label}${desc}`);
+        process.stdout.write(`  ${marker} ${label}${desc}\n`);
       });
-      console.log(
-        chalk.gray("\n  [↑/↓] navigate  [enter] select  [s] skip")
+      process.stdout.write(
+        chalk.gray("  [↑/↓] navigate  [enter] select  [s] skip\n")
       );
     };
 
-    // Initial draw
-    draw();
+    const redraw = () => {
+      // Move cursor up to beginning of options area and clear
+      process.stdout.write(`\x1b[${optionLines}A`);
+      process.stdout.write(`\x1b[0J`);
+      drawOptions();
+    };
+
+    // Initial draw: question + blank line + options
+    console.log(`  ${chalk.bold(question)}\n`);
+    drawOptions();
+    firstRender = false;
 
     // Switch stdin to raw mode for keypress detection
     const stdin = process.stdin;
@@ -202,33 +206,36 @@ function selectWithArrows(
     stdin.resume();
     stdin.setEncoding("utf-8");
 
+    const cleanup = () => {
+      stdin.setRawMode(wasRaw ?? false);
+      stdin.removeListener("data", onData);
+      stdin.pause();
+    };
+
     const onData = (key: string) => {
       // Ctrl+C
       if (key === "\x03") {
-        stdin.setRawMode(wasRaw ?? false);
-        stdin.removeListener("data", onData);
-        stdin.pause();
+        cleanup();
         console.log();
         process.exit(0);
       }
 
       // Enter
       if (key === "\r" || key === "\n") {
-        stdin.setRawMode(wasRaw ?? false);
-        stdin.removeListener("data", onData);
-        stdin.pause();
-        console.log(
-          `  ${chalk.green("✓")} ${options[selectedIdx].label}\n`
-        );
+        cleanup();
+        // Clear the options area and print confirmation
+        process.stdout.write(`\x1b[${optionLines}A`);
+        process.stdout.write(`\x1b[0J`);
+        console.log(`  ${chalk.green("✓")} ${options[selectedIdx].label}\n`);
         resolve(options[selectedIdx].value);
         return;
       }
 
       // Skip
       if (key === "s" || key === "S") {
-        stdin.setRawMode(wasRaw ?? false);
-        stdin.removeListener("data", onData);
-        stdin.pause();
+        cleanup();
+        process.stdout.write(`\x1b[${optionLines}A`);
+        process.stdout.write(`\x1b[0J`);
         console.log(chalk.gray("  (skipped)\n"));
         resolve(null);
         return;
@@ -237,14 +244,14 @@ function selectWithArrows(
       // Arrow up
       if (key === "\x1b[A" || key === "k") {
         selectedIdx = (selectedIdx - 1 + options.length) % options.length;
-        render();
+        redraw();
         return;
       }
 
       // Arrow down
       if (key === "\x1b[B" || key === "j") {
         selectedIdx = (selectedIdx + 1) % options.length;
-        render();
+        redraw();
         return;
       }
     };
