@@ -107,6 +107,17 @@ export function ReviewPage({
   }
 
   useInput((input, key) => {
+    // Skip when commenting — CommentInput handles input
+    if (isCommenting) return;
+
+    // Debug: write keypress to file for diagnostics
+    if (process.env.YAK_DEBUG) {
+      const fs = require("fs");
+      fs.appendFileSync("/tmp/yak-debug.log",
+        `[ReviewPage] input="${input}" keys=${JSON.stringify(key)} scrollOffset=${scrollOffset} flatLines=${flatLines.length} termHeight=${termHeight}\n`
+      );
+    }
+
     // Scroll
     if (key.downArrow || input === "j") {
       setScrollOffset((prev) => Math.min(prev + 1, Math.max(0, flatLines.length - termHeight)));
@@ -179,7 +190,7 @@ export function ReviewPage({
       onExit("back", comments);
       return;
     }
-  }, { isActive: !isCommenting });
+  });
 
   function handleCommentSubmit(text: string) {
     const lineInfo = getCurrentLineInfo();
@@ -240,7 +251,7 @@ export function ReviewPage({
       <Box>
         <Text color="gray">
           File {currentFileIdx + 1}/{diff.files.length}: {diff.files[currentFileIdx]?.path ?? ""}
-          {"  "}(line {scrollOffset + 1}/{flatLines.length})
+          {"  "}(line {scrollOffset + 1}/{flatLines.length}, showing {termHeight} rows)
         </Text>
       </Box>
 
