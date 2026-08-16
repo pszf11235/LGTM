@@ -11,7 +11,7 @@ import { parseDiff, getChangedPaths, getDiffStats } from "./diff-parser.js";
 
 const fixturesDir = path.resolve(
   import.meta.dir,
-  "../../../../tests/fixtures/sample-diffs"
+  "../../../../../tests/fixtures/sample-diffs"
 );
 
 function loadFixture(name: string): string {
