@@ -139,8 +139,12 @@ export interface ProjectProfile {
 
 /** Yak configuration (resolved from all layers) */
 export interface YakConfig {
-  /** Where .yak/ data lives: "central" (~/.yak/) or "repo" (.yak/ in repo root) */
-  storageMode: "central" | "repo";
+  /**
+   * Where yak data lives:
+   * - "farm": central yak-farm (default: ~/.yak-farm/<repo-name>/)
+   * - "repo": .yak/ in each repo root (committed to git)
+   */
+  storageMode: "farm" | "repo";
 
   /** Enabled plugins */
   plugins: Record<string, { enabled: boolean }>;

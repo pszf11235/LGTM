@@ -10,9 +10,9 @@ import { Command } from "commander";
 import path from "path";
 import fs from "fs";
 import type { YakPlugin, YakContext, YakConfig, Logger } from "../plugin.js";
-import { loadConfig, loadProfile } from "../config/loader.js";
+import { loadConfig, loadBootstrap, loadProfile, resolveYakDir } from "../config/loader.js";
 import { createOKFStore } from "../store/okf.js";
-import { resolveYakDir, findGitRoot } from "../store/paths.js";
+import { findGitRoot } from "../store/paths.js";
 
 /**
  * Discover plugins by scanning the packages/plugins/ directory.
@@ -97,7 +97,8 @@ export function registerPlugin(
 export function buildBootstrapContext(): YakContext {
   const repoRoot = findGitRoot();
   const config = loadConfig();
-  const yakDir = resolveYakDir(config.storageMode, repoRoot);
+  const bootstrap = loadBootstrap();
+  const yakDir = resolveYakDir(bootstrap, repoRoot);
   const store = createOKFStore(yakDir);
   const profile = loadProfile(yakDir);
 

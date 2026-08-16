@@ -1,36 +1,20 @@
 /**
- * Path resolution for the .yak/ data directory.
+ * Path resolution for yak data directories.
  *
- * Handles both storage modes:
- * - "repo": .yak/ in the git repo root (committed, team-shareable)
- * - "central": ~/.yak/ in the user's home dir (global, personal)
+ * Storage modes:
+ * - "farm": central yak-farm (default: ~/.yak-farm/<repo-name>/)
+ * - "repo": .yak/ in each repo root (committed to git, team-shareable)
  *
- * Per-project overrides always live in the repo root as .yakrc.yaml.
+ * The resolveYakDir() function that handles mode logic lives in config/loader.ts
+ * (since it depends on BootstrapConfig). This file provides the sub-path helpers.
  */
 
 import path from "path";
-import os from "os";
 import fs from "fs";
 
 /**
- * Resolve the .yak/ directory based on storage mode.
- *
- * @param mode - "central" (~/. yak/) or "repo" (.yak/ in repo root)
- * @param repoRoot - Git repo root (used for "repo" mode)
- */
-export function resolveYakDir(
-  mode: "central" | "repo",
-  repoRoot: string
-): string {
-  if (mode === "central") {
-    return path.join(os.homedir(), ".yak");
-  }
-  return path.join(repoRoot, ".yak");
-}
-
-/**
- * Ensure the .yak/ directory structure exists.
- * Creates the base directories needed for operation.
+ * Ensure the yak directory structure exists.
+ * Creates all subdirectories needed for operation.
  */
 export function ensureYakDirs(yakDir: string): void {
   const dirs = [
@@ -49,7 +33,7 @@ export function ensureYakDirs(yakDir: string): void {
 
 /**
  * Get the session directory for a given date.
- * Sessions are organized by date: .yak/sessions/YYYY-MM-DD/
+ * Sessions are organized by date: <yakDir>/sessions/YYYY-MM-DD/
  */
 export function getSessionDir(yakDir: string, date?: string): string {
   const dateStr = date ?? new Date().toISOString().split("T")[0];
