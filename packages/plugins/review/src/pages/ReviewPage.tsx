@@ -106,10 +106,7 @@ export function ReviewPage({
     return { file: currentLine.filePath, line: lineNum };
   }
 
-  useInput((input: string, key: { downArrow?: boolean; upArrow?: boolean; return?: boolean; escape?: boolean }) => {
-    // Don't handle input while commenting (CommentInput handles it)
-    if (isCommenting) return;
-
+  useInput((input, key) => {
     // Scroll
     if (key.downArrow || input === "j") {
       setScrollOffset((prev) => Math.min(prev + 1, Math.max(0, flatLines.length - termHeight)));
@@ -182,7 +179,7 @@ export function ReviewPage({
       onExit("back", comments);
       return;
     }
-  });
+  }, { isActive: !isCommenting });
 
   function handleCommentSubmit(text: string) {
     const lineInfo = getCurrentLineInfo();

@@ -18,7 +18,7 @@ interface CommentInputProps {
 export function CommentInput({ file, line, onSubmit, onCancel }: CommentInputProps) {
   const [text, setText] = useState("");
 
-  useInput((input: string, key: { escape?: boolean; return?: boolean; backspace?: boolean; delete?: boolean }) => {
+  useInput((input, key) => {
     if (key.escape) {
       onCancel();
       return;
@@ -35,8 +35,8 @@ export function CommentInput({ file, line, onSubmit, onCancel }: CommentInputPro
       setText((prev) => prev.slice(0, -1));
       return;
     }
-    // Regular character input
-    if (input && !key.escape && !key.return) {
+    // Regular character input — only add printable chars
+    if (input && input.length === 1 && !key.ctrl && !key.meta) {
       setText((prev) => prev + input);
     }
   });

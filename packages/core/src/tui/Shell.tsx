@@ -38,7 +38,7 @@ export function Shell({ tabs, initialTab, repoName, repoPath }: ShellProps) {
     ? enabledTabs.findIndex((t) => t.name === initialTab)
     : 0;
   const [activeTabIdx, setActiveTabIdx] = useState(Math.max(0, initialIdx));
-  const [statusHint, setStatusHint] = useState("q quit  tab switch");
+  const [statusHint, setStatusHint] = useState("ctrl+c quit  tab switch");
 
   useInput((input, key) => {
     // Tab key: cycle through tabs
@@ -55,18 +55,9 @@ export function Shell({ tabs, initialTab, repoName, repoPath }: ShellProps) {
       return;
     }
 
-    // Number keys: jump to tab
-    const num = parseInt(input, 10);
-    if (num >= 1 && num <= enabledTabs.length) {
-      setActiveTabIdx(num - 1);
-      return;
-    }
-
-    // q: quit
-    if (input === "q" && !key.ctrl) {
-      exit();
-      return;
-    }
+    // Ctrl+C: always quit (global escape hatch)
+    // Note: 'q' is NOT handled here — pages handle their own q key.
+    // Shell only exits via Ctrl+C. Pages use q for "back" navigation.
   });
 
   const ActivePage = enabledTabs[activeTabIdx]?.component;
