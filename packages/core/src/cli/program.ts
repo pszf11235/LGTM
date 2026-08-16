@@ -1,0 +1,157 @@
+/**
+ * CLI Program Setup & Plugin Loader
+ *
+ * Discovers plugins from packages/plugins/, validates them against
+ * the YakPlugin interface, and registers their commands under
+ * the appropriate namespace.
+ */
+
+import { Command } from "commander";
+import path from "path";
+import fs from "fs";
+import type { YakPlugin, YakContext, YakConfig, Logger } from "../plugin.js";
+
+/**
+ * Discover plugins by scanning the packages/plugins/ directory.
+ * Each plugin must export a `plugin` object or a `register` function
+ * that returns a YakPlugin.
+ */
+export async function discoverPlugins(
+  pluginsDir: string
+): Promise<YakPlugin[]> {
+  const plugins: YakPlugin[] = [];
+
+  if (!fs.existsSync(pluginsDir)) {
+    return plugins;
+  }
+
+  const entries = fs.readdirSync(pluginsDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const pluginEntry = path.join(pluginsDir, entry.name, "src", "index.ts");
+    if (!fs.existsSync(pluginEntry)) continue;
+
+    try {
+      const mod = await import(pluginEntry);
+
+      // Plugin can export either a `plugin` object or a `register()` function
+      const plugin: YakPlugin | undefined =
+        mod.register?.() ?? mod.plugin ?? mod.default;
+
+      if (plugin && isValidPlugin(plugin)) {
+        plugins.push(plugin);
+      }
+    } catch (err) {
+      // Silently skip plugins that fail to load
+      // (they might have unmet dependencies during development)
+      console.error(
+        `  ⚠️  Failed to load plugin from ${entry.name}: ${(err as Error).message}`
+      );
+    }
+  }
+
+  return plugins;
+}
+
+/**
+ * Type guard: validates that an object satisfies YakPlugin minimum contract.
+ */
+function isValidPlugin(obj: unknown): obj is YakPlugin {
+  if (typeof obj !== "object" || obj === null) return false;
+  const p = obj as Record<string, unknown>;
+  return (
+    typeof p.name === "string" &&
+    typeof p.description === "string" &&
+    typeof p.version === "string"
+  );
+}
+
+/**
+ * Register a plugin's commands into the Commander program.
+ * Creates a subcommand namespace: `yak <plugin.name> <command>`
+ */
+export function registerPlugin(
+  program: Command,
+  plugin: YakPlugin,
+  ctx: YakContext
+): void {
+  const sub = program
+    .command(plugin.name)
+    .description(plugin.description);
+
+  // Let the plugin register its own subcommands
+  if (typeof plugin.registerCommands === "function") {
+    plugin.registerCommands(sub, ctx);
+  }
+}
+
+/**
+ * Build a minimal YakContext for bootstrapping.
+ * This will be enriched in later tasks as store/config/llm are implemented.
+ */
+export function buildBootstrapContext(): YakContext {
+  const repoRoot = process.cwd();
+  const yakDir = path.join(repoRoot, ".yak");
+
+  const logger: Logger = {
+    info: (msg) => console.log(`  ${msg}`),
+    warn: (msg) => console.log(`  ⚠️  ${msg}`),
+    error: (msg) => console.error(`  ❌ ${msg}`),
+    debug: (msg) => {
+      if (process.env.YAK_DEBUG) console.log(`  🐛 ${msg}`);
+    },
+  };
+
+  const config: YakConfig = {
+    storageMode: "repo",
+    plugins: {
+      review: { enabled: true },
+      specify: { enabled: false },
+      learn: { enabled: false },
+    },
+    ai: { enabled: false },
+  };
+
+  // Stub store (will be real in Task 3)
+  const store = {
+    read: async () => null,
+    write: async () => {},
+    exists: async () => false,
+    list: async () => [],
+  };
+
+  return {
+    profile: null,
+    store,
+    llm: null,
+    config,
+    logger,
+    yakDir,
+    repoRoot,
+  };
+}
+
+/**
+ * Resolve the plugins directory relative to the package root.
+ * Handles both development (monorepo) and installed (node_modules) cases.
+ */
+export function resolvePluginsDir(): string {
+  // In development: plugins are sibling to core in the monorepo
+  const devPath = path.resolve(
+    import.meta.dir ?? __dirname,
+    "..",
+    "..",
+    "..",
+    "plugins"
+  );
+  if (fs.existsSync(devPath)) return devPath;
+
+  // Fallback: look relative to cwd
+  const cwdPath = path.join(process.cwd(), "packages", "plugins");
+  if (fs.existsSync(cwdPath)) return cwdPath;
+
+  // No plugins found
+  return devPath;
+}
