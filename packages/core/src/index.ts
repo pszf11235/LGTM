@@ -43,22 +43,41 @@ async function main() {
     }
   }
 
-  // ─── Core Commands ─────────────────────────────────────────────────────
-
-  // `yak` (bare) → opens TUI (placeholder until Task 8)
-  program.action(() => {
-    if (process.argv.length <= 2) {
-      console.log(
-        `\n${chalk.bold("🦬 Yak")} — TUI launching soon!\n`
-      );
-      console.log(
-        chalk.gray(
-          `  In a future version, bare ${chalk.cyan("yak")} opens the interactive TUI.\n` +
-            `  For now, use ${chalk.cyan("yak --help")} to see available commands.\n`
-        )
-      );
+  // ─── Handle bare `yak` (no args) BEFORE parsing ────────────────────────
+  // Commander doesn't reliably call program.action() when subcommands exist.
+  // So we intercept bare invocations here.
+  if (process.argv.length <= 2) {
+    const { isOnboardingComplete } = await import("./onboarding/flow.js");
+    if (!isOnboardingComplete(ctx.yakDir)) {
+      const hasProfile = await ctx.store.exists("profile.md");
+      if (hasProfile) {
+        console.log(
+          chalk.gray("\n  Yak profile is incomplete — resuming setup...\n")
+        );
+      } else {
+        console.log(
+          chalk.gray("\n  No yak profile found — starting first-time setup...\n")
+        );
+      }
+      const { runOnboarding } = await import("./onboarding/flow.js");
+      await runOnboarding();
+      return;
     }
-  });
+
+    // Profile complete — show TUI placeholder (will become real TUI in Task 8)
+    console.log(
+      `\n${chalk.bold("🦬 Yak")} — TUI launching soon!\n`
+    );
+    console.log(
+      chalk.gray(
+        `  In a future version, bare ${chalk.cyan("yak")} opens the interactive TUI.\n` +
+          `  For now, use ${chalk.cyan("yak --help")} to see available commands.\n`
+      )
+    );
+    return;
+  }
+
+  // ─── Core Commands ─────────────────────────────────────────────────────
 
   // `yak tui [plugin]` → opens TUI on specific tab
   program
@@ -117,29 +136,60 @@ async function main() {
       console.log(chalk.yellow(`○ Plugin '${name}' disabled`));
     });
 
-  // `yak init` → onboarding (placeholder until Task 4)
+  // `yak init` → run or resume onboarding
   program
     .command("init")
-    .description("Initialize Yak in this project (runs onboarding)")
-    .action(() => {
-      console.log(chalk.yellow("🦬 Onboarding flow coming in Task 4!"));
-      console.log(chalk.gray("  Will ask about project goals, tech stack, quality references, etc.\n"));
+    .description("Initialize Yak in this project (runs or resumes onboarding)")
+    .option("--skip-onboarding", "Skip interactive questions, use defaults")
+    .action(async (opts: { skipOnboarding?: boolean }) => {
+      if (opts.skipOnboarding) {
+        ctx.logger.info("Skipping onboarding — using defaults.");
+        ctx.logger.info("Run `yak init` again without --skip-onboarding to configure.");
+        return;
+      }
+
+      const { runOnboarding } = await import("./onboarding/flow.js");
+      await runOnboarding();
     });
 
-  // `yak config` → view config (placeholder until Task 3)
+  // `yak config` → show current config, offer to re-run onboarding to change
   program
     .command("config")
-    .description("View or edit Yak configuration")
-    .action(() => {
-      console.log(chalk.bold("\n🦬 Yak Config (defaults)\n"));
-      console.log(`  Storage mode: ${chalk.cyan(ctx.config.storageMode)}`);
+    .description("View current config or re-run setup to change settings")
+    .option("-e, --edit", "Re-run onboarding to change settings")
+    .action(async (opts: { edit?: boolean }) => {
+      if (opts.edit) {
+        const { runOnboarding } = await import("./onboarding/flow.js");
+        await runOnboarding();
+        return;
+      }
+
+      console.log(chalk.bold("\n🦬 Yak Config\n"));
+      console.log(`  Storage mode: ${chalk.cyan(ctx.config.storageMode === "farm" ? "yak-farm (~/.yak-farm/)" : "per-repo (.yak/)")}`);
       console.log(`  AI enabled:   ${chalk.cyan(String(ctx.config.ai.enabled))}`);
+      if (ctx.config.ai.enabled && ctx.config.ai.provider) {
+        console.log(`  AI provider:  ${chalk.cyan(ctx.config.ai.provider)}`);
+      }
       console.log(`  Plugins:`);
       for (const [name, cfg] of Object.entries(ctx.config.plugins)) {
         const icon = cfg.enabled ? chalk.green("●") : chalk.gray("○");
         console.log(`    ${icon} ${name}`);
       }
-      console.log();
+
+      if (ctx.profile) {
+        console.log(`\n  ${chalk.bold("Profile:")}`);
+        console.log(`    Project:   ${chalk.cyan(ctx.profile.project)}`);
+        console.log(`    Goal:      ${chalk.cyan(ctx.profile.goal)}`);
+        console.log(`    Feedback:  ${chalk.cyan(ctx.profile.feedbackStyle)}`);
+        console.log(`    Team:      ${chalk.cyan(ctx.profile.teamSize)}`);
+        if (ctx.profile.techStack.length > 0) {
+          console.log(`    Stack:     ${chalk.cyan(ctx.profile.techStack.join(", "))}`);
+        }
+      }
+
+      console.log(
+        chalk.gray(`\n  Run ${chalk.cyan("yak config --edit")} to change settings.\n`)
+      );
     });
 
   // Parse and execute

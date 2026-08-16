@@ -3,24 +3,49 @@
  *
  * Resolution order (last wins):
  * 1. Built-in defaults
- * 2. Central/repo config (.yak/config.md or ~/.yak/config.md)
- * 3. Plugin-specific config (.yak/plugins/<name>/config.md)
+ * 2. Storage config from bootstrap (.yak/ or yak-farm)
+ * 3. Plugin-specific config
  * 4. Repo override (.yakrc.yaml in repo root — always checked)
  * 5. CLI flags (handled by Commander, not here)
  *
- * On first `yak init`, user chooses storage mode (central vs repo).
- * This choice is stored in ~/.yakrc (bootstrap file).
+ * On first `yak init`, user chooses storage mode:
+ * - "farm": All yak data in one place (the "yak-farm", default: ~/.yak-farm/)
+ * - "repo": Each repo has its own .yak/ (committed to git, team-shareable)
+ *
+ * Either way, ~/.yakrc stores the choice + a registry of known repos (Task 21).
  */
 
 import fs from "fs";
 import path from "path";
-import { parse as parseYaml } from "yaml";
+import os from "os";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { YakConfig, ProjectProfile } from "../plugin.js";
-import { findGitRoot, resolveYakDir, getProfilePath } from "../store/paths.js";
+import { findGitRoot, getProfilePath } from "../store/paths.js";
 
-/** Bootstrap config stored in ~/.yakrc — just the storage mode choice */
-interface BootstrapConfig {
-  storageMode: "central" | "repo";
+/**
+ * Bootstrap config stored in ~/.yakrc.
+ * This is the ONLY central file — determines where everything else lives.
+ */
+export interface BootstrapConfig {
+  /**
+   * Storage mode:
+   * - "farm": All yak data in one central location (the "yak-farm")
+   *           Default: ~/.yak-farm/
+   *           Good for: keeping everything in one place, cross-repo queries, personal use
+   * - "repo": Each repo has its own .yak/ directory (committed to git)
+   *           Good for: sharing config/rules with team, per-repo reviews tracked in git
+   */
+  storageMode: "farm" | "repo";
+
+  /** Custom path for yak-farm (default: ~/.yak-farm/) — only used in farm mode */
+  farmPath?: string;
+}
+
+/**
+ * Default yak-farm location.
+ */
+export function getDefaultFarmPath(): string {
+  return path.join(os.homedir(), ".yak-farm");
 }
 
 /**
@@ -28,16 +53,14 @@ interface BootstrapConfig {
  * Returns defaults if file doesn't exist (first run).
  */
 export function loadBootstrap(): BootstrapConfig {
-  const bootstrapPath = path.join(
-    process.env.HOME ?? process.env.USERPROFILE ?? "~",
-    ".yakrc"
-  );
+  const bootstrapPath = path.join(os.homedir(), ".yakrc");
 
   try {
     const raw = fs.readFileSync(bootstrapPath, "utf-8");
     const parsed = parseYaml(raw) as Partial<BootstrapConfig>;
     return {
       storageMode: parsed.storageMode ?? "repo",
+      farmPath: parsed.farmPath,
     };
   } catch {
     // First run — default to repo mode
@@ -49,18 +72,48 @@ export function loadBootstrap(): BootstrapConfig {
  * Save bootstrap config to ~/.yakrc.
  */
 export function saveBootstrap(config: BootstrapConfig): void {
-  const bootstrapPath = path.join(
-    process.env.HOME ?? process.env.USERPROFILE ?? "~",
-    ".yakrc"
-  );
+  const bootstrapPath = path.join(os.homedir(), ".yakrc");
 
-  const content = `# Yak bootstrap config\n# Created by \`yak init\`\nstorageMode: ${config.storageMode}\n`;
-  fs.writeFileSync(bootstrapPath, content, "utf-8");
+  const lines = [
+    "# Yak bootstrap config",
+    "# Created by `yak init`",
+    "#",
+    "# storageMode:",
+    '#   "farm" = all yak data in one place (the yak-farm)',
+    '#   "repo" = .yak/ per repo (committed to git)',
+    "",
+    `storageMode: ${config.storageMode}`,
+  ];
+
+  if (config.farmPath) {
+    lines.push(`farmPath: ${config.farmPath}`);
+  }
+
+  lines.push("");
+  fs.writeFileSync(bootstrapPath, lines.join("\n"), "utf-8");
+}
+
+/**
+ * Resolve the yak data directory based on storage mode.
+ *
+ * - Farm mode: ~/.yak-farm/<repo-name>/ (or custom farmPath)
+ * - Repo mode: <repoRoot>/.yak/
+ */
+export function resolveYakDir(
+  config: BootstrapConfig,
+  repoRoot: string
+): string {
+  if (config.storageMode === "farm") {
+    const farmBase = config.farmPath ?? getDefaultFarmPath();
+    const repoName = path.basename(repoRoot);
+    return path.join(farmBase, repoName);
+  }
+  return path.join(repoRoot, ".yak");
 }
 
 /**
  * Load the repo-level override (.yakrc.yaml in repo root).
- * Returns empty object if not found.
+ * Always checked regardless of storage mode — teams can commit shared config.
  */
 function loadRepoOverride(repoRoot: string): Partial<YakConfig> {
   const candidates = [
@@ -126,7 +179,7 @@ export function loadConfig(): YakConfig {
 }
 
 /**
- * Load the project profile from .yak/profile.md.
+ * Load the project profile from the yak data dir.
  * Returns null if no profile exists (not yet initialized).
  */
 export function loadProfile(yakDir: string): ProjectProfile | null {
@@ -134,8 +187,6 @@ export function loadProfile(yakDir: string): ProjectProfile | null {
 
   try {
     const raw = fs.readFileSync(profilePath, "utf-8");
-    // gray-matter would be better here but we avoid the dep in this module
-    // Parse frontmatter manually (simple YAML between --- delimiters)
     const match = raw.match(/^---\n([\s\S]*?)\n---/);
     if (!match) return null;
 

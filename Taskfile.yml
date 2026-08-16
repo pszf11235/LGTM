@@ -1,0 +1,114 @@
+# https://taskfile.dev
+# Install: brew install go-task/tap/go-task (or see https://taskfile.dev/installation/)
+# Usage: task <command>
+
+version: '3'
+
+vars:
+  YAK_DIR: .yak
+  FARM_DIR: "{{.HOME}}/.yak-farm"
+  BOOTSTRAP: "{{.HOME}}/.yakrc"
+
+tasks:
+  # ─── Development ──────────────────────────────────────────────────────
+
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  dev:
+    desc: Run yak in dev mode
+    cmds:
+      - bun run packages/core/src/index.ts {{.CLI_ARGS}}
+
+  install:
+    desc: Install all dependencies
+    cmds:
+      - bun install
+
+  build:
+    desc: Build the project
+    cmds:
+      - bun build packages/core/src/index.ts --outdir dist --target node
+
+  # ─── Testing ──────────────────────────────────────────────────────────
+
+  test:
+    desc: Run all tests
+    cmds:
+      - bun test
+
+  test:watch:
+    desc: Run tests in watch mode
+    cmds:
+      - bun test --watch
+
+  lint:
+    desc: Type check (tsc --noEmit)
+    cmds:
+      - bun run lint
+
+  check:
+    desc: Run all checks (lint + test + build)
+    cmds:
+      - task: lint
+      - task: test
+      - task: build
+
+  # ─── Yak Management ──────────────────────────────────────────────────
+
+  slaughter:
+    desc: "🪓 Full cleanup — remove ALL yak data (fresh start)"
+    prompt: "This will delete .yak/, ~/.yak-farm/, and ~/.yakrc. Continue?"
+    cmds:
+      - rm -rf {{.YAK_DIR}}
+      - rm -rf {{.FARM_DIR}}
+      - rm -f {{.BOOTSTRAP}}
+      - echo "🪓 Yak slaughtered. Run 'bun run yak' for a fresh start."
+
+  slaughter:local:
+    desc: "🪓 Remove only this repo's .yak/ directory"
+    cmds:
+      - rm -rf {{.YAK_DIR}}
+      - echo "🪓 Local yak data removed. Profile and rules gone."
+
+  slaughter:farm:
+    desc: "🪓 Remove the yak-farm (central storage)"
+    cmds:
+      - rm -rf {{.FARM_DIR}}
+      - echo "🪓 Yak-farm cleared."
+
+  slaughter:config:
+    desc: "🪓 Remove only bootstrap config (~/.yakrc) — forces re-onboarding"
+    cmds:
+      - rm -f {{.BOOTSTRAP}}
+      - echo "🪓 Bootstrap config removed. Next 'yak' run will re-onboard."
+
+  reset:
+    desc: "🔄 Full reset — slaughter + reinstall deps"
+    cmds:
+      - task: slaughter
+      - rm -rf node_modules
+      - bun install
+      - echo "🔄 Fresh as a newborn yak."
+
+  # ─── Info ─────────────────────────────────────────────────────────────
+
+  info:
+    desc: Show current yak state (config locations, profile status)
+    cmds:
+      - |
+        echo "🦬 Yak Info"
+        echo ""
+        echo "Bootstrap (~/.yakrc):"
+        if [ -f {{.BOOTSTRAP}} ]; then cat {{.BOOTSTRAP}}; else echo "  Not found (first run)"; fi
+        echo ""
+        echo "Local .yak/:"
+        if [ -d {{.YAK_DIR}} ]; then ls -la {{.YAK_DIR}}/; else echo "  Not found"; fi
+        echo ""
+        echo "Yak-farm:"
+        if [ -d {{.FARM_DIR}} ]; then ls -la {{.FARM_DIR}}/; else echo "  Not found"; fi
+        echo ""
+        echo "Profile:"
+        if [ -f {{.YAK_DIR}}/profile.md ]; then head -20 {{.YAK_DIR}}/profile.md; else echo "  Not found"; fi

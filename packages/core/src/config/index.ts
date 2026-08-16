@@ -8,7 +8,10 @@ export {
   saveBootstrap,
   getDefaultConfig,
   loadProfile,
+  resolveYakDir,
+  getDefaultFarmPath,
 } from "./loader.js";
+export type { BootstrapConfig } from "./loader.js";
 
 export {
   validateConfig,

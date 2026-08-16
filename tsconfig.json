@@ -15,6 +15,7 @@
     "rootDir": ".",
     "jsx": "react-jsx",
     "jsxImportSource": "react",
+    "types": ["bun-types"],
     "paths": {
       "@yak/core": ["./packages/core/src/index.ts"],
       "@yak/core/*": ["./packages/core/src/*"]
