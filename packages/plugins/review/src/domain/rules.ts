@@ -105,18 +105,13 @@ export function createRulesEngine(store: OKFStore) {
       .replace(/[^a-z0-9]+/g, "-")
       .slice(0, 40);
 
-    await store.write(
-      `rules/${id}-${slug}.md`,
-      {
-        type: "yak/rule",
-        ...rule,
-        // Strip undefined for YAML
-        ...(rule.pattern === undefined ? {} : { pattern: rule.pattern }),
-        ...(rule.filePattern === undefined ? {} : { filePattern: rule.filePattern }),
-        ...(rule.createdFrom === undefined ? {} : { createdFrom: rule.createdFrom }),
-      },
-      generateRuleBody(rule)
-    );
+    // Strip undefined values (YAML serializer chokes on them)
+    const data = JSON.parse(JSON.stringify({
+      type: "yak/rule",
+      ...rule,
+    }));
+
+    await store.write(`rules/${id}-${slug}.md`, data, generateRuleBody(rule));
 
     return rule;
   }
