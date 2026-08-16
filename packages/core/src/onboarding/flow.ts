@@ -48,43 +48,18 @@ export async function runOnboarding(): Promise<{
 
   const answers: Record<string, string> = {};
 
-  try {
-    for (const q of ONBOARDING_QUESTIONS) {
-      const answer = await askQuestion(rl, q);
-      if (answer !== null) {
-        answers[q.id] = answer;
-      }
-    }
-
-    // Auto-detect tech stack
-    const detectedStack = detectTechStack(repoRoot);
-    if (detectedStack.length > 0) {
-      console.log(
-        `\n  ${chalk.green("✓")} Detected tech stack: ${chalk.cyan(detectedStack.join(", "))}`
-      );
-    }
-
-    // Build bootstrap config
+  // Helper: save whatever we have so far (partial or complete)
+  const saveProgress = async () => {
     const bootstrap: BootstrapConfig = {
       storageMode: (answers.storageMode as "farm" | "repo") ?? "repo",
     };
-
-    if (bootstrap.storageMode === "farm") {
-      console.log(
-        chalk.gray(
-          `\n  Yak-farm location: ${chalk.cyan(getDefaultFarmPath())}`
-        )
-      );
-    }
-
-    // Save bootstrap
     saveBootstrap(bootstrap);
 
-    // Resolve yak dir and create structure
     const yakDir = resolveYakDir(bootstrap, repoRoot);
     ensureYakDirs(yakDir);
 
-    // Build profile
+    const detectedStack = detectTechStack(repoRoot);
+
     const profile: ProjectProfile = {
       project: projectName,
       goal: answers.goal ?? "production",
@@ -105,16 +80,42 @@ export async function runOnboarding(): Promise<{
       createdAt: new Date().toISOString(),
     };
 
-    // Save profile as OKF
     const store = createOKFStore(yakDir);
     await store.write(
       "profile.md",
-      {
-        type: "yak/profile",
-        ...profile,
-      },
+      { type: "yak/profile", ...profile },
       generateProfileBody(profile)
     );
+
+    return { profile, bootstrap, yakDir, detectedStack };
+  };
+
+  try {
+    for (const q of ONBOARDING_QUESTIONS) {
+      const answer = await askQuestion(rl, q);
+      if (answer !== null) {
+        answers[q.id] = answer;
+      }
+      // Save after every answer (partial config survives Ctrl+C / crash)
+      await saveProgress();
+    }
+
+    // Final save and summary
+    const { profile, bootstrap, yakDir, detectedStack } = await saveProgress();
+
+    if (detectedStack.length > 0) {
+      console.log(
+        `\n  ${chalk.green("✓")} Detected tech stack: ${chalk.cyan(detectedStack.join(", "))}`
+      );
+    }
+
+    if (bootstrap.storageMode === "farm") {
+      console.log(
+        chalk.gray(
+          `  Yak-farm location: ${chalk.cyan(getDefaultFarmPath())}`
+        )
+      );
+    }
 
     console.log(
       `\n  ${chalk.green("✓")} Profile saved to ${chalk.cyan(yakDir + "/profile.md")}`
