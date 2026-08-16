@@ -66,7 +66,7 @@ async function main() {
 
     // Profile complete — launch TUI
     const { launchTUI } = await import("./tui/render.js");
-    const { QueuePage } = await import("../../plugins/review/src/pages/QueuePage.js");
+    const { ReviewTab } = await import("../../plugins/review/src/pages/ReviewTab.js");
     const path = await import("path");
 
     const repoName = path.default.basename(ctx.repoRoot);
@@ -78,7 +78,7 @@ async function main() {
           name: "review",
           label: "Review",
           enabled: ctx.config.plugins.review?.enabled !== false,
-          component: QueuePage,
+          component: ReviewTab,
         },
         {
           name: "specify",
@@ -107,7 +107,7 @@ async function main() {
     .description("Open the interactive TUI (same as bare `yak`)")
     .action(async (plugin?: string) => {
       const { launchTUI } = await import("./tui/render.js");
-      const { QueuePage } = await import("../../plugins/review/src/pages/QueuePage.js");
+      const { ReviewTab } = await import("../../plugins/review/src/pages/ReviewTab.js");
       const path = await import("path");
 
       await launchTUI({
@@ -116,7 +116,7 @@ async function main() {
             name: "review",
             label: "Review",
             enabled: ctx.config.plugins.review?.enabled !== false,
-            component: QueuePage,
+            component: ReviewTab,
           },
           {
             name: "specify",
