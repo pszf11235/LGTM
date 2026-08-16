@@ -233,8 +233,11 @@ function selectWithArrows(
   return new Promise((resolve) => {
     let selectedIdx = defaultIdx;
 
-    // Number of lines the options + help text occupy
-    const optionLines = options.length + 1; // options + help line
+    // Number of lines the options + help text occupy.
+    // Each option = 1 line, help text = 1 line.
+    // drawOptions writes each with explicit \n, so after drawing
+    // the cursor sits on the line AFTER the last \n.
+    const totalDrawnLines = options.length + 1;
 
     const drawOptions = () => {
       options.forEach((opt, i) => {
@@ -246,13 +249,13 @@ function selectWithArrows(
         process.stdout.write(`  ${marker} ${label}${desc}${current}\n`);
       });
       process.stdout.write(
-        chalk.gray("  [↑/↓] navigate  [enter] select  [s] skip\n")
+        chalk.gray("  [↑/↓] navigate  [enter] select  [s] skip")
       );
     };
 
     const redraw = () => {
-      // Move cursor up to beginning of options area and clear
-      process.stdout.write(`\x1b[${optionLines}A`);
+      // Move cursor to start of line, then up to first option line, clear to end of screen
+      process.stdout.write(`\r\x1b[${totalDrawnLines - 1}A`);
       process.stdout.write(`\x1b[0J`);
       drawOptions();
     };
@@ -286,7 +289,7 @@ function selectWithArrows(
       if (key === "\r" || key === "\n") {
         cleanup();
         // Clear the options area and print confirmation
-        process.stdout.write(`\x1b[${optionLines}A`);
+        process.stdout.write(`\r\x1b[${totalDrawnLines - 1}A`);
         process.stdout.write(`\x1b[0J`);
         console.log(`  ${chalk.green("✓")} ${options[selectedIdx].label}\n`);
         resolve(options[selectedIdx].value);
@@ -296,7 +299,7 @@ function selectWithArrows(
       // Skip
       if (key === "s" || key === "S") {
         cleanup();
-        process.stdout.write(`\x1b[${optionLines}A`);
+        process.stdout.write(`\r\x1b[${totalDrawnLines - 1}A`);
         process.stdout.write(`\x1b[0J`);
         if (currentValue) {
           const currentLabel = options.find((o) => o.value === currentValue)?.label ?? currentValue;
