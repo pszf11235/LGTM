@@ -45,23 +45,28 @@ async function main() {
 
   // ─── Core Commands ─────────────────────────────────────────────────────
 
-  // `yak` (bare) → if first run, launch onboarding. Otherwise TUI (placeholder).
+  // `yak` (bare) → if first run or incomplete profile, launch onboarding. Otherwise TUI.
   program.action(async () => {
     if (process.argv.length <= 2) {
-      // Check if profile exists — if not, this is first run
-      const hasProfile = await ctx.store.exists("profile.md");
-      if (!hasProfile) {
-        console.log(
-          chalk.gray(
-            "\n  No yak profile found — starting first-time setup...\n"
-          )
-        );
+      // Check if profile exists AND is complete
+      const { isOnboardingComplete } = await import("./onboarding/flow.js");
+      if (!isOnboardingComplete(ctx.yakDir)) {
+        const hasProfile = await ctx.store.exists("profile.md");
+        if (hasProfile) {
+          console.log(
+            chalk.gray("\n  Yak profile is incomplete — resuming setup...\n")
+          );
+        } else {
+          console.log(
+            chalk.gray("\n  No yak profile found — starting first-time setup...\n")
+          );
+        }
         const { runOnboarding } = await import("./onboarding/flow.js");
         await runOnboarding();
         return;
       }
 
-      // Profile exists — show TUI placeholder (will become real TUI in Task 8)
+      // Profile complete — show TUI placeholder (will become real TUI in Task 8)
       console.log(
         `\n${chalk.bold("🦬 Yak")} — TUI launching soon!\n`
       );
@@ -131,10 +136,10 @@ async function main() {
       console.log(chalk.yellow(`○ Plugin '${name}' disabled`));
     });
 
-  // `yak init` → onboarding
+  // `yak init` → run or resume onboarding
   program
     .command("init")
-    .description("Initialize Yak in this project (runs onboarding)")
+    .description("Initialize Yak in this project (runs or resumes onboarding)")
     .option("--skip-onboarding", "Skip interactive questions, use defaults")
     .action(async (opts: { skipOnboarding?: boolean }) => {
       if (opts.skipOnboarding) {
@@ -143,7 +148,6 @@ async function main() {
         return;
       }
 
-      // Dynamic import to avoid loading readline on every CLI invocation
       const { runOnboarding } = await import("./onboarding/flow.js");
       await runOnboarding();
     });
