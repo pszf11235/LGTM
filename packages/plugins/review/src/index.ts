@@ -12,6 +12,7 @@ import { registerStatusCommand } from "./commands/status.js";
 import { registerApproveCommand } from "./commands/approve.js";
 import { registerFlagCommand } from "./commands/flag.js";
 import { registerRuleCommand } from "./commands/rule.js";
+import { registerScanCommand } from "./commands/scan.js";
 
 /**
  * Review plugin — implements the YakPlugin interface.
@@ -28,15 +29,9 @@ export const plugin: YakPlugin = {
     registerApproveCommand(program, ctx);
     registerFlagCommand(program, ctx);
     registerRuleCommand(program, ctx);
+    registerScanCommand(program, ctx);
 
     // Placeholder commands (future tasks)
-    program
-      .command("scan")
-      .description("Run all rules against the entire repo")
-      .action(() => {
-        ctx.logger.info("Repo-wide scan coming in Task 13!");
-      });
-
     program
       .command("history")
       .description("Search past review sessions")
