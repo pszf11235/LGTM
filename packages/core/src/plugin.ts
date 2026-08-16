@@ -1,0 +1,181 @@
+/**
+ * Plugin interface and context types.
+ *
+ * Every Yak plugin implements YakPlugin. The core discovers plugins,
+ * calls registerCommands() to wire CLI, and provides YakContext for
+ * access to shared services (LLM, store, config).
+ */
+
+import type { Command } from "commander";
+
+/**
+ * The contract every Yak plugin must implement.
+ */
+export interface YakPlugin {
+  /** Unique plugin name (used as CLI namespace: `yak <name> <command>`) */
+  name: string;
+
+  /** Human-readable description (shown in `yak plugins`) */
+  description: string;
+
+  /** Plugin version (semver) */
+  version: string;
+
+  /**
+   * Register CLI commands under this plugin's namespace.
+   * Called by the core during bootstrap.
+   *
+   * @param program - The Commander subcommand for this plugin (already namespaced)
+   * @param ctx - Access to core services (store, config, llm, etc.)
+   */
+  registerCommands(program: Command, ctx: YakContext): void;
+
+  /**
+   * TUI pages this plugin provides (optional).
+   * Each page becomes a tab in the TUI shell.
+   */
+  pages?: TUIPage[];
+
+  /**
+   * Plugin-specific onboarding questions (optional).
+   * Pre-filled from global profile, always skippable.
+   * Asked on first use of the plugin.
+   */
+  onboarding?: OnboardingStep[];
+
+  /**
+   * Called once when plugin is first enabled or on `yak init`.
+   * Use for plugin-specific setup (creating directories, etc.)
+   */
+  initialize?(ctx: YakContext): Promise<void>;
+}
+
+/**
+ * Context object passed to plugins — provides access to core services.
+ * Plugins should NOT import core internals directly; use this context.
+ */
+export interface YakContext {
+  /** Resolved project profile (from onboarding) — may be null if not yet initialized */
+  profile: ProjectProfile | null;
+
+  /** OKF store for reading/writing markdown files */
+  store: OKFStore;
+
+  /** LLM provider — null if AI is disabled */
+  llm: LLMProvider | null;
+
+  /** Resolved configuration */
+  config: YakConfig;
+
+  /** Logger */
+  logger: Logger;
+
+  /** Root directory of the .yak data store */
+  yakDir: string;
+
+  /** Git root directory of the current repo */
+  repoRoot: string;
+}
+
+/**
+ * A page that a plugin contributes to the TUI.
+ * Each page becomes a tab in the shell.
+ */
+export interface TUIPage {
+  /** Tab label shown in the TUI header */
+  label: string;
+
+  /** Short key to jump to this tab (e.g., "r" for review) */
+  shortcut?: string;
+
+  /**
+   * React component to render for this page.
+   * Receives the YakContext as props.
+   */
+  component: React.ComponentType<{ ctx: YakContext }>;
+}
+
+/**
+ * A single onboarding question.
+ */
+export interface OnboardingStep {
+  /** Unique ID for this question */
+  id: string;
+
+  /** Question text shown to the user */
+  question: string;
+
+  /** Input type */
+  type: "select" | "multiselect" | "text" | "confirm";
+
+  /** Options for select/multiselect types */
+  options?: string[];
+
+  /** Default value (can reference profile values) */
+  default?: string;
+
+  /** Skip this question if condition is met */
+  skipIf?: (profile: ProjectProfile | null) => boolean;
+}
+
+// ─── Shared Types (will be fleshed out in Task 3) ────────────────────────
+
+/** Project profile created during onboarding */
+export interface ProjectProfile {
+  project: string;
+  goal: "vibed" | "production" | "enterprise" | "learning" | string;
+  qualityReferences: string[];
+  feedbackStyle: "direct" | "gentle" | "socratic" | "minimal";
+  techStack: string[];
+  teamSize: "solo" | "small" | "large";
+  ai: {
+    enabled: boolean;
+    provider?: "openai" | "anthropic" | "ollama";
+    model?: string;
+    baseUrl?: string;
+  };
+  createdAt: string;
+}
+
+/** Yak configuration (resolved from all layers) */
+export interface YakConfig {
+  /** Where .yak/ data lives: "central" (~/.yak/) or "repo" (.yak/ in repo root) */
+  storageMode: "central" | "repo";
+
+  /** Enabled plugins */
+  plugins: Record<string, { enabled: boolean }>;
+
+  /** AI config */
+  ai: {
+    enabled: boolean;
+    provider?: "openai" | "anthropic" | "ollama";
+    model?: string;
+    baseUrl?: string;
+    apiKey?: string;
+  };
+}
+
+/** OKF Store interface (implemented in Task 3) */
+export interface OKFStore {
+  read(path: string): Promise<{ data: Record<string, unknown>; content: string } | null>;
+  write(path: string, data: Record<string, unknown>, content: string): Promise<void>;
+  exists(path: string): Promise<boolean>;
+  list(dir: string): Promise<string[]>;
+}
+
+/** LLM Provider interface (implemented in Task 12) */
+export interface LLMProvider {
+  /** Generate a completion */
+  complete(prompt: string, options?: { maxTokens?: number; temperature?: number }): Promise<string>;
+
+  /** Check if the provider is available */
+  isAvailable(): Promise<boolean>;
+}
+
+/** Simple logger interface */
+export interface Logger {
+  info(msg: string): void;
+  warn(msg: string): void;
+  error(msg: string): void;
+  debug(msg: string): void;
+}
