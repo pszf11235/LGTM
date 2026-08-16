@@ -112,3 +112,17 @@ tasks:
         echo ""
         echo "Profile:"
         if [ -f {{.YAK_DIR}}/profile.md ]; then head -20 {{.YAK_DIR}}/profile.md; else echo "  Not found"; fi
+
+
+  # ─── Debugging ────────────────────────────────────────────────────────
+
+  debug:
+    desc: Run yak with debug logging (writes to /tmp/yak-debug.log)
+    cmds:
+      - rm -f /tmp/yak-debug.log
+      - YAK_DEBUG=1 bun run packages/core/src/index.ts {{.CLI_ARGS}}
+
+  debug:log:
+    desc: Tail the debug log
+    cmds:
+      - tail -f /tmp/yak-debug.log

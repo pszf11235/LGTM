@@ -66,17 +66,19 @@ export function QueuePage({ onStatusHint, onOpenReview }: QueuePageProps) {
     setLoading(false);
   }
 
-  useInput((input: string, key: { downArrow?: boolean; upArrow?: boolean; return?: boolean }) => {
-    if (prs.length === 0) return;
-
+  useInput((input, key) => {
     if (key.downArrow || input === "j") {
-      setSelectedIdx((prev) => Math.min(prev + 1, prs.length - 1));
+      if (prs.length > 0) setSelectedIdx((prev) => Math.min(prev + 1, prs.length - 1));
     }
     if (key.upArrow || input === "k") {
-      setSelectedIdx((prev) => Math.max(prev - 1, 0));
+      if (prs.length > 0) setSelectedIdx((prev) => Math.max(prev - 1, 0));
+    }
+    // q: quit the TUI from queue page
+    if (input === "q") {
+      process.exit(0);
     }
     // Enter: open review for selected PR
-    if (key.return && onOpenReview) {
+    if (key.return && onOpenReview && prs.length > 0) {
       const selected = prs[selectedIdx];
       if (selected) {
         // Load diff for this PR (in demo mode, create a sample diff)
