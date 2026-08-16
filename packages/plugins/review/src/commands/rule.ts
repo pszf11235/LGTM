@@ -204,4 +204,39 @@ export function registerRuleCommand(program: Command, ctx: YakContext) {
       }
       console.log();
     });
+
+  rule
+    .command("suggest")
+    .description("Analyze your review comments for patterns and suggest rules")
+    .action(async () => {
+      const { analyzeCommentPatterns } = await import("../domain/patterns.js");
+
+      console.log(chalk.bold("\n🦬 Analyzing review comments for patterns...\n"));
+
+      const suggestions = await analyzeCommentPatterns(ctx.store, ctx.llm);
+
+      if (suggestions.length === 0) {
+        console.log(chalk.gray("  No patterns found yet. Keep reviewing — suggestions appear after 3+ similar comments across PRs.\n"));
+        return;
+      }
+
+      console.log(chalk.bold(`  Found ${suggestions.length} pattern(s):\n`));
+
+      for (const s of suggestions) {
+        const confIcon = s.confidence === "high" ? chalk.green("●") : s.confidence === "medium" ? chalk.yellow("●") : chalk.gray("●");
+        console.log(`  ${confIcon} ${chalk.bold(s.description)}`);
+        console.log(chalk.gray(`    Category: ${s.category} | Severity: ${s.severity} | Confidence: ${s.confidence}`));
+        if (s.sourceComments.length > 0) {
+          console.log(chalk.gray(`    Based on:`));
+          for (const c of s.sourceComments.slice(0, 3)) {
+            console.log(chalk.gray(`      • ${c}`));
+          }
+        }
+        console.log();
+      }
+
+      console.log(chalk.gray(`  Create a rule from a suggestion with:`));
+      console.log(chalk.cyan(`    yak review rule add "<description>" [--pattern "..."]`));
+      console.log();
+    });
 }
