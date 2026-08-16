@@ -64,6 +64,7 @@ export async function runOnboarding(): Promise<{
     if (existingProfile.teamSize) answers.teamSize = existingProfile.teamSize;
     if (existingProfile.ai?.provider) answers.aiProvider = existingProfile.ai.provider;
     else if (existingProfile.ai?.enabled === false) answers.aiProvider = "none";
+    if (existingProfile.ai?.model) answers.aiModel = existingProfile.ai.model;
   }
 
   // Figure out which questions still need answers
@@ -125,6 +126,7 @@ export async function runOnboarding(): Promise<{
       ai: {
         enabled: aiEnabled,
         ...(aiEnabled && answers.aiProvider ? { provider: answers.aiProvider as "openai" | "anthropic" | "ollama" } : {}),
+        ...(aiEnabled && answers.aiModel ? { model: answers.aiModel } : {}),
       },
       createdAt: existingProfile?.createdAt ?? new Date().toISOString(),
     };
@@ -143,7 +145,7 @@ export async function runOnboarding(): Promise<{
     for (const q of questionsToAsk) {
       // Show current value if re-running (editing mode)
       const currentValue = answers[q.id];
-      const answer = await askQuestion(rl, q, currentValue);
+      const answer = await askQuestion(rl, q, currentValue, answers);
       if (answer !== null) {
         answers[q.id] = answer;
       }
@@ -190,7 +192,8 @@ export async function runOnboarding(): Promise<{
 async function askQuestion(
   rl: readline.Interface,
   q: OnboardingQuestion,
-  currentValue?: string
+  currentValue?: string,
+  answers?: Record<string, string>
 ): Promise<string | null> {
   if (q.type === "select" && q.options) {
     // If editing, pre-select the current value
@@ -209,7 +212,20 @@ async function askQuestion(
   }
 
   if (q.type === "text") {
-    const hint = currentValue ? chalk.gray(` (current: ${currentValue})`) : "";
+    // Skip model question if AI is disabled
+    if (q.id === "aiModel" && (!answers?.aiProvider || answers.aiProvider === "none")) {
+      return null;
+    }
+
+    // Show model suggestions based on provider
+    let hint = currentValue ? chalk.gray(` (current: ${currentValue})`) : "";
+    if (q.id === "aiModel" && !currentValue) {
+      const suggestions = getModelSuggestions(answers?.aiProvider);
+      if (suggestions) {
+        hint = chalk.gray(`\n  Suggestions: ${suggestions}`);
+      }
+    }
+
     const answer = await prompt(rl, `  ${chalk.bold(q.question)}${hint}\n  > `);
     if (answer.toLowerCase() === "s" || answer === "") {
       return currentValue ?? null;
@@ -340,6 +356,22 @@ function prompt(rl: readline.Interface, question: string): Promise<string> {
       resolve(answer.trim());
     });
   });
+}
+
+/**
+ * Get model suggestions based on provider.
+ */
+function getModelSuggestions(provider?: string): string | null {
+  switch (provider) {
+    case "openai":
+      return "gpt-4o-mini (fast/cheap), gpt-4o (thorough), o3-mini (reasoning)";
+    case "anthropic":
+      return "claude-sonnet-4-20250514 (balanced), claude-opus-4-20250514 (deep)";
+    case "ollama":
+      return "llama3.2 (general), codellama (code), qwen2.5-coder (code)";
+    default:
+      return null;
+  }
 }
 
 /**

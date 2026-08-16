@@ -132,4 +132,10 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
     ],
     default: "none",
   },
+  {
+    id: "aiModel",
+    question: "Which model? (or skip for default)",
+    type: "text",
+    default: "",
+  },
 ];
