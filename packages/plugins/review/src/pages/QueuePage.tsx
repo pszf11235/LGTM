@@ -64,7 +64,7 @@ export function QueuePage({ onStatusHint }: QueuePageProps) {
     setLoading(false);
   }
 
-  useInput((input, key) => {
+  useInput((input: string, key: { downArrow?: boolean; upArrow?: boolean; return?: boolean }) => {
     if (prs.length === 0) return;
 
     if (key.downArrow || input === "j") {
