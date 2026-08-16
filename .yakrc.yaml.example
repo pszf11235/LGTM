@@ -1,0 +1,22 @@
+# Yak Configuration (per-repo override)
+# Place this file as .yakrc.yaml in your repo root.
+# Values here override the global config from .yak/
+
+# Plugins
+plugins:
+  review:
+    enabled: true
+  specify:
+    enabled: false
+  learn:
+    enabled: false
+
+# AI settings (optional — also configurable via env vars)
+ai:
+  enabled: false
+  # provider: openai      # openai | anthropic | ollama
+  # model: gpt-4o-mini    # model name
+  # baseUrl: http://localhost:11434  # for ollama
+
+# Storage mode is set globally via ~/.yakrc (chosen during `yak init`)
+# It cannot be overridden per-repo.
