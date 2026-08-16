@@ -130,7 +130,7 @@ async function main() {
       }
 
       // Dynamic import to avoid loading readline on every CLI invocation
-      const { runOnboarding } = await import("../onboarding/flow.js");
+      const { runOnboarding } = await import("./onboarding/flow.js");
       await runOnboarding();
     });
 
