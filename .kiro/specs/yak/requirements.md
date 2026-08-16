@@ -37,12 +37,15 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 
 ### US-0.3: Config System
 **As a** user with preferences,
-**I want** a layered config system,
-**So that** I can set defaults globally and override per-repo or per-command.
+**I want** a layered config system with configurable storage location,
+**So that** I can choose between central config or per-repo config and override as needed.
 
 **Acceptance Criteria:**
-- [ ] Override chain: profile.md → plugin config → .yakrc.yaml (repo) → CLI flags
-- [ ] `yak config` shows current resolved config
+- [ ] On first start, user chooses config location: central (`~/.yak/`) or per-repo (`.yak/`)
+- [ ] Choice stored in a bootstrap file (`~/.yakrc` or env var)
+- [ ] Per-project overrides always possible via `.yakrc.yaml` in repo root
+- [ ] Override chain: defaults → central/repo config → plugin config → .yakrc.yaml (repo) → CLI flags
+- [ ] `yak config` shows current resolved config + config location
 - [ ] `yak config set <key> <value>` updates config
 - [ ] Plugins can define their own config keys (namespaced)
 
@@ -120,7 +123,10 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 
 ### US-2.1: TUI Review Interface
 **Acceptance Criteria:**
-- [ ] `yak review tui` opens full-screen TUI
+- [ ] `yak` (bare command) opens full-screen TUI with tabs for each enabled plugin
+- [ ] `yak tui review` opens TUI directly on the review tab
+- [ ] TUI has tab navigation: Review | Specify | Learn (disabled tabs greyed out)
+- [ ] All CLI commands are also executable within the TUI (command palette or hotkeys)
 - [ ] Queue page: list PRs, select to review
 - [ ] Review page: summary → diff → comments (vertical scroll)
 - [ ] Status bar with keybindings
@@ -213,10 +219,13 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 
 ### US-5.1: GitHub Mode
 **Acceptance Criteria:**
-- [ ] Fetch PR metadata + diff from GitHub API
+- [ ] Git and GitHub integration is native — no LLM needed to fetch repos/PRs
+- [ ] Given a repo URL and PR number, tool can init repo and pull PR diff without AI
+- [ ] Fetch PR metadata + diff from GitHub API (Octokit REST)
 - [ ] Post reviews (APPROVE / REQUEST_CHANGES)
 - [ ] Post inline comments at correct file/line
 - [ ] Auth via GITHUB_TOKEN env or `gh auth`
+- [ ] Works with `simple-git` for local operations (clone, fetch, diff)
 
 ### US-5.2: Cross-PR Overlap Detection
 **Acceptance Criteria:**

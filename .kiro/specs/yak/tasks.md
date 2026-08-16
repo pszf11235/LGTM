@@ -145,14 +145,18 @@ Interactive first-time setup.
 ### Task 8: TUI Shell & Queue Page 🏆
 **Branch:** `feat/task-08-tui-shell`
 
-- [ ] `packages/core/src/tui/Shell.tsx` — header + page area + status bar
+- [ ] `packages/core/src/tui/Shell.tsx` — header with plugin tabs + page area + status bar
+- [ ] Tab bar: enabled plugins as tabs, switch with Tab/number keys
 - [ ] `packages/core/src/tui/theme.ts` — OpenCode colors
 - [ ] `packages/plugins/review/src/pages/QueuePage.tsx`:
   - PR list with states, groups
   - Arrow keys to select, Enter to review
   - Feature group badges
-- [ ] `yak review tui` launches TUI in queue mode
-- [ ] Verify: TUI opens, shows queue, exits cleanly
+- [ ] `yak` (bare command) launches TUI on first enabled tab
+- [ ] `yak tui review` opens directly on review tab
+- [ ] Command palette (`:` key) — execute CLI commands within TUI
+- [ ] All CLI commands accessible via TUI (feature parity)
+- [ ] Verify: TUI opens with tabs, shows queue, exits cleanly
 
 ---
 

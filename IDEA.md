@@ -100,10 +100,17 @@ yak plugins                        # list plugins + status
 yak plugins enable specify         # enable a plugin
 yak plugins disable learn          # disable
 
-# Review plugin (first shipping plugin)
+# TUI (primary interface — just run `yak`)
+yak                                # opens TUI with tabs for each plugin
+yak tui                            # same as above (explicit)
+yak tui review                     # opens TUI directly on review tab
+
+# All CLI commands are also executable within the TUI
+# CLI is for scripting/quick actions, TUI is the interactive experience
+
+# Review plugin (native git/gh — no LLM needed to fetch PRs)
 yak review add 101 102 103         # queue PRs
 yak review status                  # show queue with feature groups
-yak review tui                     # open TUI for review session
 yak review approve 101             # mark approved
 yak review flag 103 --reason "..." # flag with reason
 yak review rule add "..."          # create review rule

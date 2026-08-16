@@ -7,7 +7,7 @@ Yak is a monorepo with a thin core and domain-specific plugins.
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                         CLI Entry                             │
-│                    (yak <plugin> <command>)                   │
+│              yak → TUI | yak <plugin> <cmd> → CLI            │
 └──────────────────────────┬──────────────────────────────────┘
                            │
 ┌──────────────────────────┴──────────────────────────────────┐
@@ -136,11 +136,18 @@ Each plugin can define additional questions. They:
 
 ```
 1. Built-in defaults (hardcoded)
-2. Global profile (.yak/profile.md)
-3. Plugin config (.yak/plugins/<name>/config.md)
-4. Repo config (.yakrc.yaml in repo root)
-5. CLI flags (highest priority)
+2. Central or repo config (chosen on first start: ~/.yak/ or .yak/)
+3. Global profile (profile.md in chosen config location)
+4. Plugin config (.yak/plugins/<name>/config.md)
+5. Repo override (.yakrc.yaml in repo root — always checked)
+6. CLI flags (highest priority)
 ```
+
+On first `yak init`, user chooses config location:
+- **Central** (`~/.yak/`) — shared across all repos, good for solo devs
+- **Per-repo** (`.yak/` in repo root) — committed to git, good for teams
+
+Choice stored in `~/.yakrc` bootstrap file. Per-repo `.yakrc.yaml` always overrides regardless of mode.
 
 ---
 
@@ -271,19 +278,23 @@ Key principle: **every file in `.yak/` is browsable as markdown** — in GitHub,
 
 OpenCode-style: full-screen, vertical scroll, minimal chrome, keyboard-driven.
 
-Core provides the shell (header, status bar, page routing). Plugins provide pages that render inside the shell.
+**Entry point:** Just run `yak` — opens the TUI. `yak tui review` jumps directly to a tab.
+
+Core provides the shell (header with plugin tabs, status bar, page routing). Plugins provide pages rendered inside their tab.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  🦬 yak review                                    my-project │  ← Header (core)
+│  🦬 yak                          [ Review | Specify | Learn ]│  ← Header + tabs
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│           (Plugin page content renders here)                 │  ← Plugin page
+│           (Active plugin tab content renders here)           │  ← Plugin page
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
-│  [keys] context-sensitive help                        1/5    │  ← StatusBar (core)
+│  [keys] context-sensitive help                    : command  │  ← StatusBar + command palette
 └─────────────────────────────────────────────────────────────┘
 ```
+
+All CLI commands are also executable within the TUI via a command palette (`:` to open, type command). This ensures feature parity between CLI and TUI.
 
 ---
 
