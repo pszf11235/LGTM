@@ -170,7 +170,7 @@ export interface OKFStore {
 /** LLM Provider interface (implemented in Task 12) */
 export interface LLMProvider {
   /** Generate a completion */
-  complete(prompt: string, options?: { maxTokens?: number; temperature?: number }): Promise<string>;
+  complete(prompt: string, options?: { maxTokens?: number; temperature?: number; systemPrompt?: string }): Promise<string>;
 
   /** Check if the provider is available */
   isAvailable(): Promise<boolean>;
