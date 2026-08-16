@@ -43,41 +43,41 @@ async function main() {
     }
   }
 
-  // ─── Core Commands ─────────────────────────────────────────────────────
-
-  // `yak` (bare) → if first run or incomplete profile, launch onboarding. Otherwise TUI.
-  program.action(async () => {
-    if (process.argv.length <= 2) {
-      // Check if profile exists AND is complete
-      const { isOnboardingComplete } = await import("./onboarding/flow.js");
-      if (!isOnboardingComplete(ctx.yakDir)) {
-        const hasProfile = await ctx.store.exists("profile.md");
-        if (hasProfile) {
-          console.log(
-            chalk.gray("\n  Yak profile is incomplete — resuming setup...\n")
-          );
-        } else {
-          console.log(
-            chalk.gray("\n  No yak profile found — starting first-time setup...\n")
-          );
-        }
-        const { runOnboarding } = await import("./onboarding/flow.js");
-        await runOnboarding();
-        return;
+  // ─── Handle bare `yak` (no args) BEFORE parsing ────────────────────────
+  // Commander doesn't reliably call program.action() when subcommands exist.
+  // So we intercept bare invocations here.
+  if (process.argv.length <= 2) {
+    const { isOnboardingComplete } = await import("./onboarding/flow.js");
+    if (!isOnboardingComplete(ctx.yakDir)) {
+      const hasProfile = await ctx.store.exists("profile.md");
+      if (hasProfile) {
+        console.log(
+          chalk.gray("\n  Yak profile is incomplete — resuming setup...\n")
+        );
+      } else {
+        console.log(
+          chalk.gray("\n  No yak profile found — starting first-time setup...\n")
+        );
       }
-
-      // Profile complete — show TUI placeholder (will become real TUI in Task 8)
-      console.log(
-        `\n${chalk.bold("🦬 Yak")} — TUI launching soon!\n`
-      );
-      console.log(
-        chalk.gray(
-          `  In a future version, bare ${chalk.cyan("yak")} opens the interactive TUI.\n` +
-            `  For now, use ${chalk.cyan("yak --help")} to see available commands.\n`
-        )
-      );
+      const { runOnboarding } = await import("./onboarding/flow.js");
+      await runOnboarding();
+      return;
     }
-  });
+
+    // Profile complete — show TUI placeholder (will become real TUI in Task 8)
+    console.log(
+      `\n${chalk.bold("🦬 Yak")} — TUI launching soon!\n`
+    );
+    console.log(
+      chalk.gray(
+        `  In a future version, bare ${chalk.cyan("yak")} opens the interactive TUI.\n` +
+          `  For now, use ${chalk.cyan("yak --help")} to see available commands.\n`
+      )
+    );
+    return;
+  }
+
+  // ─── Core Commands ─────────────────────────────────────────────────────
 
   // `yak tui [plugin]` → opens TUI on specific tab
   program
