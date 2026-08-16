@@ -23,9 +23,11 @@ export interface TabDefinition {
 interface ShellProps {
   tabs: TabDefinition[];
   initialTab?: string;
+  repoName?: string;
+  repoPath?: string;
 }
 
-export function Shell({ tabs, initialTab }: ShellProps) {
+export function Shell({ tabs, initialTab, repoName, repoPath }: ShellProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const termWidth = stdout?.columns ?? 80;
@@ -75,11 +77,14 @@ export function Shell({ tabs, initialTab }: ShellProps) {
       <Box>
         <Text>
           {headerBar(
-            `🦬 ${theme.bold("yak")}`,
+            `🦬 ${theme.bold("yak")} ${theme.muted(repoName ?? "")}`,
             renderTabs(enabledTabs, activeTabIdx),
             termWidth
           )}
         </Text>
+      </Box>
+      <Box>
+        <Text>{theme.muted(repoPath ?? "")}</Text>
       </Box>
       <Box>
         <Text>{borderLine(termWidth)}</Text>

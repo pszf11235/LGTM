@@ -67,27 +67,35 @@ async function main() {
     // Profile complete — launch TUI
     const { launchTUI } = await import("./tui/render.js");
     const { QueuePage } = await import("../../plugins/review/src/pages/QueuePage.js");
+    const path = await import("path");
 
-    await launchTUI([
-      {
-        name: "review",
-        label: "Review",
-        enabled: ctx.config.plugins.review?.enabled !== false,
-        component: QueuePage,
-      },
-      {
-        name: "specify",
-        label: "Specify",
-        enabled: ctx.config.plugins.specify?.enabled === true,
-        component: () => null, // stub
-      },
-      {
-        name: "learn",
-        label: "Learn",
-        enabled: ctx.config.plugins.learn?.enabled === true,
-        component: () => null, // stub
-      },
-    ]);
+    const repoName = path.default.basename(ctx.repoRoot);
+    const repoPath = ctx.repoRoot;
+
+    await launchTUI({
+      tabs: [
+        {
+          name: "review",
+          label: "Review",
+          enabled: ctx.config.plugins.review?.enabled !== false,
+          component: QueuePage,
+        },
+        {
+          name: "specify",
+          label: "Specify",
+          enabled: ctx.config.plugins.specify?.enabled === true,
+          component: () => null, // stub
+        },
+        {
+          name: "learn",
+          label: "Learn",
+          enabled: ctx.config.plugins.learn?.enabled === true,
+          component: () => null, // stub
+        },
+      ],
+      repoName,
+      repoPath,
+    });
     return;
   }
 
@@ -100,9 +108,10 @@ async function main() {
     .action(async (plugin?: string) => {
       const { launchTUI } = await import("./tui/render.js");
       const { QueuePage } = await import("../../plugins/review/src/pages/QueuePage.js");
+      const path = await import("path");
 
-      await launchTUI(
-        [
+      await launchTUI({
+        tabs: [
           {
             name: "review",
             label: "Review",
@@ -122,8 +131,10 @@ async function main() {
             component: () => null,
           },
         ],
-        plugin
-      );
+        initialTab: plugin,
+        repoName: path.default.basename(ctx.repoRoot),
+        repoPath: ctx.repoRoot,
+      });
     });
 
   // `yak plugins` → list all plugins with status

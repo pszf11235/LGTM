@@ -9,18 +9,24 @@ import React from "react";
 import { render } from "ink";
 import { Shell, type TabDefinition } from "./Shell.js";
 
+interface LaunchOptions {
+  tabs: TabDefinition[];
+  initialTab?: string;
+  repoName?: string;
+  repoPath?: string;
+}
+
 /**
  * Launch the TUI with the given tabs.
- *
- * @param tabs - Plugin tabs to show
- * @param initialTab - Optional tab name to start on
  */
-export async function launchTUI(
-  tabs: TabDefinition[],
-  initialTab?: string
-): Promise<void> {
+export async function launchTUI(options: LaunchOptions): Promise<void> {
   const { waitUntilExit } = render(
-    React.createElement(Shell, { tabs, initialTab })
+    React.createElement(Shell, {
+      tabs: options.tabs,
+      initialTab: options.initialTab,
+      repoName: options.repoName,
+      repoPath: options.repoPath,
+    })
   );
   await waitUntilExit();
 }
