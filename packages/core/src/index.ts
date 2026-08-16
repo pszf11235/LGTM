@@ -64,16 +64,30 @@ async function main() {
       return;
     }
 
-    // Profile complete — show TUI placeholder (will become real TUI in Task 8)
-    console.log(
-      `\n${chalk.bold("🦬 Yak")} — TUI launching soon!\n`
-    );
-    console.log(
-      chalk.gray(
-        `  In a future version, bare ${chalk.cyan("yak")} opens the interactive TUI.\n` +
-          `  For now, use ${chalk.cyan("yak --help")} to see available commands.\n`
-      )
-    );
+    // Profile complete — launch TUI
+    const { launchTUI } = await import("./tui/render.js");
+    const { QueuePage } = await import("../../plugins/review/src/pages/QueuePage.js");
+
+    await launchTUI([
+      {
+        name: "review",
+        label: "Review",
+        enabled: ctx.config.plugins.review?.enabled !== false,
+        component: QueuePage,
+      },
+      {
+        name: "specify",
+        label: "Specify",
+        enabled: ctx.config.plugins.specify?.enabled === true,
+        component: () => null, // stub
+      },
+      {
+        name: "learn",
+        label: "Learn",
+        enabled: ctx.config.plugins.learn?.enabled === true,
+        component: () => null, // stub
+      },
+    ]);
     return;
   }
 
@@ -82,12 +96,33 @@ async function main() {
   // `yak tui [plugin]` → opens TUI on specific tab
   program
     .command("tui [plugin]")
-    .description("Open the interactive TUI (default when running bare `yak`)")
-    .action((plugin?: string) => {
-      console.log(
-        chalk.yellow(
-          `🦬 TUI coming in Task 8! (requested tab: ${plugin ?? "default"})`
-        )
+    .description("Open the interactive TUI (same as bare `yak`)")
+    .action(async (plugin?: string) => {
+      const { launchTUI } = await import("./tui/render.js");
+      const { QueuePage } = await import("../../plugins/review/src/pages/QueuePage.js");
+
+      await launchTUI(
+        [
+          {
+            name: "review",
+            label: "Review",
+            enabled: ctx.config.plugins.review?.enabled !== false,
+            component: QueuePage,
+          },
+          {
+            name: "specify",
+            label: "Specify",
+            enabled: ctx.config.plugins.specify?.enabled === true,
+            component: () => null,
+          },
+          {
+            name: "learn",
+            label: "Learn",
+            enabled: ctx.config.plugins.learn?.enabled === true,
+            component: () => null,
+          },
+        ],
+        plugin
       );
     });
 
