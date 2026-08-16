@@ -7,12 +7,13 @@
 
 import type { Command } from "commander";
 import type { YakPlugin, YakContext } from "@yak/core/plugin.js";
+import { registerAddCommand } from "./commands/add.js";
+import { registerStatusCommand } from "./commands/status.js";
+import { registerApproveCommand } from "./commands/approve.js";
+import { registerFlagCommand } from "./commands/flag.js";
 
 /**
  * Review plugin — implements the YakPlugin interface.
- *
- * Commands will be fleshed out in Task 7. For now, they're
- * placeholders that demonstrate the plugin system works.
  */
 export const plugin: YakPlugin = {
   name: "review",
@@ -20,37 +21,13 @@ export const plugin: YakPlugin = {
   version: "0.1.0",
 
   registerCommands(program: Command, ctx: YakContext): void {
-    program
-      .command("add <prs...>")
-      .description("Add PR(s) to the review queue")
-      .action((prs: string[]) => {
-        ctx.logger.info(`Would queue PRs: ${prs.join(", ")} (full impl in Task 7)`);
-      });
+    // Real commands (implemented)
+    registerAddCommand(program, ctx);
+    registerStatusCommand(program, ctx);
+    registerApproveCommand(program, ctx);
+    registerFlagCommand(program, ctx);
 
-    program
-      .command("status")
-      .description("Show review queue status with feature groups")
-      .action(() => {
-        ctx.logger.info("Queue status coming in Task 7!");
-      });
-
-    program
-      .command("approve <pr>")
-      .description("Approve a reviewed PR")
-      .action((pr: string) => {
-        ctx.logger.info(`Would approve PR #${pr} (full impl in Task 7)`);
-      });
-
-    program
-      .command("flag <pr>")
-      .description("Flag a PR with issues")
-      .option("-r, --reason <reason>", "Reason for flagging")
-      .action((pr: string, opts: { reason?: string }) => {
-        ctx.logger.info(
-          `Would flag PR #${pr}: ${opts.reason ?? "(no reason)"} (full impl in Task 7)`
-        );
-      });
-
+    // Placeholder commands (future tasks)
     program
       .command("rule <action>")
       .description("Manage review rules (add/list/export/suggest)")
@@ -78,5 +55,4 @@ export const plugin: YakPlugin = {
   },
 };
 
-// Also export as default for flexible import patterns
 export default plugin;

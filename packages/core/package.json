@@ -4,6 +4,14 @@
   "description": "Core framework for Yak — CLI, TUI, plugin system, LLM, storage",
   "type": "module",
   "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./plugin.js": "./src/plugin.ts",
+    "./store/okf.js": "./src/store/okf.ts",
+    "./store/paths.js": "./src/store/paths.ts",
+    "./config/loader.js": "./src/config/loader.ts",
+    "./utils/git.js": "./src/utils/git.ts"
+  },
   "scripts": {
     "dev": "bun run src/index.ts",
     "test": "bun test"
