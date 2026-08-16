@@ -10,6 +10,9 @@ import { Command } from "commander";
 import path from "path";
 import fs from "fs";
 import type { YakPlugin, YakContext, YakConfig, Logger } from "../plugin.js";
+import { loadConfig, loadProfile } from "../config/loader.js";
+import { createOKFStore } from "../store/okf.js";
+import { resolveYakDir, findGitRoot } from "../store/paths.js";
 
 /**
  * Discover plugins by scanning the packages/plugins/ directory.
@@ -89,11 +92,14 @@ export function registerPlugin(
 
 /**
  * Build a minimal YakContext for bootstrapping.
- * This will be enriched in later tasks as store/config/llm are implemented.
+ * Uses real config loader and OKF store when available.
  */
 export function buildBootstrapContext(): YakContext {
-  const repoRoot = process.cwd();
-  const yakDir = path.join(repoRoot, ".yak");
+  const repoRoot = findGitRoot();
+  const config = loadConfig();
+  const yakDir = resolveYakDir(config.storageMode, repoRoot);
+  const store = createOKFStore(yakDir);
+  const profile = loadProfile(yakDir);
 
   const logger: Logger = {
     info: (msg) => console.log(`  ${msg}`),
@@ -104,26 +110,8 @@ export function buildBootstrapContext(): YakContext {
     },
   };
 
-  const config: YakConfig = {
-    storageMode: "repo",
-    plugins: {
-      review: { enabled: true },
-      specify: { enabled: false },
-      learn: { enabled: false },
-    },
-    ai: { enabled: false },
-  };
-
-  // Stub store (will be real in Task 3)
-  const store = {
-    read: async () => null,
-    write: async () => {},
-    exists: async () => false,
-    list: async () => [],
-  };
-
   return {
-    profile: null,
+    profile,
     store,
     llm: null,
     config,
