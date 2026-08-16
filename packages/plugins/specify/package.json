@@ -5,6 +5,7 @@
   "type": "module",
   "main": "./src/index.ts",
   "dependencies": {
-    "@yak/core": "workspace:*"
+    "@yak/core": "workspace:*",
+    "commander": "^12.1.0"
   }
 }
