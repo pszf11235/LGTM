@@ -11,6 +11,7 @@ import { registerAddCommand } from "./commands/add.js";
 import { registerStatusCommand } from "./commands/status.js";
 import { registerApproveCommand } from "./commands/approve.js";
 import { registerFlagCommand } from "./commands/flag.js";
+import { registerRuleCommand } from "./commands/rule.js";
 
 /**
  * Review plugin — implements the YakPlugin interface.
@@ -26,15 +27,9 @@ export const plugin: YakPlugin = {
     registerStatusCommand(program, ctx);
     registerApproveCommand(program, ctx);
     registerFlagCommand(program, ctx);
+    registerRuleCommand(program, ctx);
 
     // Placeholder commands (future tasks)
-    program
-      .command("rule <action>")
-      .description("Manage review rules (add/list/export/suggest)")
-      .action((action: string) => {
-        ctx.logger.info(`Rule '${action}' coming in Task 11!`);
-      });
-
     program
       .command("scan")
       .description("Run all rules against the entire repo")
