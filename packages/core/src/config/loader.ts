@@ -161,7 +161,11 @@ export function loadConfig(): YakConfig {
   const repoRoot = findGitRoot();
   const repoOverride = loadRepoOverride(repoRoot);
 
-  // Merge: defaults ← bootstrap ← repo override
+  // Load profile (has AI preference from onboarding)
+  const yakDir = resolveYakDir(bootstrap, repoRoot);
+  const profile = loadProfile(yakDir);
+
+  // Merge: defaults ← profile ← repo override
   const config: YakConfig = {
     ...defaults,
     storageMode: bootstrap.storageMode,
@@ -171,6 +175,7 @@ export function loadConfig(): YakConfig {
     },
     ai: {
       ...defaults.ai,
+      ...(profile?.ai ?? {}),
       ...(repoOverride.ai ?? {}),
     },
   };
