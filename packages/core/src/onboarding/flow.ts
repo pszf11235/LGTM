@@ -131,7 +131,8 @@ export async function runOnboarding(): Promise<{
 }
 
 /**
- * Ask a single onboarding question via readline.
+ * Ask a single onboarding question.
+ * Uses arrow keys for select, readline for text.
  * Returns null if skipped.
  */
 async function askQuestion(
@@ -139,27 +140,13 @@ async function askQuestion(
   q: OnboardingQuestion
 ): Promise<string | null> {
   if (q.type === "select" && q.options) {
-    console.log(`  ${chalk.bold(q.question)}\n`);
-    q.options.forEach((opt, i) => {
-      const marker = opt.value === q.default ? chalk.green("●") : chalk.gray("○");
-      const desc = opt.description ? chalk.gray(` — ${opt.description}`) : "";
-      console.log(`    ${marker} ${i + 1}) ${opt.label}${desc}`);
-    });
-    console.log();
-
-    const answer = await prompt(
-      rl,
-      `  Choice [1-${q.options.length}] (s=skip, default=${q.default}): `
+    const defaultIdx = q.options.findIndex((o) => o.value === q.default);
+    const result = await selectWithArrows(
+      q.question,
+      q.options,
+      defaultIdx >= 0 ? defaultIdx : 0
     );
-
-    if (answer.toLowerCase() === "s") return null;
-    if (answer === "") return q.default ?? null;
-
-    const idx = parseInt(answer, 10) - 1;
-    if (idx >= 0 && idx < q.options.length) {
-      return q.options[idx].value;
-    }
-    return q.default ?? null;
+    return result;
   }
 
   if (q.type === "text") {
@@ -172,7 +159,102 @@ async function askQuestion(
 }
 
 /**
- * Prompt the user for input.
+ * Interactive arrow-key selector.
+ * ↑/↓ to navigate, Enter to confirm, s to skip.
+ */
+function selectWithArrows(
+  question: string,
+  options: { value: string; label: string; description?: string }[],
+  defaultIdx: number
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    let selectedIdx = defaultIdx;
+
+    const render = () => {
+      // Move cursor up to overwrite previous render (except first time)
+      const lines = options.length + 3; // question + blank + options + blank
+      process.stdout.write(`\x1b[${lines}A\x1b[0J`);
+      draw();
+    };
+
+    const draw = () => {
+      console.log(`  ${chalk.bold(question)}`);
+      console.log();
+      options.forEach((opt, i) => {
+        const marker = i === selectedIdx ? chalk.green("❯") : " ";
+        const label =
+          i === selectedIdx ? chalk.cyan(opt.label) : opt.label;
+        const desc = opt.description ? chalk.gray(` — ${opt.description}`) : "";
+        console.log(`  ${marker} ${label}${desc}`);
+      });
+      console.log(
+        chalk.gray("\n  [↑/↓] navigate  [enter] select  [s] skip")
+      );
+    };
+
+    // Initial draw
+    draw();
+
+    // Switch stdin to raw mode for keypress detection
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf-8");
+
+    const onData = (key: string) => {
+      // Ctrl+C
+      if (key === "\x03") {
+        stdin.setRawMode(wasRaw ?? false);
+        stdin.removeListener("data", onData);
+        stdin.pause();
+        console.log();
+        process.exit(0);
+      }
+
+      // Enter
+      if (key === "\r" || key === "\n") {
+        stdin.setRawMode(wasRaw ?? false);
+        stdin.removeListener("data", onData);
+        stdin.pause();
+        console.log(
+          `  ${chalk.green("✓")} ${options[selectedIdx].label}\n`
+        );
+        resolve(options[selectedIdx].value);
+        return;
+      }
+
+      // Skip
+      if (key === "s" || key === "S") {
+        stdin.setRawMode(wasRaw ?? false);
+        stdin.removeListener("data", onData);
+        stdin.pause();
+        console.log(chalk.gray("  (skipped)\n"));
+        resolve(null);
+        return;
+      }
+
+      // Arrow up
+      if (key === "\x1b[A" || key === "k") {
+        selectedIdx = (selectedIdx - 1 + options.length) % options.length;
+        render();
+        return;
+      }
+
+      // Arrow down
+      if (key === "\x1b[B" || key === "j") {
+        selectedIdx = (selectedIdx + 1) % options.length;
+        render();
+        return;
+      }
+    };
+
+    stdin.on("data", onData);
+  });
+}
+
+/**
+ * Prompt the user for text input.
  */
 function prompt(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => {
