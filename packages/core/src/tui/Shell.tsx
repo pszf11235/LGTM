@@ -77,14 +77,14 @@ export function Shell({ tabs, initialTab, repoName, repoPath }: ShellProps) {
       <Box>
         <Text>
           {headerBar(
-            `🦬 ${theme.bold("yak")} ${theme.muted(repoName ?? "")}`,
+            `🦬 ${theme.bold("yak")}`,
             renderTabs(enabledTabs, activeTabIdx),
             termWidth
           )}
         </Text>
       </Box>
       <Box>
-        <Text>{theme.muted(repoPath ?? "")}</Text>
+        <Text>{theme.muted(`reviewing: ${repoName ?? "unknown"}  ${repoPath ? theme.muted(repoPath) : ""}`)}</Text>
       </Box>
       <Box>
         <Text>{borderLine(termWidth)}</Text>
