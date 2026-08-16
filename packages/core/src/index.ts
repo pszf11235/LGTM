@@ -10,123 +10,143 @@
 
 import { Command } from "commander";
 import chalk from "chalk";
+import {
+  discoverPlugins,
+  registerPlugin,
+  buildBootstrapContext,
+  resolvePluginsDir,
+} from "./cli/program.js";
 
-const program = new Command();
+async function main() {
+  const program = new Command();
 
-program
-  .name("yak")
-  .description(
-    `${chalk.bold("🦬 Yak")} — Stop shaving, start shipping\n\n` +
-      `A dev productivity platform with plugins.\n` +
-      `Run ${chalk.cyan("yak")} to open the TUI, or ${chalk.cyan("yak <plugin> <command>")} for CLI mode.`
-  )
-  .version("0.1.0");
-
-// Placeholder: `yak` (bare) will open TUI in a future task
-program
-  .command("tui [plugin]")
-  .description("Open the interactive TUI (default when running bare `yak`)")
-  .action((plugin?: string) => {
-    console.log(
-      chalk.yellow(
-        `🦬 TUI coming soon! (requested tab: ${plugin ?? "default"})`
-      )
-    );
-  });
-
-// Plugin management
-program
-  .command("plugins")
-  .description("List installed plugins and their status")
-  .action(() => {
-    console.log(chalk.bold("\n🦬 Yak Plugins\n"));
-    console.log(
-      `  ${chalk.green("●")} ${chalk.bold("review")}    — PR review harness (enabled)`
-    );
-    console.log(
-      `  ${chalk.gray("○")} ${chalk.bold("specify")}   — Codebase intelligence (stub)`
-    );
-    console.log(
-      `  ${chalk.gray("○")} ${chalk.bold("learn")}     — Interactive learning paths (stub)`
-    );
-    console.log();
-  });
-
-// Init command placeholder
-program
-  .command("init")
-  .description("Initialize Yak in this project (runs onboarding)")
-  .action(() => {
-    console.log(chalk.yellow("🦬 Onboarding flow coming in Task 4!"));
-  });
-
-// Config command placeholder
-program
-  .command("config")
-  .description("View or edit Yak configuration")
-  .action(() => {
-    console.log(chalk.yellow("🦬 Config system coming in Task 3!"));
-  });
-
-// Review plugin placeholder commands
-const review = program
-  .command("review")
-  .description("PR review harness — structured code review workflow");
-
-review
-  .command("add <prs...>")
-  .description("Add PR(s) to the review queue")
-  .action((prs: string[]) => {
-    console.log(
-      chalk.yellow(`🦬 Would queue PRs: ${prs.join(", ")} (coming in Task 7)`)
-    );
-  });
-
-review
-  .command("status")
-  .description("Show review queue status")
-  .action(() => {
-    console.log(chalk.yellow("🦬 Queue status coming in Task 7!"));
-  });
-
-review
-  .command("approve <pr>")
-  .description("Approve a reviewed PR")
-  .action((pr: string) => {
-    console.log(chalk.yellow(`🦬 Would approve PR #${pr} (coming in Task 7)`));
-  });
-
-review
-  .command("flag <pr>")
-  .description("Flag a PR with issues")
-  .option("-r, --reason <reason>", "Reason for flagging")
-  .action((pr: string, opts: { reason?: string }) => {
-    console.log(
-      chalk.yellow(
-        `🦬 Would flag PR #${pr}: ${opts.reason ?? "(no reason)"} (coming in Task 7)`
-      )
-    );
-  });
-
-review
-  .command("rule <action>")
-  .description("Manage review rules (add/list/export)")
-  .action((action: string) => {
-    console.log(
-      chalk.yellow(`🦬 Rule ${action} coming in Task 11!`)
-    );
-  });
-
-// If no command given, show help (will become TUI in Task 8)
-program.action(() => {
-  console.log(
-    chalk.bold("\n🦬 Yak") + " — run " + chalk.cyan("yak --help") + " for commands\n"
-  );
-  console.log(
-    chalk.gray(
-      "  Tip: In a future version, bare `yak` will open the interactive TUI.\n"
+  program
+    .name("yak")
+    .description(
+      `${chalk.bold("🦬 Yak")} — Stop shaving, start shipping\n\n` +
+        `A dev productivity platform with plugins.\n` +
+        `Run ${chalk.cyan("yak")} to open the TUI, or ${chalk.cyan("yak <plugin> <command>")} for CLI mode.`
     )
-  );
-});
+    .version("0.1.0");
 
-program.parse(process.argv);
+  // Build bootstrap context (minimal, will be enriched by later tasks)
+  const ctx = buildBootstrapContext();
+
+  // Discover and register plugins
+  const pluginsDir = resolvePluginsDir();
+  const plugins = await discoverPlugins(pluginsDir);
+
+  for (const plugin of plugins) {
+    const pluginConfig = ctx.config.plugins[plugin.name];
+    if (pluginConfig?.enabled !== false) {
+      registerPlugin(program, plugin, ctx);
+    }
+  }
+
+  // ─── Core Commands ─────────────────────────────────────────────────────
+
+  // `yak` (bare) → opens TUI (placeholder until Task 8)
+  program.action(() => {
+    if (process.argv.length <= 2) {
+      console.log(
+        `\n${chalk.bold("🦬 Yak")} — TUI launching soon!\n`
+      );
+      console.log(
+        chalk.gray(
+          `  In a future version, bare ${chalk.cyan("yak")} opens the interactive TUI.\n` +
+            `  For now, use ${chalk.cyan("yak --help")} to see available commands.\n`
+        )
+      );
+    }
+  });
+
+  // `yak tui [plugin]` → opens TUI on specific tab
+  program
+    .command("tui [plugin]")
+    .description("Open the interactive TUI (default when running bare `yak`)")
+    .action((plugin?: string) => {
+      console.log(
+        chalk.yellow(
+          `🦬 TUI coming in Task 8! (requested tab: ${plugin ?? "default"})`
+        )
+      );
+    });
+
+  // `yak plugins` → list all plugins with status
+  program
+    .command("plugins")
+    .description("List installed plugins and their status")
+    .action(() => {
+      console.log(chalk.bold("\n🦬 Yak Plugins\n"));
+
+      for (const plugin of plugins) {
+        const enabled = ctx.config.plugins[plugin.name]?.enabled !== false;
+        const icon = enabled ? chalk.green("●") : chalk.gray("○");
+        const status = enabled ? "" : chalk.gray(" (disabled)");
+        console.log(
+          `  ${icon} ${chalk.bold(plugin.name.padEnd(10))} — ${plugin.description}${status}`
+        );
+      }
+
+      if (plugins.length === 0) {
+        console.log(chalk.gray("  No plugins found."));
+      }
+
+      console.log();
+      console.log(
+        chalk.gray(
+          `  Enable/disable: ${chalk.cyan("yak plugins enable <name>")} / ${chalk.cyan("yak plugins disable <name>")}`
+        )
+      );
+      console.log();
+    });
+
+  // `yak plugins enable/disable <name>`
+  program
+    .command("plugins:enable <name>")
+    .description("Enable a plugin")
+    .action((name: string) => {
+      // Will persist to config in Task 3
+      console.log(chalk.green(`✓ Plugin '${name}' enabled`));
+    });
+
+  program
+    .command("plugins:disable <name>")
+    .description("Disable a plugin")
+    .action((name: string) => {
+      console.log(chalk.yellow(`○ Plugin '${name}' disabled`));
+    });
+
+  // `yak init` → onboarding (placeholder until Task 4)
+  program
+    .command("init")
+    .description("Initialize Yak in this project (runs onboarding)")
+    .action(() => {
+      console.log(chalk.yellow("🦬 Onboarding flow coming in Task 4!"));
+      console.log(chalk.gray("  Will ask about project goals, tech stack, quality references, etc.\n"));
+    });
+
+  // `yak config` → view config (placeholder until Task 3)
+  program
+    .command("config")
+    .description("View or edit Yak configuration")
+    .action(() => {
+      console.log(chalk.bold("\n🦬 Yak Config (defaults)\n"));
+      console.log(`  Storage mode: ${chalk.cyan(ctx.config.storageMode)}`);
+      console.log(`  AI enabled:   ${chalk.cyan(String(ctx.config.ai.enabled))}`);
+      console.log(`  Plugins:`);
+      for (const [name, cfg] of Object.entries(ctx.config.plugins)) {
+        const icon = cfg.enabled ? chalk.green("●") : chalk.gray("○");
+        console.log(`    ${icon} ${name}`);
+      }
+      console.log();
+    });
+
+  // Parse and execute
+  await program.parseAsync(process.argv);
+}
+
+main().catch((err) => {
+  console.error(chalk.red(`\n❌ Fatal error: ${err.message}\n`));
+  process.exit(1);
+});
