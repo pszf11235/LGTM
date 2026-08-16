@@ -112,19 +112,25 @@ export function QueuePage({ onStatusHint }: QueuePageProps) {
       </Box>
 
       {/* PR rows */}
-      {prs.map((pr, i) => (
-        <Box key={pr.number}>
-          <Text>
-            {i === selectedIdx ? "❯ " : "  "}
-            {stateIcon(pr.state)} {String(pr.number).padEnd(4)}{" "}
-            {stateLabel(pr.state)}{"  "}
-            {pr.title.length > 28 ? pr.title.slice(0, 25) + "..." : pr.title.padEnd(28)}{"  "}
-            {String(pr.filesChanged).padStart(3)}{"  "}
-            {pr.featureGroup ?? ""}
-            {pr.flagReason ? ` — ${pr.flagReason}` : ""}
-          </Text>
-        </Box>
-      ))}
+      {prs.map((pr, i) => {
+        const isSelected = i === selectedIdx;
+        const rowColor = isSelected ? "cyan" : undefined;
+        const prefix = isSelected ? "❯ " : "  ";
+
+        return (
+          <Box key={pr.number}>
+            <Text color={rowColor} bold={isSelected} inverse={isSelected}>
+              {prefix}
+              {stateIcon(pr.state)} {String(pr.number).padEnd(4)}{" "}
+              {stateLabel(pr.state)}{"  "}
+              {pr.title.length > 28 ? pr.title.slice(0, 25) + "..." : pr.title.padEnd(28)}{"  "}
+              {String(pr.filesChanged).padStart(3)}{"  "}
+              {pr.featureGroup ?? ""}
+              {pr.flagReason ? ` — ${pr.flagReason}` : ""}
+            </Text>
+          </Box>
+        );
+      })}
 
       {/* Summary */}
       <Box marginTop={1}>
