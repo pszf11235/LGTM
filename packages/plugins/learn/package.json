@@ -1,0 +1,10 @@
+{
+  "name": "@yak/plugin-learn",
+  "version": "0.1.0",
+  "description": "Yak Learn Plugin — interactive learning paths for new tech stacks (stub)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@yak/core": "workspace:*"
+  }
+}
