@@ -60,6 +60,7 @@ export async function runOnboarding(): Promise<{
 
     const detectedStack = detectTechStack(repoRoot);
 
+    const aiEnabled = answers.aiProvider !== "none" && !!answers.aiProvider;
     const profile: ProjectProfile = {
       project: projectName,
       goal: answers.goal ?? "production",
@@ -71,21 +72,16 @@ export async function runOnboarding(): Promise<{
       techStack: detectedStack,
       teamSize: (answers.teamSize as ProjectProfile["teamSize"]) ?? "solo",
       ai: {
-        enabled: answers.aiProvider !== "none" && !!answers.aiProvider,
-        provider:
-          answers.aiProvider !== "none"
-            ? (answers.aiProvider as "openai" | "anthropic" | "ollama")
-            : undefined,
+        enabled: aiEnabled,
+        ...(aiEnabled && answers.aiProvider ? { provider: answers.aiProvider as "openai" | "anthropic" | "ollama" } : {}),
       },
       createdAt: new Date().toISOString(),
     };
 
     const store = createOKFStore(yakDir);
-    await store.write(
-      "profile.md",
-      { type: "yak/profile", ...profile },
-      generateProfileBody(profile)
-    );
+    // Strip undefined values before serializing (YAML can't handle them)
+    const cleanData = JSON.parse(JSON.stringify({ type: "yak/profile", ...profile }));
+    await store.write("profile.md", cleanData, generateProfileBody(profile));
 
     return { profile, bootstrap, yakDir, detectedStack };
   };
