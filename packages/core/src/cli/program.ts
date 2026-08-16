@@ -128,8 +128,9 @@ export function buildBootstrapContext(): YakContext {
  */
 export function resolvePluginsDir(): string {
   // In development: plugins are sibling to core in the monorepo
+  const currentDir = import.meta.dir;
   const devPath = path.resolve(
-    import.meta.dir ?? __dirname,
+    currentDir,
     "..",
     "..",
     "..",
