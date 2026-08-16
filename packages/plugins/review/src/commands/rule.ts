@@ -145,4 +145,63 @@ export function registerRuleCommand(program: Command, ctx: YakContext) {
         ctx.logger.error(`Failed to import: ${(err as Error).message}`);
       }
     });
+
+  rule
+    .command("export")
+    .description("Export rules as enforcement mechanisms (hook/steering/eslint)")
+    .requiredOption("-f, --format <format>", "Output format: hook, steering, or eslint")
+    .option("-o, --output <file>", "Write to file (default: stdout)")
+    .action(async (opts: { format: string; output?: string }) => {
+      const { exportAsHook, exportAsSteering, exportAsESLint } = await import("../domain/rules-export.js");
+      const engine = createRulesEngine(ctx.store);
+      const rules = await engine.loadRules();
+
+      if (rules.length === 0) {
+        console.log(chalk.gray(`\n  No rules to export. Create some first.\n`));
+        return;
+      }
+
+      let output: string;
+      let defaultFile: string;
+
+      switch (opts.format) {
+        case "hook":
+          output = exportAsHook(rules);
+          defaultFile = ".git/hooks/pre-commit";
+          break;
+        case "steering":
+          output = exportAsSteering(rules);
+          defaultFile = ".kiro/steering/yak-rules.md";
+          break;
+        case "eslint":
+          output = exportAsESLint(rules);
+          defaultFile = ".eslintrc.yak.json";
+          break;
+        default:
+          ctx.logger.error(`Unknown format: ${opts.format}. Use: hook, steering, or eslint`);
+          return;
+      }
+
+      if (opts.output) {
+        const fs = await import("fs");
+        const path = await import("path");
+        const fullPath = path.default.resolve(ctx.repoRoot, opts.output);
+        fs.default.mkdirSync(path.default.dirname(fullPath), { recursive: true });
+        fs.default.writeFileSync(fullPath, output);
+
+        // Make hook executable
+        if (opts.format === "hook") {
+          fs.default.chmodSync(fullPath, 0o755);
+        }
+
+        console.log(chalk.green(`\n  ✓ Exported to ${opts.output}`));
+        if (opts.format === "hook") {
+          console.log(chalk.gray(`    (made executable)`));
+        }
+      } else {
+        // Print to stdout
+        console.log(output);
+      }
+      console.log();
+    });
 }
