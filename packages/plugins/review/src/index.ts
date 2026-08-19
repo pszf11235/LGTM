@@ -14,6 +14,7 @@ import { registerFlagCommand } from "./commands/flag.js";
 import { registerRuleCommand } from "./commands/rule.js";
 import { registerScanCommand } from "./commands/scan.js";
 import { registerWatchCommand } from "./commands/watch.js";
+import { ReviewTab } from "./pages/ReviewTab.js";
 
 /**
  * Review plugin — implements the YakPlugin interface.
@@ -22,6 +23,14 @@ export const plugin: YakPlugin = {
   name: "review",
   description: "PR review harness — structured code review with rules and grouping",
   version: "0.1.0",
+
+  pages: [
+    {
+      label: "Review",
+      shortcut: "r",
+      component: ReviewTab,
+    },
+  ],
 
   registerCommands(program: Command, ctx: YakContext): void {
     // Real commands (implemented)
