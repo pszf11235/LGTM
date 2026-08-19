@@ -283,7 +283,13 @@ function selectWithArrows(
     // Switch stdin to raw mode for keypress detection
     const stdin = process.stdin;
     const wasRaw = stdin.isRaw;
-    stdin.setRawMode(true);
+    try {
+      stdin.setRawMode(true);
+    } catch {
+      // If setRawMode fails (e.g., piped stdin), fall back
+      resolve(options[defaultIdx].value);
+      return;
+    }
     stdin.resume();
     stdin.setEncoding("utf-8");
 

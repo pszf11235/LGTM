@@ -357,11 +357,12 @@ function parseViolationResponse(response: string, ruleId: string): RuleViolation
       .filter((v: any) => v.file && v.line)
       .map((v: any) => ({
         ruleId,
-        file: v.file,
+        file: String(v.file),
         line: typeof v.line === "number" ? v.line : parseInt(v.line, 10),
         explanation: v.explanation ?? "Rule violation detected",
         suggestion: v.suggestion,
-      }));
+      }))
+      .filter((v) => !isNaN(v.line) && v.line > 0); // Remove invalid line numbers
   } catch {
     return [];
   }

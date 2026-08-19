@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useApp } from "ink";
 import type { ParsedDiff } from "../domain/diff-parser.js";
 
 interface QueuePageProps {
@@ -27,6 +27,7 @@ export function QueuePage({ onStatusHint, onOpenReview }: QueuePageProps) {
   const [prs, setPrs] = useState<DisplayPR[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [loading, setLoading] = useState(true);
+  const { exit } = useApp();
 
   useEffect(() => {
     onStatusHint("↑↓ navigate  enter review  a approve  f flag  q quit");
@@ -75,7 +76,7 @@ export function QueuePage({ onStatusHint, onOpenReview }: QueuePageProps) {
     }
     // q: quit the TUI from queue page
     if (input === "q") {
-      process.exit(0);
+      exit();
     }
     // Enter: open review for selected PR
     if (key.return && onOpenReview && prs.length > 0) {
