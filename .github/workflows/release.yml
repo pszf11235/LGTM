@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build binaries (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            artifact: lgtm-linux-x64
+          - os: ubuntu-latest
+            target: bun-linux-arm64
+            artifact: lgtm-linux-arm64
+          - os: macos-latest
+            target: bun-darwin-arm64
+            artifact: lgtm-darwin-arm64
+          - os: macos-13
+            target: bun-darwin-x64
+            artifact: lgtm-darwin-x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Build binary
+        run: |
+          mkdir -p dist
+          bun build packages/core/src/index.ts --compile --target=${{ matrix.target }} --outfile dist/${{ matrix.artifact }}
+
+      - name: Generate checksum
+        run: |
+          cd dist
+          if command -v sha256sum &>/dev/null; then
+            sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          else
+            shasum -a 256 ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.artifact }}
+            dist/${{ matrix.artifact }}.sha256
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          # Move all binaries and checksums into release/
+          find artifacts -type f | while read f; do
+            cp "$f" release/
+          done
+          # Generate combined checksum file
+          cd release
+          cat *.sha256 > checksums-sha256.txt
+          ls -lh
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: LGTM v${{ steps.version.outputs.version }}
+          body: |
+            ## 👍 LGTM v${{ steps.version.outputs.version }}
+
+            ### Installation
+
+            Download the binary for your platform, make it executable, and move to your PATH:
+
+            ```bash
+            # macOS (Apple Silicon)
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lgtm-darwin-arm64 -o lgtm
+            chmod +x lgtm && sudo mv lgtm /usr/local/bin/
+
+            # macOS (Intel)
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lgtm-darwin-x64 -o lgtm
+            chmod +x lgtm && sudo mv lgtm /usr/local/bin/
+
+            # Linux (x64)
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lgtm-linux-x64 -o lgtm
+            chmod +x lgtm && sudo mv lgtm /usr/local/bin/
+
+            # Linux (ARM64)
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lgtm-linux-arm64 -o lgtm
+            chmod +x lgtm && sudo mv lgtm /usr/local/bin/
+            ```
+
+            ### Verify checksums
+
+            ```bash
+            sha256sum --check checksums-sha256.txt
+            ```
+
+            ### What's included
+
+            Self-contained executable — no Bun, Node, or any runtime needed.
+            Just download, make executable, and run `lgtm`.
+          files: |
+            release/lgtm-linux-x64
+            release/lgtm-linux-arm64
+            release/lgtm-darwin-x64
+            release/lgtm-darwin-arm64
+            release/checksums-sha256.txt
+          draft: false
+          prerelease: false
