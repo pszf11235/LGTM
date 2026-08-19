@@ -14,7 +14,9 @@ import { registerFlagCommand } from "./commands/flag.js";
 import { registerRuleCommand } from "./commands/rule.js";
 import { registerScanCommand } from "./commands/scan.js";
 import { registerWatchCommand } from "./commands/watch.js";
+import { registerDashboardCommand } from "./commands/dashboard.js";
 import { ReviewTab } from "./pages/ReviewTab.js";
+import { DashboardPage } from "./pages/DashboardPage.js";
 
 /**
  * Review plugin — implements the LGTMPlugin interface.
@@ -25,6 +27,11 @@ export const plugin: LGTMPlugin = {
   version: "0.1.0",
 
   pages: [
+    {
+      label: "Dashboard",
+      shortcut: "d",
+      component: DashboardPage,
+    },
     {
       label: "Review",
       shortcut: "r",
@@ -41,6 +48,7 @@ export const plugin: LGTMPlugin = {
     registerRuleCommand(program, ctx);
     registerScanCommand(program, ctx);
     registerWatchCommand(program, ctx);
+    registerDashboardCommand(program, ctx);
 
     // Placeholder commands (future tasks)
     program
