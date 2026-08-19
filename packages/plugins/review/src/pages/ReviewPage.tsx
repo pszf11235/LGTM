@@ -191,7 +191,7 @@ export function ReviewPage({
         if (startInfo) {
           setIsCommenting(true);
           // Store range info for the comment handler
-          (window as any).__yakCommentRange = { startLine: startInfo.line, endLine: endInfo?.line ?? startInfo.line, file: startInfo.file };
+          (globalThis as any).__yakCommentRange = { startLine: startInfo.line, endLine: endInfo?.line ?? startInfo.line, file: startInfo.file };
         }
         setSelectionStart(null);
       } else {
