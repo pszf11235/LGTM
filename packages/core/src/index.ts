@@ -66,36 +66,26 @@ async function main() {
 
     // Profile complete — launch TUI
     const { launchTUI } = await import("./tui/render.js");
-    const { ReviewTab } = await import("../../plugins/review/src/pages/ReviewTab.js");
     const path = await import("path");
 
     const repoName = path.default.basename(ctx.repoRoot);
     const repoPath = ctx.repoRoot;
 
-    await launchTUI({
-      tabs: [
-        {
-          name: "review",
-          label: "Review",
-          enabled: ctx.config.plugins.review?.enabled !== false,
-          component: ReviewTab,
-        },
-        {
-          name: "specify",
-          label: "Specify",
-          enabled: ctx.config.plugins.specify?.enabled === true,
-          component: () => null, // stub
-        },
-        {
-          name: "learn",
-          label: "Learn",
-          enabled: ctx.config.plugins.learn?.enabled === true,
-          component: () => null, // stub
-        },
-      ],
-      repoName,
-      repoPath,
-    });
+    // Build tabs dynamically from discovered plugins (not hardcoded)
+    const tabs = plugins
+      .filter((p) => ctx.config.plugins[p.name]?.enabled !== false)
+      .map((p) => {
+        // Use plugin's first page as its tab, or a placeholder
+        const page = p.pages?.[0];
+        return {
+          name: p.name,
+          label: page?.label ?? p.name.charAt(0).toUpperCase() + p.name.slice(1),
+          enabled: true,
+          component: page?.component ?? (() => null),
+        };
+      });
+
+    await launchTUI({ tabs, repoName, repoPath });
     return;
   }
 
@@ -130,30 +120,22 @@ async function main() {
     .description("Open the interactive TUI (same as bare `yak`)")
     .action(async (plugin?: string) => {
       const { launchTUI } = await import("./tui/render.js");
-      const { ReviewTab } = await import("../../plugins/review/src/pages/ReviewTab.js");
       const path = await import("path");
 
+      const tabs = plugins
+        .filter((p) => ctx.config.plugins[p.name]?.enabled !== false)
+        .map((p) => {
+          const page = p.pages?.[0];
+          return {
+            name: p.name,
+            label: page?.label ?? p.name.charAt(0).toUpperCase() + p.name.slice(1),
+            enabled: true,
+            component: page?.component ?? (() => null),
+          };
+        });
+
       await launchTUI({
-        tabs: [
-          {
-            name: "review",
-            label: "Review",
-            enabled: ctx.config.plugins.review?.enabled !== false,
-            component: ReviewTab,
-          },
-          {
-            name: "specify",
-            label: "Specify",
-            enabled: ctx.config.plugins.specify?.enabled === true,
-            component: () => null,
-          },
-          {
-            name: "learn",
-            label: "Learn",
-            enabled: ctx.config.plugins.learn?.enabled === true,
-            component: () => null,
-          },
-        ],
+        tabs,
         initialTab: plugin,
         repoName: path.default.basename(ctx.repoRoot),
         repoPath: ctx.repoRoot,

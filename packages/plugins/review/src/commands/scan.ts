@@ -96,7 +96,7 @@ export function registerScanCommand(program: Command, ctx: YakContext) {
         for (const file of matchingFiles) {
           const fullPath = path.join(ctx.repoRoot, file);
           try {
-            const content = fs.readFileSync(fullPath, "utf-8");
+            const content = await Bun.file(fullPath).text();
             const lines = content.split("\n");
 
             for (let i = 0; i < lines.length; i++) {

@@ -17,7 +17,7 @@ export interface TabDefinition {
   name: string;
   label: string;
   enabled: boolean;
-  component: React.ComponentType<{ onStatusHint: (hint: string) => void }>;
+  component: React.ComponentType<any>;
 }
 
 interface ShellProps {
