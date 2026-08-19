@@ -61,7 +61,7 @@ async function main() {
       }
       const { runOnboarding } = await import("./onboarding/flow.js");
       await runOnboarding();
-      return;
+      // After onboarding completes, fall through to launch TUI
     }
 
     // Profile complete — launch TUI
@@ -71,18 +71,25 @@ async function main() {
     const repoName = path.default.basename(ctx.repoRoot);
     const repoPath = ctx.repoRoot;
 
-    // Build tabs dynamically from discovered plugins (not hardcoded)
+    // Build tabs dynamically from discovered plugins (all pages, flattened)
     const tabs = plugins
       .filter((p) => ctx.config.plugins[p.name]?.enabled !== false)
-      .map((p) => {
-        // Use plugin's first page as its tab, or a placeholder
-        const page = p.pages?.[0];
-        return {
+      .flatMap((p) => {
+        if (p.pages && p.pages.length > 0) {
+          return p.pages.map((page) => ({
+            name: `${p.name}-${page.label.toLowerCase()}`,
+            label: page.label,
+            enabled: true,
+            component: page.component,
+          }));
+        }
+        // Plugin with no pages: show as placeholder tab
+        return [{
           name: p.name,
-          label: page?.label ?? p.name.charAt(0).toUpperCase() + p.name.slice(1),
+          label: p.name.charAt(0).toUpperCase() + p.name.slice(1),
           enabled: true,
-          component: page?.component ?? (() => null),
-        };
+          component: (() => null) as any,
+        }];
       });
 
     // Check AI availability and watch count for TUI indicators
@@ -148,14 +155,21 @@ async function main() {
 
       const tabs = plugins
         .filter((p) => ctx.config.plugins[p.name]?.enabled !== false)
-        .map((p) => {
-          const page = p.pages?.[0];
-          return {
+        .flatMap((p) => {
+          if (p.pages && p.pages.length > 0) {
+            return p.pages.map((page) => ({
+              name: `${p.name}-${page.label.toLowerCase()}`,
+              label: page.label,
+              enabled: true,
+              component: page.component,
+            }));
+          }
+          return [{
             name: p.name,
-            label: page?.label ?? p.name.charAt(0).toUpperCase() + p.name.slice(1),
+            label: p.name.charAt(0).toUpperCase() + p.name.slice(1),
             enabled: true,
-            component: page?.component ?? (() => null),
-          };
+            component: (() => null) as any,
+          }];
         });
 
       await launchTUI({
