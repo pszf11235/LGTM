@@ -107,6 +107,13 @@ async function main() {
     // Non-critical — don't block startup
   }
 
+  // ─── Warn if API key might be in committed files ─────────────────────
+  if (ctx.config.storageMode === "repo" && ctx.config.ai.apiKey) {
+    console.log(
+      chalk.yellow("  ⚠ Warning: AI API key detected in config. In repo-mode, ensure .yak/ is in .gitignore.\n")
+    );
+  }
+
   // ─── Core Commands ─────────────────────────────────────────────────────
 
   // `yak ai` — AI connection management
