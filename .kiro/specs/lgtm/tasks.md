@@ -1,4 +1,4 @@
-# Tasks: Yak Platform + Review Plugin
+# Tasks: LGTM Platform + Review Plugin
 
 ## Implementation Plan
 
@@ -14,13 +14,13 @@
 Set up Bun workspace monorepo with core + plugin structure.
 
 - [ ] Initialize workspace: root package.json with `workspaces`
-- [ ] `packages/core/` — package.json (@yak/core), tsconfig
-- [ ] `packages/plugins/review/` — package.json (@yak/plugin-review), tsconfig
+- [ ] `packages/core/` — package.json (@lgtm/core), tsconfig
+- [ ] `packages/plugins/review/` — package.json (@lgtm/plugin-review), tsconfig
 - [ ] `packages/plugins/specify/` — stub package
 - [ ] `packages/plugins/learn/` — stub package
 - [ ] Root: bunfig.toml, tsconfig.json (base), .gitignore
 - [ ] Add shared deps to core: commander, ink, react, chalk, gray-matter, simple-git, cosmiconfig, minimatch
-- [ ] Entry point: `packages/core/src/index.ts` → `yak --help` works
+- [ ] Entry point: `packages/core/src/index.ts` → `lgtm --help` works
 - [ ] bin in root package.json → runs core entry
 - [ ] Scripts: `dev`, `build`, `test`
 - [ ] Verify: `bun run packages/core/src/index.ts --help` prints usage
@@ -32,15 +32,15 @@ Set up Bun workspace monorepo with core + plugin structure.
 
 Define the plugin contract and auto-discovery.
 
-- [ ] `packages/core/src/plugin.ts` — YakPlugin interface, YakContext type
+- [ ] `packages/core/src/plugin.ts` — LGTMPlugin interface, LGTMContext type
 - [ ] `packages/core/src/cli/program.ts` — Commander setup that loads plugins
 - [ ] Plugin discovery: scan `packages/plugins/*/` for valid plugins
-- [ ] Register plugin commands under namespace: `yak <plugin.name> <command>`
-- [ ] `yak plugins` command — lists all discovered plugins + enabled status
-- [ ] Plugin enable/disable state stored in `.yak/plugins.yaml`
+- [ ] Register plugin commands under namespace: `lgtm <plugin.name> <command>`
+- [ ] `lgtm plugins` command — lists all discovered plugins + enabled status
+- [ ] Plugin enable/disable state stored in `.lgtm/plugins.yaml`
 - [ ] Stub plugins (specify, learn) register with name + description only
 - [ ] Review plugin registers with placeholder commands
-- [ ] Verify: `yak plugins` shows all 3, `yak review --help` shows subcommands
+- [ ] Verify: `lgtm plugins` shows all 3, `lgtm review --help` shows subcommands
 
 ---
 
@@ -54,13 +54,13 @@ Persistence layer and configuration system.
   - `writeOKF(path, data, content)` → formatted markdown file
   - Uses gray-matter for parsing/stringifying
 - [ ] `packages/core/src/store/paths.ts`:
-  - `getYakDir()` → resolves `.yak/` relative to git root
+  - `getYakDir()` → resolves `.lgtm/` relative to git root
   - `ensureDir(subpath)` → creates directory structure
   - `getSessionDir(date)`, `getRulesDir()`, `getPluginDir(name)`
 - [ ] `packages/core/src/config/loader.ts`:
-  - cosmiconfig with `.yakrc.yaml`, `.yak/config.yaml`
+  - cosmiconfig with `.lgtmrc.yaml`, `.lgtm/config.yaml`
   - `loadConfig()` → resolved config (merged layers)
-  - `getProfile()` → reads `.yak/profile.md` frontmatter
+  - `getProfile()` → reads `.lgtm/profile.md` frontmatter
 - [ ] `packages/core/src/config/schema.ts` — TypeScript types for config + profile
 - [ ] Tests: OKF round-trip, config resolution
 - [ ] Verify: can write/read OKF files, config loads with defaults
@@ -86,12 +86,12 @@ Interactive first-time setup.
   - Runs questions sequentially (Ink-based or readline prompts)
   - Each question skippable with `s`
   - Entire flow skippable with Ctrl+C (saves what was answered)
-  - Saves result to `.yak/profile.md`
+  - Saves result to `.lgtm/profile.md`
 - [ ] `packages/core/src/cli/commands/init.ts`:
-  - `yak init` — runs onboarding, creates .yak/ structure
-  - If `.yak/profile.md` exists, asks to overwrite
+  - `lgtm init` — runs onboarding, creates .lgtm/ structure
+  - If `.lgtm/profile.md` exists, asks to overwrite
 - [ ] Plugin onboarding hook: called on first plugin use (pre-filled from profile)
-- [ ] Verify: `yak init` walks through questions, saves profile.md
+- [ ] Verify: `lgtm init` walks through questions, saves profile.md
 
 ---
 
@@ -132,9 +132,9 @@ Interactive first-time setup.
 ### Task 7: Review Plugin CLI Commands 🏆
 **Branch:** `feat/task-07-review-cli`
 
-- [ ] `yak review add <numbers...>` — queue with grouping
-- [ ] `yak review status` — table with groups, states
-- [ ] `yak review approve <n>` / `yak review flag <n> --reason "..."`
+- [ ] `lgtm review add <numbers...>` — queue with grouping
+- [ ] `lgtm review status` — table with groups, states
+- [ ] `lgtm review approve <n>` / `lgtm review flag <n> --reason "..."`
 - [ ] Wire commands into plugin registration
 - [ ] Verify: full CLI flow (add → status → approve/flag)
 
@@ -152,8 +152,8 @@ Interactive first-time setup.
   - PR list with states, groups
   - Arrow keys to select, Enter to review
   - Feature group badges
-- [ ] `yak` (bare command) launches TUI on first enabled tab
-- [ ] `yak tui review` opens directly on review tab
+- [ ] `lgtm` (bare command) launches TUI on first enabled tab
+- [ ] `lgtm tui review` opens directly on review tab
 - [ ] Command palette (`:` key) — execute CLI commands within TUI
 - [ ] All CLI commands accessible via TUI (feature parity)
 - [ ] Verify: TUI opens with tabs, shows queue, exits cleanly
@@ -193,7 +193,7 @@ Interactive first-time setup.
 - [ ] `packages/plugins/review/src/domain/rules.ts`:
   - `createRule()`, `loadRules()`, `matchRegex(rules, diff)`
   - Rules as individual OKF markdown files with examples
-- [ ] `yak review rule add`, `yak review rule list`
+- [ ] `lgtm review rule add`, `lgtm review rule list`
 - [ ] `r` in TUI → create rule from context
 - [ ] Violations shown inline in diff view
 - [ ] Tests: regex matching
@@ -217,7 +217,7 @@ Interactive first-time setup.
 ### Task 13: Repo-Wide Scan
 **Branch:** `feat/task-13-scan`
 
-- [ ] `yak review scan` — all rules against whole repo
+- [ ] `lgtm review scan` — all rules against whole repo
 - [ ] Batch processing with progress indicator
 - [ ] Results with action options (issue/PR/fold/ignore)
 - [ ] Verify: finds existing violations
@@ -227,7 +227,7 @@ Interactive first-time setup.
 ### Task 14: Rule Export
 **Branch:** `feat/task-14-rule-export`
 
-- [ ] `yak review rule export --format hook|steering|eslint`
+- [ ] `lgtm review rule export --format hook|steering|eslint`
 - [ ] Generate appropriate output for each format
 - [ ] Verify: exported hook catches violations
 
@@ -239,7 +239,7 @@ Interactive first-time setup.
 **Branch:** `feat/task-15-patterns`
 
 - [ ] `packages/plugins/review/src/domain/patterns.ts`
-- [ ] `yak review rules suggest` — mine comment history for repeated themes
+- [ ] `lgtm review rules suggest` — mine comment history for repeated themes
 - [ ] LLM analysis: identify patterns, suggest rules with examples
 - [ ] Interactive confirm/edit/reject flow
 - [ ] Verify: repeated comments → rule suggestion
@@ -249,7 +249,7 @@ Interactive first-time setup.
 ### Task 16: AI Summary
 **Branch:** `feat/task-16-ai-summary`
 
-- [ ] Summary generation on `yak review add --ai`
+- [ ] Summary generation on `lgtm review add --ai`
 - [ ] Cached by commit SHA
 - [ ] Shown in status + TUI
 - [ ] Graceful fallback
@@ -273,7 +273,7 @@ Interactive first-time setup.
 **Branch:** `feat/task-18-overlap`
 
 - [ ] Detect file/line conflicts between queued PRs
-- [ ] Show in status, `yak review compare` command
+- [ ] Show in status, `lgtm review compare` command
 - [ ] Verify: overlapping PRs trigger warnings
 
 ---

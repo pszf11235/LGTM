@@ -5,8 +5,8 @@ node_modules/
 dist/
 
 # Yak runtime data (sessions are local, not committed)
-.yak/sessions/
-.yak/scans/
+.lgtm/sessions/
+.lgtm/scans/
 
 # OS
 .DS_Store

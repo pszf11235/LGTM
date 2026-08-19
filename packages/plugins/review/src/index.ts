@@ -1,12 +1,12 @@
 /**
- * @yak/plugin-review
+ * @lgtm/plugin-review
  *
  * PR Review Harness plugin for Yak.
  * Provides structured code review workflow with rules, grouping, and TUI.
  */
 
 import type { Command } from "commander";
-import type { YakPlugin, YakContext } from "@yak/core/plugin.js";
+import type { LGTMPlugin, LGTMContext } from "@lgtm/core/plugin.js";
 import { registerAddCommand } from "./commands/add.js";
 import { registerStatusCommand } from "./commands/status.js";
 import { registerApproveCommand } from "./commands/approve.js";
@@ -17,9 +17,9 @@ import { registerWatchCommand } from "./commands/watch.js";
 import { ReviewTab } from "./pages/ReviewTab.js";
 
 /**
- * Review plugin — implements the YakPlugin interface.
+ * Review plugin — implements the LGTMPlugin interface.
  */
-export const plugin: YakPlugin = {
+export const plugin: LGTMPlugin = {
   name: "review",
   description: "PR review harness — structured code review with rules and grouping",
   version: "0.1.0",
@@ -32,7 +32,7 @@ export const plugin: YakPlugin = {
     },
   ],
 
-  registerCommands(program: Command, ctx: YakContext): void {
+  registerCommands(program: Command, ctx: LGTMContext): void {
     // Real commands (implemented)
     registerAddCommand(program, ctx);
     registerStatusCommand(program, ctx);

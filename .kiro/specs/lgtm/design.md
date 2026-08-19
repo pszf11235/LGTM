@@ -1,4 +1,4 @@
-# Design: Yak Platform
+# Design: LGTM Platform
 
 ## Architecture Overview
 
@@ -7,7 +7,7 @@ Yak is a monorepo with a thin core and domain-specific plugins.
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                         CLI Entry                             │
-│              yak → TUI | yak <plugin> <cmd> → CLI            │
+│              lgtm → TUI | lgtm <plugin> <cmd> → CLI            │
 └──────────────────────────┬──────────────────────────────────┘
                            │
 ┌──────────────────────────┴──────────────────────────────────┐
@@ -64,9 +64,9 @@ Yak is a monorepo with a thin core and domain-specific plugins.
 ```typescript
 // packages/core/src/plugin.ts
 
-interface YakPlugin {
+interface LGTMPlugin {
   name: string;                              // e.g., "review"
-  description: string;                       // shown in `yak plugins`
+  description: string;                       // shown in `lgtm plugins`
   version: string;
 
   // Commands this plugin registers
@@ -80,10 +80,10 @@ interface YakPlugin {
   onboarding?: OnboardingStep[];
 
   // Called once when plugin is first enabled
-  initialize?(ctx: YakContext): Promise<void>;
+  initialize?(ctx: LGTMContext): Promise<void>;
 }
 
-interface YakContext {
+interface LGTMContext {
   config: PRRConfig;
   profile: ProjectProfile;
   store: OKFStore;
@@ -105,7 +105,7 @@ interface OnboardingStep {
 
 ## Onboarding Flow
 
-### Generic (Core) — on `yak init`
+### Generic (Core) — on `lgtm init`
 
 ```typescript
 interface ProjectProfile {
@@ -130,31 +130,31 @@ interface ProjectProfile {
 Each plugin can define additional questions. They:
 - Are pre-filled from the global profile (e.g., review depth inherits from project goal)
 - Are always skippable (`--skip-onboarding` or `s` key)
-- Are stored in `.yak/plugins/<name>/config.md`
+- Are stored in `.lgtm/plugins/<name>/config.md`
 
 ### Config Resolution Order
 
 ```
 1. Built-in defaults (hardcoded)
-2. Central or repo config (chosen on first start: ~/.yak/ or .yak/)
+2. Central or repo config (chosen on first start: ~/.lgtm/ or .lgtm/)
 3. Global profile (profile.md in chosen config location)
-4. Plugin config (.yak/plugins/<name>/config.md)
-5. Repo override (.yakrc.yaml in repo root — always checked)
+4. Plugin config (.lgtm/plugins/<name>/config.md)
+5. Repo override (.lgtmrc.yaml in repo root — always checked)
 6. CLI flags (highest priority)
 ```
 
-On first `yak init`, user chooses config location:
-- **Central** (`~/.yak/`) — shared across all repos, good for solo devs
-- **Per-repo** (`.yak/` in repo root) — committed to git, good for teams
+On first `lgtm init`, user chooses config location:
+- **Central** (`~/.lgtm/`) — shared across all repos, good for solo devs
+- **Per-repo** (`.lgtm/` in repo root) — committed to git, good for teams
 
-Choice stored in `~/.yakrc` bootstrap file. Per-repo `.yakrc.yaml` always overrides regardless of mode.
+Choice stored in `~/.lgtmrc` bootstrap file. Per-repo `.lgtmrc.yaml` always overrides regardless of mode.
 
 ---
 
 ## Project Structure
 
 ```
-yak/
+lgtm/
 ├── package.json                         # workspace root
 ├── bunfig.toml
 ├── tsconfig.json                        # base config
@@ -163,7 +163,7 @@ yak/
 │
 ├── packages/
 │   ├── core/
-│   │   ├── package.json                 # @yak/core
+│   │   ├── package.json                 # @lgtm/core
 │   │   ├── tsconfig.json
 │   │   └── src/
 │   │       ├── index.ts                 # main entry: CLI bootstrap
@@ -171,10 +171,10 @@ yak/
 │   │       ├── cli/
 │   │       │   ├── program.ts           # Commander setup + plugin registration
 │   │       │   └── commands/
-│   │       │       ├── init.ts          # yak init (onboarding)
-│   │       │       ├── config.ts        # yak config
-│   │       │       ├── profile.ts       # yak profile
-│   │       │       └── plugins.ts       # yak plugins list/enable/disable
+│   │       │       ├── init.ts          # lgtm init (onboarding)
+│   │       │       ├── config.ts        # lgtm config
+│   │       │       ├── profile.ts       # lgtm profile
+│   │       │       └── plugins.ts       # lgtm plugins list/enable/disable
 │   │       ├── tui/
 │   │       │   ├── Shell.tsx            # TUI shell (wraps plugin pages)
 │   │       │   ├── components/
@@ -194,7 +194,7 @@ yak/
 │   │       │   └── cache.ts            # content-hash based caching
 │   │       ├── store/
 │   │       │   ├── okf.ts             # readOKF / writeOKF
-│   │       │   └── paths.ts           # resolve .yak/ directory paths
+│   │       │   └── paths.ts           # resolve .lgtm/ directory paths
 │   │       ├── config/
 │   │       │   ├── loader.ts          # cosmiconfig + layered resolution
 │   │       │   └── schema.ts          # config types + validation
@@ -204,7 +204,7 @@ yak/
 │   │
 │   └── plugins/
 │       ├── review/
-│       │   ├── package.json            # @yak/plugin-review
+│       │   ├── package.json            # @lgtm/plugin-review
 │       │   ├── tsconfig.json
 │       │   └── src/
 │       │       ├── index.ts            # plugin registration
@@ -238,16 +238,16 @@ yak/
 │       │           └── diff-parser.ts
 │       │
 │       ├── specify/
-│       │   ├── package.json            # @yak/plugin-specify
+│       │   ├── package.json            # @lgtm/plugin-specify
 │       │   └── src/
 │       │       └── index.ts            # stub: registers name + description
 │       │
 │       └── learn/
-│           ├── package.json            # @yak/plugin-learn
+│           ├── package.json            # @lgtm/plugin-learn
 │           └── src/
 │               └── index.ts            # stub
 │
-├── .yak/                               # runtime data (gitignored partially)
+├── .lgtm/                               # runtime data (gitignored partially)
 │   ├── profile.md                      # project profile
 │   ├── plugins/
 │   │   └── review/
@@ -258,7 +258,7 @@ yak/
 │
 └── .kiro/
     └── specs/
-        └── yak/
+        └── lgtm/
             ├── requirements.md
             ├── design.md
             └── tasks.md
@@ -270,7 +270,7 @@ yak/
 
 All data uses Markdown + YAML frontmatter. See previous design doc for detailed format examples (profile.md, session index, PR review, rules).
 
-Key principle: **every file in `.yak/` is browsable as markdown** — in GitHub, Obsidian, or just `cat`.
+Key principle: **every file in `.lgtm/` is browsable as markdown** — in GitHub, Obsidian, or just `cat`.
 
 ---
 
@@ -278,13 +278,13 @@ Key principle: **every file in `.yak/` is browsable as markdown** — in GitHub,
 
 OpenCode-style: full-screen, vertical scroll, minimal chrome, keyboard-driven.
 
-**Entry point:** Just run `yak` — opens the TUI. `yak tui review` jumps directly to a tab.
+**Entry point:** Just run `lgtm` — opens the TUI. `lgtm tui review` jumps directly to a tab.
 
 Core provides the shell (header with plugin tabs, status bar, page routing). Plugins provide pages rendered inside their tab.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  🦬 yak                          [ Review | Specify | Learn ]│  ← Header + tabs
+│  👍 lgtm                          [ Review | Specify | Learn ]│  ← Header + tabs
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │           (Active plugin tab content renders here)           │  ← Plugin page
@@ -302,7 +302,7 @@ All CLI commands are also executable within the TUI via a command palette (`:` t
 
 Same as before — see review plugin design for enforcement details (regex + LLM hybrid, scoped to changed files, repo-wide on-demand).
 
-Provider interface lives in core. Plugins call it through `YakContext.llm`.
+Provider interface lives in core. Plugins call it through `LGTMContext.llm`.
 
 ---
 

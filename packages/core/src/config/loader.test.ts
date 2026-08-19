@@ -16,25 +16,25 @@ import type { BootstrapConfig } from "./loader.js";
 import { createOKFStore } from "../store/okf.js";
 
 describe("resolveYakDir", () => {
-  test("repo mode returns .yak in repo root", () => {
+  test("repo mode returns .lgtm in repo root", () => {
     const config: BootstrapConfig = { storageMode: "repo" };
     const result = resolveYakDir(config, "/home/user/myproject");
-    expect(result).toBe("/home/user/myproject/.yak");
+    expect(result).toBe("/home/user/myproject/.lgtm");
   });
 
-  test("farm mode returns ~/.yak-farm/<repo-name>", () => {
+  test("farm mode returns ~/.lgtm-farm/<repo-name>", () => {
     const config: BootstrapConfig = { storageMode: "farm" };
     const result = resolveYakDir(config, "/home/user/myproject");
-    expect(result).toBe(path.join(os.homedir(), ".yak-farm", "myproject"));
+    expect(result).toBe(path.join(os.homedir(), ".lgtm-farm", "myproject"));
   });
 
   test("farm mode with custom path uses custom path", () => {
     const config: BootstrapConfig = {
       storageMode: "farm",
-      farmPath: "/custom/yak-farm",
+      farmPath: "/custom/lgtm-farm",
     };
     const result = resolveYakDir(config, "/home/user/myproject");
-    expect(result).toBe("/custom/yak-farm/myproject");
+    expect(result).toBe("/custom/lgtm-farm/myproject");
   });
 });
 
@@ -42,7 +42,7 @@ describe("loadProfile", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = path.join(os.tmpdir(), `yak-config-test-${Date.now()}`);
+    tmpDir = path.join(os.tmpdir(), `lgtm-config-test-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
   });
 
@@ -129,7 +129,7 @@ describe("OKF profile serialization", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = path.join(os.tmpdir(), `yak-serial-test-${Date.now()}`);
+    tmpDir = path.join(os.tmpdir(), `lgtm-serial-test-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
   });
 
@@ -140,7 +140,7 @@ describe("OKF profile serialization", () => {
   test("writing profile with no undefined values succeeds", async () => {
     const store = createOKFStore(tmpDir);
     const data = {
-      type: "yak/profile",
+      type: "lgtm/profile",
       project: "test",
       goal: "production",
       feedbackStyle: "direct",
@@ -161,7 +161,7 @@ describe("OKF profile serialization", () => {
   test("writing profile with undefined values stripped via JSON.parse/stringify", async () => {
     const store = createOKFStore(tmpDir);
     const rawData = {
-      type: "yak/profile",
+      type: "lgtm/profile",
       project: "test",
       goal: "",
       feedbackStyle: "",
@@ -186,7 +186,7 @@ describe("OKF profile serialization", () => {
     await store.write(
       "profile.md",
       {
-        type: "yak/profile",
+        type: "lgtm/profile",
         project: "test",
         goal: "",
         feedbackStyle: "",

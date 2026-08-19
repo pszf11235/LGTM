@@ -1,7 +1,7 @@
 /**
  * OKF Store — Open Knowledge Format inspired storage.
  *
- * All Yak data is stored as Markdown files with YAML frontmatter.
+ * All LGTM data is stored as Markdown files with YAML frontmatter.
  * This makes everything:
  * - Human-readable (just open in any editor or GitHub)
  * - Agent-readable (LLMs can consume raw markdown)

@@ -20,7 +20,7 @@ describe("isOnboardingComplete", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = path.join(os.tmpdir(), `yak-test-${Date.now()}`);
+    tmpDir = path.join(os.tmpdir(), `lgtm-test-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
   });
 
@@ -37,7 +37,7 @@ describe("isOnboardingComplete", () => {
     await store.write(
       "profile.md",
       {
-        type: "yak/profile",
+        type: "lgtm/profile",
         project: "test",
         goal: "",
         feedbackStyle: "direct",
@@ -53,7 +53,7 @@ describe("isOnboardingComplete", () => {
     await store.write(
       "profile.md",
       {
-        type: "yak/profile",
+        type: "lgtm/profile",
         project: "test",
         goal: "production",
         feedbackStyle: "",
@@ -69,7 +69,7 @@ describe("isOnboardingComplete", () => {
     await store.write(
       "profile.md",
       {
-        type: "yak/profile",
+        type: "lgtm/profile",
         project: "test",
         goal: "production",
         feedbackStyle: "direct",
@@ -85,7 +85,7 @@ describe("isOnboardingComplete", () => {
     await store.write(
       "profile.md",
       {
-        type: "yak/profile",
+        type: "lgtm/profile",
         project: "test",
         goal: "production",
         feedbackStyle: "direct",
@@ -104,7 +104,7 @@ describe("isOnboardingComplete", () => {
     await store.write(
       "profile.md",
       {
-        type: "yak/profile",
+        type: "lgtm/profile",
         project: "test",
         goal: "vibed",
         feedbackStyle: "gentle",

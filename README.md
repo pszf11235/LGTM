@@ -1,6 +1,6 @@
-# 🦬 Yak — Stop Shaving, Start Shipping
+# 👍 LGTM — Looks Good To Me
 
-> AI coding agents let you generate 5 PRs in an hour. But now **you** need to review them. Yak is the structured review environment that breaks the bottleneck.
+> AI coding agents let you generate 5 PRs in an hour. But now **you** need to review them. LGTM is the structured review environment that breaks the bottleneck.
 
 **Yak** is a developer productivity platform with a plugin architecture. It provides a CLI + TUI for structured PR review with rules, auto-grouping, pattern analysis, and persistent review history — all stored as human-readable markdown.
 
@@ -11,11 +11,11 @@ Before AI agents:  Write 1-2 PRs/day → review naturally → manageable
 After AI agents:   5+ PRs in an hour → review in one chat window → chaos
 ```
 
-Current tools review PRs in isolation. But you're juggling related PRs, repeating the same feedback, and losing context between sessions. Yak fixes this.
+Current tools review PRs in isolation. But you're juggling related PRs, repeating the same feedback, and losing context between sessions. LGTM fixes this.
 
-## What Yak Does That an LLM Cannot
+## What LGTM Does That an LLM Cannot
 
-| Capability | LLM alone | With Yak |
+| Capability | LLM alone | With LGTM |
 |---|---|---|
 | Persist reviews across sessions | ❌ Stateless | ✅ Saved as markdown |
 | Enforce rules automatically | ❌ Forgets | ✅ Regex + LLM enforcement |
@@ -28,31 +28,31 @@ Current tools review PRs in isolation. But you're juggling related PRs, repeatin
 
 ```bash
 # Install
-git clone https://github.com/pszf11235/yak.git && cd yak
+git clone https://github.com/pszf11235/lgtm.git && cd lgtm
 bun install
 
 # First-time setup (interactive)
-bun run yak init
+bun run lgtm init
 
 # Add PRs to review queue (demo mode for testing)
-bun run yak review add 101 102 103 --demo
+bun run lgtm review add 101 102 103 --demo
 
 # Open the TUI
-bun run yak
+bun run lgtm
 
 # Or use CLI directly
-bun run yak review status
-bun run yak review approve 101
+bun run lgtm review status
+bun run lgtm review approve 101
 ```
 
 ## Features
 
 ### 📋 Review Queue & Workflow
 ```bash
-yak review add 101 102 103    # Queue PRs
-yak review status              # See queue with states + groups
-yak review approve 101         # Approve
-yak review flag 102 -r "..."   # Flag with reason
+lgtm review add 101 102 103    # Queue PRs
+lgtm review status              # See queue with states + groups
+lgtm review approve 101         # Approve
+lgtm review flag 102 -r "..."   # Flag with reason
 ```
 
 ### ⚡ Feature Grouping
@@ -65,7 +65,7 @@ Feature Groups:
 
 ### 📺 Full-Screen TUI
 ```
-🦬 yak                                    [ Review | Specify | Learn ]
+👍 lgtm                                    [ Review | Specify | Learn ]
 reviewing: my-project  /path/to/repo
 ──────────────────────────────────────────────────────────────────────
   PR #101: Add OAuth
@@ -85,18 +85,18 @@ Create rules from review patterns — enforced automatically on future PRs:
 
 ```bash
 # Create a rule (regex enforcement — zero tokens)
-yak review rule add "No hardcoded secrets" \
+lgtm review rule add "No hardcoded secrets" \
   --pattern '(api_key|secret)\s*=\s*"[^"]{8,}"' \
   --category security --severity error
 
 # Or import from existing docs
-yak review rule import CLAUDE.md
+lgtm review rule import CLAUDE.md
 
 # Scan entire repo
-yak review scan
+lgtm review scan
 
 # Export as git hook / AI steering / ESLint
-yak review rule export --format hook -o .git/hooks/pre-commit
+lgtm review rule export --format hook -o .git/hooks/pre-commit
 ```
 
 Rules support **hybrid enforcement**:
@@ -105,9 +105,9 @@ Rules support **hybrid enforcement**:
 
 ### 🤖 AI Features (Optional, Token-Efficient)
 ```bash
-yak ai test                    # Verify AI connection
-yak ai model llama3.2          # Set model
-yak review rule suggest        # Mine your comments for patterns
+lgtm ai test                    # Verify AI connection
+lgtm ai model llama3.2          # Set model
+lgtm review rule suggest        # Mine your comments for patterns
 ```
 
 - Works with: OpenAI, Anthropic, **Ollama (local/private)**
@@ -119,7 +119,7 @@ yak review rule suggest        # Mine your comments for patterns
 All data stored as Markdown + YAML frontmatter:
 ```yaml
 ---
-type: yak/review
+type: lgtm/review
 pr: 101
 title: "Add OAuth2 PKCE flow"
 state: approved
@@ -138,7 +138,7 @@ Browsable in GitHub, Obsidian, or any markdown viewer.
 ## Architecture
 
 ```
-yak/
+lgtm/
 ├── packages/core/          # CLI, TUI, LLM, OKF store, onboarding
 └── packages/plugins/
     ├── review/             # PR review (active)
@@ -151,46 +151,46 @@ yak/
 ## Configuration
 
 ```bash
-yak init                   # Interactive setup
-yak config                 # View current config
-yak config --edit          # Re-run setup to change
-yak ai model <name>       # Switch model
+lgtm init                   # Interactive setup
+lgtm config                 # View current config
+lgtm config --edit          # Re-run setup to change
+lgtm ai model <name>       # Switch model
 ```
 
 Storage modes (chosen during init):
-- **Per-repo** (`.yak/`): committed to git, shared with team
-- **Yak-farm** (`~/.yak-farm/`): central location, cross-repo queries
+- **Per-repo** (`.lgtm/`): committed to git, shared with team
+- **LGTM-farm** (`~/.lgtm-farm/`): central location, cross-repo queries
 
 ## Commands Reference
 
 | Command | Description |
 |---------|-------------|
-| `yak` | Open TUI (or run onboarding if first time) |
-| `yak init` | Interactive setup |
-| `yak config` | View/edit configuration |
-| `yak ai test` | Test AI connection |
-| `yak ai model [name]` | Show/set AI model |
-| `yak plugins` | List plugins |
-| `yak review add <prs...>` | Queue PRs for review |
-| `yak review status` | Show queue |
-| `yak review approve <pr>` | Approve a PR |
-| `yak review flag <pr> -r "..."` | Flag with reason |
-| `yak review rule add "..."` | Create a rule |
-| `yak review rule list` | List rules |
-| `yak review rule import [file]` | Import from CLAUDE.md etc. |
-| `yak review rule export -f hook` | Export as git hook |
-| `yak review rule suggest` | AI suggests rules from patterns |
-| `yak review scan` | Check whole repo against rules |
+| `lgtm` | Open TUI (or run onboarding if first time) |
+| `lgtm init` | Interactive setup |
+| `lgtm config` | View/edit configuration |
+| `lgtm ai test` | Test AI connection |
+| `lgtm ai model [name]` | Show/set AI model |
+| `lgtm plugins` | List plugins |
+| `lgtm review add <prs...>` | Queue PRs for review |
+| `lgtm review status` | Show queue |
+| `lgtm review approve <pr>` | Approve a PR |
+| `lgtm review flag <pr> -r "..."` | Flag with reason |
+| `lgtm review rule add "..."` | Create a rule |
+| `lgtm review rule list` | List rules |
+| `lgtm review rule import [file]` | Import from CLAUDE.md etc. |
+| `lgtm review rule export -f hook` | Export as git hook |
+| `lgtm review rule suggest` | AI suggests rules from patterns |
+| `lgtm review scan` | Check whole repo against rules |
 
 ## Development
 
 ```bash
 bun install              # Install deps
-bun run yak              # Run CLI
+bun run lgtm              # Run CLI
 bun test                 # Run tests
 task check               # Lint + test + build
 task slaughter           # 🪓 Full cleanup (fresh start)
-task info                # Show yak state
+task info                # Show lgtm state
 ```
 
 ## Tech Stack

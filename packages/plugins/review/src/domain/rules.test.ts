@@ -10,7 +10,7 @@ import path from "path";
 import os from "os";
 import { createRulesEngine, type Rule } from "./rules.js";
 import { parseDiff } from "./diff-parser.js";
-import { createOKFStore } from "@yak/core/store/okf.js";
+import { createOKFStore } from "@lgtm/core/store/okf.js";
 
 describe("Rules Engine", () => {
   let tmpDir: string;
@@ -18,7 +18,7 @@ describe("Rules Engine", () => {
   let engine: ReturnType<typeof createRulesEngine>;
 
   beforeEach(() => {
-    tmpDir = path.join(os.tmpdir(), `yak-rules-test-${Date.now()}`);
+    tmpDir = path.join(os.tmpdir(), `lgtm-rules-test-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
     store = createOKFStore(tmpDir);
     engine = createRulesEngine(store);

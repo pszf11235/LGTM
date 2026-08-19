@@ -1,5 +1,5 @@
 /**
- * @yak/plugin-specify (stub)
+ * @lgtm/plugin-specify (stub)
  *
  * Codebase intelligence & agent handoff tool.
  * Analyze repos, generate diagrams, create agent-ready prompts.
@@ -8,14 +8,14 @@
  */
 
 import type { Command } from "commander";
-import type { YakPlugin, YakContext } from "@yak/core/plugin.js";
+import type { LGTMPlugin, LGTMContext } from "@lgtm/core/plugin.js";
 
-export const plugin: YakPlugin = {
+export const plugin: LGTMPlugin = {
   name: "specify",
   description: "Codebase intelligence — analysis, diagrams, agent-ready prompts",
   version: "0.1.0",
 
-  registerCommands(program: Command, ctx: YakContext): void {
+  registerCommands(program: Command, ctx: LGTMContext): void {
     program
       .command("analyze [path]")
       .description("Analyze a codebase and generate documentation")

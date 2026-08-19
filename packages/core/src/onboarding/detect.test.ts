@@ -14,7 +14,7 @@ describe("detectTechStack", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = path.join(os.tmpdir(), `yak-detect-test-${Date.now()}`);
+    tmpDir = path.join(os.tmpdir(), `lgtm-detect-test-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
   });
 

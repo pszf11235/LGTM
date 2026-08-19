@@ -1,7 +1,7 @@
 {
-  "name": "@yak/core",
+  "name": "@lgtm/core",
   "version": "0.1.0",
-  "description": "Core framework for Yak — CLI, TUI, plugin system, LLM, storage",
+  "description": "Core framework for LGTM — CLI, TUI, plugin system, LLM, storage",
   "type": "module",
   "main": "./src/index.ts",
   "exports": {

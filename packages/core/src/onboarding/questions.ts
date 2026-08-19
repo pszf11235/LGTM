@@ -1,5 +1,5 @@
 /**
- * Default onboarding questions for `yak init`.
+ * Default onboarding questions for `lgtm init`.
  *
  * These establish the project profile that all plugins use.
  * Each question is skippable. The whole flow is skippable with --skip-onboarding.
@@ -16,18 +16,18 @@ export interface OnboardingQuestion {
 export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
   {
     id: "storageMode",
-    question: "Where should yak store its data?",
+    question: "Where should lgtm store its data?",
     type: "select",
     options: [
       {
         value: "repo",
-        label: "Per-repo (.yak/ in each repo)",
+        label: "Per-repo (.lgtm/ in each repo)",
         description:
           "Committed to git, shared with team. Each repo has its own reviews, rules, and config.",
       },
       {
         value: "farm",
-        label: "Yak-farm (central ~/.yak-farm/)",
+        label: "LGTM-farm (central ~/.lgtm-farm/)",
         description:
           "All repos in one place. Easy cross-repo queries. Personal, not committed to git.",
       },
@@ -71,7 +71,7 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
   },
   {
     id: "feedbackStyle",
-    question: "How should yak give you feedback?",
+    question: "How should lgtm give you feedback?",
     type: "select",
     options: [
       {

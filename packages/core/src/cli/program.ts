@@ -2,14 +2,14 @@
  * CLI Program Setup & Plugin Loader
  *
  * Discovers plugins from packages/plugins/, validates them against
- * the YakPlugin interface, and registers their commands under
+ * the LGTMPlugin interface, and registers their commands under
  * the appropriate namespace.
  */
 
 import { Command } from "commander";
 import path from "path";
 import fs from "fs";
-import type { YakPlugin, YakContext, YakConfig, Logger } from "../plugin.js";
+import type { LGTMPlugin, LGTMContext, LGTMConfig, Logger } from "../plugin.js";
 import { loadConfig, loadBootstrap, loadProfile, resolveYakDir } from "../config/loader.js";
 import { createOKFStore } from "../store/okf.js";
 import { findGitRoot } from "../store/paths.js";
@@ -17,12 +17,12 @@ import { findGitRoot } from "../store/paths.js";
 /**
  * Discover plugins by scanning the packages/plugins/ directory.
  * Each plugin must export a `plugin` object or a `register` function
- * that returns a YakPlugin.
+ * that returns a LGTMPlugin.
  */
 export async function discoverPlugins(
   pluginsDir: string
-): Promise<YakPlugin[]> {
-  const plugins: YakPlugin[] = [];
+): Promise<LGTMPlugin[]> {
+  const plugins: LGTMPlugin[] = [];
 
   if (!fs.existsSync(pluginsDir)) {
     return plugins;
@@ -40,7 +40,7 @@ export async function discoverPlugins(
       const mod = await import(pluginEntry);
 
       // Plugin can export either a `plugin` object or a `register()` function
-      const plugin: YakPlugin | undefined =
+      const plugin: LGTMPlugin | undefined =
         mod.register?.() ?? mod.plugin ?? mod.default;
 
       if (plugin && isValidPlugin(plugin)) {
@@ -59,9 +59,9 @@ export async function discoverPlugins(
 }
 
 /**
- * Type guard: validates that an object satisfies YakPlugin minimum contract.
+ * Type guard: validates that an object satisfies LGTMPlugin minimum contract.
  */
-function isValidPlugin(obj: unknown): obj is YakPlugin {
+function isValidPlugin(obj: unknown): obj is LGTMPlugin {
   if (typeof obj !== "object" || obj === null) return false;
   const p = obj as Record<string, unknown>;
   return (
@@ -73,12 +73,12 @@ function isValidPlugin(obj: unknown): obj is YakPlugin {
 
 /**
  * Register a plugin's commands into the Commander program.
- * Creates a subcommand namespace: `yak <plugin.name> <command>`
+ * Creates a subcommand namespace: `lgtm <plugin.name> <command>`
  */
 export function registerPlugin(
   program: Command,
-  plugin: YakPlugin,
-  ctx: YakContext
+  plugin: LGTMPlugin,
+  ctx: LGTMContext
 ): void {
   const sub = program
     .command(plugin.name)
@@ -91,23 +91,23 @@ export function registerPlugin(
 }
 
 /**
- * Build a minimal YakContext for bootstrapping.
+ * Build a minimal LGTMContext for bootstrapping.
  * Uses real config loader and OKF store when available.
  */
-export function buildBootstrapContext(): YakContext {
+export function buildBootstrapContext(): LGTMContext {
   const repoRoot = findGitRoot();
   const config = loadConfig();
   const bootstrap = loadBootstrap();
-  const yakDir = resolveYakDir(bootstrap, repoRoot);
-  const store = createOKFStore(yakDir);
-  const profile = loadProfile(yakDir);
+  const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+  const store = createOKFStore(lgtmDir);
+  const profile = loadProfile(lgtmDir);
 
   const logger: Logger = {
     info: (msg) => console.log(`  ${msg}`),
     warn: (msg) => console.log(`  ⚠️  ${msg}`),
     error: (msg) => console.error(`  ❌ ${msg}`),
     debug: (msg) => {
-      if (process.env.YAK_DEBUG) console.log(`  🐛 ${msg}`);
+      if (process.env.LGTM_DEBUG) console.log(`  🐛 ${msg}`);
     },
   };
 
@@ -117,7 +117,7 @@ export function buildBootstrapContext(): YakContext {
     llm: null,
     config,
     logger,
-    yakDir,
+    lgtmDir,
     repoRoot,
   };
 }

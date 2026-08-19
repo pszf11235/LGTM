@@ -1,18 +1,18 @@
 /**
- * `yak review watch` — Monitor repos for new PRs needing review.
+ * `lgtm review watch` — Monitor repos for new PRs needing review.
  *
  * Commands:
- *   yak review watch add <owner/repo>   — add a repo to watch list
- *   yak review watch list               — show watched repos + pending PRs
- *   yak review watch remove <owner/repo> — stop watching
- *   yak review watch status             — show PRs needing attention
- *   yak review watch --once             — single check (good for cron)
+ *   lgtm review watch add <owner/repo>   — add a repo to watch list
+ *   lgtm review watch list               — show watched repos + pending PRs
+ *   lgtm review watch remove <owner/repo> — stop watching
+ *   lgtm review watch status             — show PRs needing attention
+ *   lgtm review watch --once             — single check (good for cron)
  */
 
 import type { Command } from "commander";
-import type { YakContext } from "@yak/core/plugin.js";
+import type { LGTMContext } from "@lgtm/core/plugin.js";
 import chalk from "chalk";
-import type { OKFStore } from "@yak/core/plugin.js";
+import type { OKFStore } from "@lgtm/core/plugin.js";
 
 interface WatchedRepo {
   owner: string;
@@ -30,7 +30,7 @@ interface PendingPR {
   url: string;
 }
 
-export function registerWatchCommand(program: Command, ctx: YakContext) {
+export function registerWatchCommand(program: Command, ctx: LGTMContext) {
   const watch = program
     .command("watch")
     .description("Monitor repos for new PRs needing review");
@@ -42,7 +42,7 @@ export function registerWatchCommand(program: Command, ctx: YakContext) {
     .action(async (repo: string, opts: { filter: string }) => {
       const [owner, repoName] = repo.split("/");
       if (!owner || !repoName) {
-        ctx.logger.error("Format: owner/repo (e.g., pszf11235/yak)");
+        ctx.logger.error("Format: owner/repo (e.g., pszf11235/lgtm)");
         return;
       }
 
@@ -87,11 +87,11 @@ export function registerWatchCommand(program: Command, ctx: YakContext) {
     .action(async () => {
       const config = await loadWatchConfig(ctx.store);
       if (config.length === 0) {
-        console.log(chalk.gray(`\n  No repos being watched. Add one: ${chalk.cyan("yak review watch add owner/repo")}\n`));
+        console.log(chalk.gray(`\n  No repos being watched. Add one: ${chalk.cyan("lgtm review watch add owner/repo")}\n`));
         return;
       }
 
-      console.log(chalk.bold(`\n🦬 Watched Repos (${config.length})\n`));
+      console.log(chalk.bold(`\n👍 Watched Repos (${config.length})\n`));
       for (const r of config) {
         const lastChecked = r.lastChecked ? chalk.gray(` (last: ${r.lastChecked.split("T")[0]})`) : "";
         console.log(`  ${chalk.green("●")} ${r.owner}/${r.repo} — filter: ${r.filter}${lastChecked}`);
@@ -111,7 +111,7 @@ export function registerWatchCommand(program: Command, ctx: YakContext) {
         return;
       }
 
-      console.log(chalk.bold("\n🦬 Checking for PRs needing review...\n"));
+      console.log(chalk.bold("\n👍 Checking for PRs needing review...\n"));
 
       const allPending: PendingPR[] = [];
 
@@ -150,7 +150,7 @@ export function registerWatchCommand(program: Command, ctx: YakContext) {
         console.log(`  ${chalk.cyan(`#${pr.number}`)} ${pr.title}`);
         console.log(chalk.gray(`    ${pr.repo} by @${pr.author} — ${pr.createdAt.split("T")[0]}`));
       }
-      console.log(chalk.gray(`\n  Add to queue: ${chalk.cyan("yak review add <numbers...>")}\n`));
+      console.log(chalk.gray(`\n  Add to queue: ${chalk.cyan("lgtm review add <numbers...>")}\n`));
     });
 }
 
@@ -162,7 +162,7 @@ async function loadWatchConfig(store: OKFStore): Promise<WatchedRepo[]> {
 
 async function saveWatchConfig(store: OKFStore, repos: WatchedRepo[]): Promise<void> {
   const cleanData = JSON.parse(JSON.stringify({
-    type: "yak/watch",
+    type: "lgtm/watch",
     repos,
     lastUpdated: new Date().toISOString(),
   }));
@@ -189,7 +189,7 @@ async function fetchOpenPRs(watched: WatchedRepo): Promise<Array<{ number: numbe
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github.v3+json",
-      "User-Agent": "yak-cli",
+      "User-Agent": "lgtm-cli",
     },
     signal: AbortSignal.timeout(15000),
   });

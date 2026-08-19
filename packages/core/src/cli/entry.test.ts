@@ -1,7 +1,7 @@
 /**
  * Tests for CLI entry point behavior.
  *
- * Verifies that bare `yak` routes correctly based on profile state.
+ * Verifies that bare `lgtm` routes correctly based on profile state.
  * These test the logic, not the actual CLI parsing (that needs integration tests).
  *
  * Run with: bun test packages/core/src/cli/entry.test.ts
@@ -14,11 +14,11 @@ import os from "os";
 import { isOnboardingComplete } from "../onboarding/flow.js";
 import { createOKFStore } from "../store/okf.js";
 
-describe("CLI routing logic: bare 'yak' behavior", () => {
+describe("CLI routing logic: bare 'lgtm' behavior", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = path.join(os.tmpdir(), `yak-cli-test-${Date.now()}`);
+    tmpDir = path.join(os.tmpdir(), `lgtm-cli-test-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
   });
 
@@ -26,13 +26,13 @@ describe("CLI routing logic: bare 'yak' behavior", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test("no .yak/ directory → should trigger onboarding", () => {
+  test("no .lgtm/ directory → should trigger onboarding", () => {
     // No profile at all
     expect(isOnboardingComplete(tmpDir)).toBe(false);
   });
 
-  test("empty .yak/ directory → should trigger onboarding", () => {
-    fs.mkdirSync(path.join(tmpDir, ".yak"), { recursive: true });
+  test("empty .lgtm/ directory → should trigger onboarding", () => {
+    fs.mkdirSync(path.join(tmpDir, ".lgtm"), { recursive: true });
     expect(isOnboardingComplete(tmpDir)).toBe(false);
   });
 
@@ -41,7 +41,7 @@ describe("CLI routing logic: bare 'yak' behavior", () => {
     await store.write(
       "profile.md",
       {
-        type: "yak/profile",
+        type: "lgtm/profile",
         project: "test",
         goal: "",
         feedbackStyle: "",
@@ -57,7 +57,7 @@ describe("CLI routing logic: bare 'yak' behavior", () => {
     await store.write(
       "profile.md",
       {
-        type: "yak/profile",
+        type: "lgtm/profile",
         project: "test",
         goal: "",
         feedbackStyle: "",
@@ -74,7 +74,7 @@ describe("CLI routing logic: bare 'yak' behavior", () => {
     await store.write(
       "profile.md",
       {
-        type: "yak/profile",
+        type: "lgtm/profile",
         project: "test",
         goal: "production",
         feedbackStyle: "",
@@ -90,7 +90,7 @@ describe("CLI routing logic: bare 'yak' behavior", () => {
     await store.write(
       "profile.md",
       {
-        type: "yak/profile",
+        type: "lgtm/profile",
         project: "test",
         goal: "production",
         feedbackStyle: "direct",

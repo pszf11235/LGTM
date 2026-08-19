@@ -114,7 +114,7 @@ export function ReviewPage({
     // Debug: write keypress to file for diagnostics
     if (process.env.YAK_DEBUG) {
       const fs = require("fs");
-      fs.appendFileSync("/tmp/yak-debug.log",
+      fs.appendFileSync("/tmp/lgtm-debug.log",
         `[ReviewPage] input="${input}" cursor=${cursorLine} scroll=${scrollOffset} total=${flatLines.length} termH=${termHeight}\n`
       );
     }
@@ -191,7 +191,7 @@ export function ReviewPage({
         if (startInfo) {
           setIsCommenting(true);
           // Store range info for the comment handler
-          (globalThis as any).__yakCommentRange = { startLine: startInfo.line, endLine: endInfo?.line ?? startInfo.line, file: startInfo.file };
+          (globalThis as any).__lgtmCommentRange = { startLine: startInfo.line, endLine: endInfo?.line ?? startInfo.line, file: startInfo.file };
         }
         setSelectionStart(null);
       } else {
@@ -226,9 +226,9 @@ export function ReviewPage({
 
   function handleCommentSubmit(text: string) {
     // Check for range comment
-    const range = (globalThis as any).__yakCommentRange;
+    const range = (globalThis as any).__lgtmCommentRange;
     if (range) {
-      delete (globalThis as any).__yakCommentRange;
+      delete (globalThis as any).__lgtmCommentRange;
       const newComment: ReviewComment = {
         id: crypto.randomUUID(),
         file: range.file,

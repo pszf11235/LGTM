@@ -1,21 +1,21 @@
 /**
  * Plugin interface and context types.
  *
- * Every Yak plugin implements YakPlugin. The core discovers plugins,
- * calls registerCommands() to wire CLI, and provides YakContext for
+ * Every LGTM plugin implements LGTMPlugin. The core discovers plugins,
+ * calls registerCommands() to wire CLI, and provides LGTMContext for
  * access to shared services (LLM, store, config).
  */
 
 import type { Command } from "commander";
 
 /**
- * The contract every Yak plugin must implement.
+ * The contract every LGTM plugin must implement.
  */
-export interface YakPlugin {
-  /** Unique plugin name (used as CLI namespace: `yak <name> <command>`) */
+export interface LGTMPlugin {
+  /** Unique plugin name (used as CLI namespace: `lgtm <name> <command>`) */
   name: string;
 
-  /** Human-readable description (shown in `yak plugins`) */
+  /** Human-readable description (shown in `lgtm plugins`) */
   description: string;
 
   /** Plugin version (semver) */
@@ -28,7 +28,7 @@ export interface YakPlugin {
    * @param program - The Commander subcommand for this plugin (already namespaced)
    * @param ctx - Access to core services (store, config, llm, etc.)
    */
-  registerCommands(program: Command, ctx: YakContext): void;
+  registerCommands(program: Command, ctx: LGTMContext): void;
 
   /**
    * TUI pages this plugin provides (optional).
@@ -44,17 +44,17 @@ export interface YakPlugin {
   onboarding?: OnboardingStep[];
 
   /**
-   * Called once when plugin is first enabled or on `yak init`.
+   * Called once when plugin is first enabled or on `lgtm init`.
    * Use for plugin-specific setup (creating directories, etc.)
    */
-  initialize?(ctx: YakContext): Promise<void>;
+  initialize?(ctx: LGTMContext): Promise<void>;
 }
 
 /**
  * Context object passed to plugins — provides access to core services.
  * Plugins should NOT import core internals directly; use this context.
  */
-export interface YakContext {
+export interface LGTMContext {
   /** Resolved project profile (from onboarding) — may be null if not yet initialized */
   profile: ProjectProfile | null;
 
@@ -65,13 +65,13 @@ export interface YakContext {
   llm: LLMProvider | null;
 
   /** Resolved configuration */
-  config: YakConfig;
+  config: LGTMConfig;
 
   /** Logger */
   logger: Logger;
 
-  /** Root directory of the .yak data store */
-  yakDir: string;
+  /** Root directory of the .lgtm data store */
+  lgtmDir: string;
 
   /** Git root directory of the current repo */
   repoRoot: string;
@@ -90,7 +90,7 @@ export interface TUIPage {
 
   /**
    * React component to render for this page.
-   * Receives the YakContext as props.
+   * Receives the LGTMContext as props.
    */
   component: React.ComponentType<any>;
 }
@@ -137,12 +137,12 @@ export interface ProjectProfile {
   createdAt: string;
 }
 
-/** Yak configuration (resolved from all layers) */
-export interface YakConfig {
+/** LGTM configuration (resolved from all layers) */
+export interface LGTMConfig {
   /**
-   * Where yak data lives:
-   * - "farm": central yak-farm (default: ~/.yak-farm/<repo-name>/)
-   * - "repo": .yak/ in each repo root (committed to git)
+   * Where lgtm data lives:
+   * - "farm": central lgtm-farm (default: ~/.lgtm-farm/<repo-name>/)
+   * - "repo": .lgtm/ in each repo root (committed to git)
    */
   storageMode: "farm" | "repo";
 

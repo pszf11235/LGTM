@@ -1,4 +1,4 @@
-# 🦬 Yak Roadmap
+# 👍 LGTM Roadmap
 
 ## v0.1.0 (Current — Hackathon Release)
 

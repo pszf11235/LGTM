@@ -1,7 +1,7 @@
 /**
  * Rules Engine — create, load, match, and enforce review rules.
  *
- * Rules are stored as individual OKF markdown files in .yak/rules/.
+ * Rules are stored as individual OKF markdown files in .lgtm/rules/.
  * Each rule has: description, category, severity, enforcement type,
  * optional regex pattern, file glob, and examples (bad/good).
  *
@@ -10,7 +10,7 @@
  * - "llm": sent to LLM with examples (Task 12)
  */
 
-import type { OKFStore } from "@yak/core/plugin.js";
+import type { OKFStore } from "@lgtm/core/plugin.js";
 import type { RuleViolation } from "./types.js";
 import type { ParsedDiff } from "./diff-parser.js";
 import { minimatch } from "minimatch";
@@ -41,7 +41,7 @@ export interface Rule {
  */
 export function createRulesEngine(store: OKFStore) {
   /**
-   * Load all rules from .yak/rules/*.md
+   * Load all rules from .lgtm/rules/*.md
    */
   async function loadRules(): Promise<Rule[]> {
     const files = await store.list("rules");
@@ -50,7 +50,7 @@ export function createRulesEngine(store: OKFStore) {
     for (const file of files) {
       if (file === "rules/index.md") continue; // skip index
       const doc = await store.read(file);
-      if (!doc || doc.data.type !== "yak/rule") continue;
+      if (!doc || doc.data.type !== "lgtm/rule") continue;
 
       rules.push({
         id: doc.data.id as string,
@@ -107,7 +107,7 @@ export function createRulesEngine(store: OKFStore) {
 
     // Strip undefined values (YAML serializer chokes on them)
     const data = JSON.parse(JSON.stringify({
-      type: "yak/rule",
+      type: "lgtm/rule",
       ...rule,
     }));
 

@@ -7,7 +7,7 @@
  * Persists queue state to session index.md (OKF format).
  */
 
-import type { OKFStore } from "@yak/core/plugin.js";
+import type { OKFStore } from "@lgtm/core/plugin.js";
 import type { QueuedPR, FeatureGroup } from "./types.js";
 import { analyzeGroups } from "./grouping.js";
 
@@ -52,7 +52,7 @@ export function createQueueManager(store: OKFStore, date?: string) {
     await store.write(
       indexPath,
       {
-        type: "yak/session",
+        type: "lgtm/session",
         date: session.date,
         status: session.prs.some((p) => p.state === "reviewing")
           ? "in-progress"

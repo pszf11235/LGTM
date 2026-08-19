@@ -1,5 +1,5 @@
 /**
- * `yak review rule <action>` — Manage review rules.
+ * `lgtm review rule <action>` — Manage review rules.
  *
  * Subcommands:
  *   add "description" [--pattern regex] [--category security] [--severity warn]
@@ -9,11 +9,11 @@
  */
 
 import type { Command } from "commander";
-import type { YakContext } from "@yak/core/plugin.js";
+import type { LGTMContext } from "@lgtm/core/plugin.js";
 import { createRulesEngine } from "../domain/rules.js";
 import chalk from "chalk";
 
-export function registerRuleCommand(program: Command, ctx: YakContext) {
+export function registerRuleCommand(program: Command, ctx: LGTMContext) {
   const rule = program
     .command("rule")
     .description("Manage review rules (add/list/enable/disable)");
@@ -55,7 +55,7 @@ export function registerRuleCommand(program: Command, ctx: YakContext) {
         createdFrom: opts.fromPr,
       });
 
-      console.log(chalk.bold(`\n🦬 Rule created: ${rule.id}\n`));
+      console.log(chalk.bold(`\n👍 Rule created: ${rule.id}\n`));
       console.log(`  ${chalk.cyan(rule.description)}`);
       console.log(`  Category: ${rule.category} | Severity: ${rule.severity} | Enforcement: ${rule.enforcement}`);
       if (rule.pattern) console.log(`  Pattern: ${chalk.gray(rule.pattern)}`);
@@ -71,11 +71,11 @@ export function registerRuleCommand(program: Command, ctx: YakContext) {
       const rules = await engine.loadRules();
 
       if (rules.length === 0) {
-        console.log(chalk.gray(`\n  No rules yet. Create one with ${chalk.cyan("yak review rule add \"...\"")} \n`));
+        console.log(chalk.gray(`\n  No rules yet. Create one with ${chalk.cyan("lgtm review rule add \"...\"")} \n`));
         return;
       }
 
-      console.log(chalk.bold(`\n🦬 Review Rules (${rules.length})\n`));
+      console.log(chalk.bold(`\n👍 Review Rules (${rules.length})\n`));
       console.log(chalk.gray("  ID              Sev   Cat          Enforcement  Description"));
       console.log(chalk.gray("  " + "─".repeat(75)));
 
@@ -124,11 +124,11 @@ export function registerRuleCommand(program: Command, ctx: YakContext) {
           console.log(chalk.gray("\n  No rule source files found (CLAUDE.md, .cursorrules, .kiro/steering, etc.)\n"));
           return;
         }
-        console.log(chalk.bold("\n🦬 Discovered rule sources:\n"));
+        console.log(chalk.bold("\n👍 Discovered rule sources:\n"));
         for (const s of sources) {
           console.log(`  📄 ${s}`);
         }
-        console.log(chalk.gray(`\n  Import with: ${chalk.cyan(`yak review rule import <file>`)}\n`));
+        console.log(chalk.gray(`\n  Import with: ${chalk.cyan(`lgtm review rule import <file>`)}\n`));
         return;
       }
 
@@ -136,7 +136,7 @@ export function registerRuleCommand(program: Command, ctx: YakContext) {
       console.log(chalk.gray(`\n  Importing rules from ${file}...\n`));
       try {
         const rules = await importRulesFromFile(file, ctx.repoRoot, ctx.store, ctx.llm);
-        console.log(chalk.bold(`  🦬 Imported ${rules.length} rule(s):\n`));
+        console.log(chalk.bold(`  👍 Imported ${rules.length} rule(s):\n`));
         for (const r of rules) {
           console.log(`  ${chalk.green("+")} ${r.id}: ${r.description} [${r.enforcement}]`);
         }
@@ -171,11 +171,11 @@ export function registerRuleCommand(program: Command, ctx: YakContext) {
           break;
         case "steering":
           output = exportAsSteering(rules);
-          defaultFile = ".kiro/steering/yak-rules.md";
+          defaultFile = ".kiro/steering/lgtm-rules.md";
           break;
         case "eslint":
           output = exportAsESLint(rules);
-          defaultFile = ".eslintrc.yak.json";
+          defaultFile = ".eslintrc.lgtm.json";
           break;
         default:
           ctx.logger.error(`Unknown format: ${opts.format}. Use: hook, steering, or eslint`);
@@ -211,7 +211,7 @@ export function registerRuleCommand(program: Command, ctx: YakContext) {
     .action(async () => {
       const { analyzeCommentPatterns } = await import("../domain/patterns.js");
 
-      console.log(chalk.bold("\n🦬 Analyzing review comments for patterns...\n"));
+      console.log(chalk.bold("\n👍 Analyzing review comments for patterns...\n"));
 
       const suggestions = await analyzeCommentPatterns(ctx.store, ctx.llm);
 
@@ -236,7 +236,7 @@ export function registerRuleCommand(program: Command, ctx: YakContext) {
       }
 
       console.log(chalk.gray(`  Create a rule from a suggestion with:`));
-      console.log(chalk.cyan(`    yak review rule add "<description>" [--pattern "..."]`));
+      console.log(chalk.cyan(`    lgtm review rule add "<description>" [--pattern "..."]`));
       console.log();
     });
 }

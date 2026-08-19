@@ -9,10 +9,10 @@ import { parseGitUrl } from "./git.js";
 
 describe("parseGitUrl", () => {
   test("parses HTTPS URL", () => {
-    const result = parseGitUrl("https://github.com/pszf11235/yak.git");
+    const result = parseGitUrl("https://github.com/pszf11235/lgtm.git");
     expect(result).not.toBeNull();
     expect(result!.owner).toBe("pszf11235");
-    expect(result!.repo).toBe("yak");
+    expect(result!.repo).toBe("lgtm");
   });
 
   test("parses HTTPS URL without .git suffix", () => {
@@ -23,10 +23,10 @@ describe("parseGitUrl", () => {
   });
 
   test("parses SSH URL", () => {
-    const result = parseGitUrl("git@github.com:pszf11235/yak.git");
+    const result = parseGitUrl("git@github.com:pszf11235/lgtm.git");
     expect(result).not.toBeNull();
     expect(result!.owner).toBe("pszf11235");
-    expect(result!.repo).toBe("yak");
+    expect(result!.repo).toBe("lgtm");
   });
 
   test("parses SSH URL without .git suffix", () => {

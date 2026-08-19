@@ -11,7 +11,7 @@
  * Without LLM: imports as LLM-enforced rules with the raw text as description.
  */
 
-import type { OKFStore, LLMProvider } from "@yak/core/plugin.js";
+import type { OKFStore, LLMProvider } from "@lgtm/core/plugin.js";
 import { createRulesEngine, type Rule } from "./rules.js";
 import fs from "fs";
 import path from "path";

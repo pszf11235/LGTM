@@ -1,13 +1,13 @@
 /**
- * `yak review approve <pr>` — Mark a PR as approved.
+ * `lgtm review approve <pr>` — Mark a PR as approved.
  */
 
 import type { Command } from "commander";
-import type { YakContext } from "@yak/core/plugin.js";
+import type { LGTMContext } from "@lgtm/core/plugin.js";
 import { createQueueManager } from "../domain/queue.js";
 import chalk from "chalk";
 
-export function registerApproveCommand(program: Command, ctx: YakContext) {
+export function registerApproveCommand(program: Command, ctx: LGTMContext) {
   program
     .command("approve <pr>")
     .description("Approve a reviewed PR")
