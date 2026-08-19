@@ -17,6 +17,8 @@ import { registerWatchCommand } from "./commands/watch.js";
 import { registerDashboardCommand } from "./commands/dashboard.js";
 import { ReviewTab } from "./pages/ReviewTab.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
+import { RulesPage } from "./pages/RulesPage.js";
+import { HistoryPage } from "./pages/HistoryPage.js";
 
 /**
  * Review plugin — implements the LGTMPlugin interface.
@@ -36,6 +38,16 @@ export const plugin: LGTMPlugin = {
       label: "Review",
       shortcut: "r",
       component: ReviewTab,
+    },
+    {
+      label: "Rules",
+      shortcut: "u",
+      component: RulesPage,
+    },
+    {
+      label: "History",
+      shortcut: "h",
+      component: HistoryPage,
     },
   ],
 
