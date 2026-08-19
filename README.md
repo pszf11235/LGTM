@@ -1,5 +1,7 @@
 # 👍 LGTM — Looks Good To Me
 
+[![CI](https://github.com/pszf11235/LGTM/actions/workflows/ci.yml/badge.svg)](https://github.com/pszf11235/LGTM/actions/workflows/ci.yml)
+
 > AI coding agents let you generate 5 PRs in an hour. But now **you** need to review them. LGTM is the structured review environment that breaks the bottleneck.
 
 **Yak** is a developer productivity platform with a plugin architecture. It provides a CLI + TUI for structured PR review with rules, auto-grouping, pattern analysis, and persistent review history — all stored as human-readable markdown.
