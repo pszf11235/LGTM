@@ -141,6 +141,10 @@ async function main() {
   const { registerAICommands } = await import("./cli/commands/ai.js");
   registerAICommands(program, ctx);
 
+  // `lgtm auth` — service authentication (OAuth)
+  const { registerAuthCommands } = await import("./cli/commands/auth.js");
+  registerAuthCommands(program);
+
   // `lgtm discover` — repo registry
   const { registerDiscoverCommand } = await import("./cli/commands/discover.js");
   registerDiscoverCommand(program);

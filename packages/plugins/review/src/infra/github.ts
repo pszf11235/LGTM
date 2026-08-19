@@ -43,6 +43,17 @@ export function createGitHubAdapter(owner: string, repo: string) {
     if (process.env.GITHUB_TOKEN) { cachedToken = process.env.GITHUB_TOKEN; return cachedToken; }
     if (process.env.GH_TOKEN) { cachedToken = process.env.GH_TOKEN; return cachedToken; }
 
+    // Check saved OAuth token (~/.lgtm-credentials)
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const os = require("os");
+      const credFile = path.join(os.homedir(), ".lgtm-credentials");
+      const raw = fs.readFileSync(credFile, "utf-8");
+      const creds = JSON.parse(raw);
+      if (creds.github) { cachedToken = creds.github; return cachedToken; }
+    } catch { /* no saved credentials */ }
+
     // Try `gh auth token` (only once)
     try {
       const { execSync } = require("child_process");
