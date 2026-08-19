@@ -13,6 +13,7 @@ import { registerApproveCommand } from "./commands/approve.js";
 import { registerFlagCommand } from "./commands/flag.js";
 import { registerRuleCommand } from "./commands/rule.js";
 import { registerScanCommand } from "./commands/scan.js";
+import { registerWatchCommand } from "./commands/watch.js";
 
 /**
  * Review plugin — implements the YakPlugin interface.
@@ -30,6 +31,7 @@ export const plugin: YakPlugin = {
     registerFlagCommand(program, ctx);
     registerRuleCommand(program, ctx);
     registerScanCommand(program, ctx);
+    registerWatchCommand(program, ctx);
 
     // Placeholder commands (future tasks)
     program
