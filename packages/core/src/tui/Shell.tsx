@@ -27,9 +27,10 @@ interface ShellProps {
   repoPath?: string;
   watchCount?: number;       // pending PRs from watcher
   aiStatus?: { available: boolean; provider?: string };
+  webappUrl?: string;        // URL of the embedded webapp server
 }
 
-export function Shell({ tabs, initialTab, repoName, repoPath, watchCount, aiStatus }: ShellProps) {
+export function Shell({ tabs, initialTab, repoName, repoPath, watchCount, aiStatus, webappUrl }: ShellProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const termWidth = stdout?.columns ?? 80;
@@ -99,6 +100,8 @@ export function Shell({ tabs, initialTab, repoName, repoPath, watchCount, aiStat
       <Box justifyContent="space-between" width={termWidth}>
         <Text color="gray">{statusHint}</Text>
         <Text color="gray">
+          {webappUrl ? theme.primary(`🌐 ${webappUrl}`) : ""}
+          {"  "}
           {aiStatus ? (aiStatus.available ? theme.success(`AI: ✓ ${aiStatus.provider ?? ""}`) : theme.error("AI: ✗ offline")) : ""}
           {"  "}
           {activeTabIdx + 1}/{enabledTabs.length}
