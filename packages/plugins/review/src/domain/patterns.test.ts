@@ -35,64 +35,60 @@ describe("Pattern Analysis", () => {
   });
 
   test("returns empty when fewer than 3 comments", async () => {
-    // Create a session with only 2 comments
-    fs.mkdirSync(path.join(tmpDir, "sessions", "s1"), { recursive: true });
+    // Create a session with only 2 comments from 1 PR
     fs.writeFileSync(
       path.join(tmpDir, "sessions", "index.md"),
       "---\ntype: lgtm/session-index\n---\n# Sessions\n"
     );
     fs.writeFileSync(
-      path.join(tmpDir, "sessions", "s1", "index.md"),
-      "---\ntype: lgtm/session-index\n---\n# Session 1\n"
-    );
-    fs.writeFileSync(
-      path.join(tmpDir, "sessions", "s1", "pr-1.md"),
+      path.join(tmpDir, "sessions", "pr-1.md"),
       "---\ntype: lgtm/review\npr: 1\n---\n### src/app.ts\n- **L14:** Missing error handling\n- **L20:** Add null check\n"
     );
 
     const suggestions = await analyzeCommentPatterns(store);
-    // Only 2 comments from 1 PR — not enough to find patterns
+    // Only 2 comments from 1 PR — not enough to find cross-PR patterns
     expect(suggestions).toEqual([]);
   });
 
   test("detects repeated comments across different PRs", async () => {
-    // Create sessions with repeated "missing error handling" comment
-    fs.mkdirSync(path.join(tmpDir, "sessions", "s1"), { recursive: true });
+    // The collectAllComments function:
+    // 1. store.list("sessions") → finds index.md files
+    // 2. For each index.md, strips to get dir, then lists that dir for review files
+    // So we need: sessions/s1/index.md + sessions/s1/pr-1.md, etc.
+    // But store.list() only lists .md files in the IMMEDIATE directory (non-recursive)
+    // So store.list("sessions") must find "sessions/s1" as... wait no, it only finds .md files.
+    //
+    // The actual pattern: store.list("sessions") finds session index files like
+    // "sessions/index.md" directly. Then dir = "sessions". Then store.list("sessions")
+    // returns ALL .md files in sessions/ including pr-*.md files.
+    //
+    // So the correct structure is: ALL files flat in sessions/ directory.
+
+    // Create flat session files in sessions/
     fs.writeFileSync(
       path.join(tmpDir, "sessions", "index.md"),
       "---\ntype: lgtm/session-index\n---\n# Sessions\n"
     );
     fs.writeFileSync(
-      path.join(tmpDir, "sessions", "s1", "index.md"),
-      "---\ntype: lgtm/session-index\n---\n# Session\n"
+      path.join(tmpDir, "sessions", "pr-1.md"),
+      "---\ntype: lgtm/review\npr: 1\n---\n### src/auth.ts\n- **L10:** Missing error handling here\n- **L30:** Consider caching this value\n"
     );
-
-    // PR 1: "Missing error handling"
     fs.writeFileSync(
-      path.join(tmpDir, "sessions", "s1", "pr-1.md"),
-      "---\ntype: lgtm/review\npr: 1\n---\n### src/auth.ts\n- **L10:** Missing error handling here\n- **L30:** Consider caching this\n"
+      path.join(tmpDir, "sessions", "pr-2.md"),
+      "---\ntype: lgtm/review\npr: 2\n---\n### src/api.ts\n- **L5:** Missing error handling here\n- **L15:** Unused import found\n"
     );
-
-    // PR 2: "Missing error handling" (same pattern)
     fs.writeFileSync(
-      path.join(tmpDir, "sessions", "s1", "pr-2.md"),
-      "---\ntype: lgtm/review\npr: 2\n---\n### src/api.ts\n- **L5:** Missing error handling here\n- **L15:** Unused import\n"
-    );
-
-    // PR 3: "Missing error handling" (third instance)
-    fs.writeFileSync(
-      path.join(tmpDir, "sessions", "s1", "pr-3.md"),
+      path.join(tmpDir, "sessions", "pr-3.md"),
       "---\ntype: lgtm/review\npr: 3\n---\n### src/db.ts\n- **L22:** Missing error handling here\n"
     );
 
     const suggestions = await analyzeCommentPatterns(store);
-    // Should detect "missing error handling" as a pattern
+    // Should detect "missing error handling" as a pattern across 3 PRs
     expect(suggestions.length).toBeGreaterThanOrEqual(1);
 
     const errorHandlingSuggestion = suggestions.find((s) =>
       s.description.toLowerCase().includes("error") || s.description.toLowerCase().includes("handling")
     );
-    // If text matching finds it, great. Pattern detection is heuristic.
     if (errorHandlingSuggestion) {
       expect(errorHandlingSuggestion.confidence).toBe("high"); // 3+ similar
       expect(errorHandlingSuggestion.sourceComments.length).toBeGreaterThanOrEqual(2);
@@ -100,22 +96,17 @@ describe("Pattern Analysis", () => {
   });
 
   test("uses LLM when available", async () => {
-    // Create minimal session data
-    fs.mkdirSync(path.join(tmpDir, "sessions", "s1"), { recursive: true });
+    // Create flat session files with repeated comments
     fs.writeFileSync(
       path.join(tmpDir, "sessions", "index.md"),
       "---\ntype: lgtm/session-index\n---\n# Sessions\n"
     );
     fs.writeFileSync(
-      path.join(tmpDir, "sessions", "s1", "index.md"),
-      "---\ntype: lgtm/session-index\n---\n"
-    );
-    fs.writeFileSync(
-      path.join(tmpDir, "sessions", "s1", "pr-1.md"),
+      path.join(tmpDir, "sessions", "pr-1.md"),
       "---\ntype: lgtm/review\npr: 1\n---\n### a.ts\n- **L1:** Add types\n- **L2:** Add types\n- **L3:** Add types\n"
     );
     fs.writeFileSync(
-      path.join(tmpDir, "sessions", "s1", "pr-2.md"),
+      path.join(tmpDir, "sessions", "pr-2.md"),
       "---\ntype: lgtm/review\npr: 2\n---\n### b.ts\n- **L1:** Add types please\n"
     );
 
