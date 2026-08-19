@@ -16,6 +16,8 @@ import { registerScanCommand } from "./commands/scan.js";
 import { registerWatchCommand } from "./commands/watch.js";
 import { registerDashboardCommand } from "./commands/dashboard.js";
 import { registerAutoCommand } from "./commands/auto.js";
+import { registerReportCommand } from "./commands/report.js";
+import { registerStandupCommand } from "./commands/standup.js";
 import { ReviewTab } from "./pages/ReviewTab.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { RulesPage } from "./pages/RulesPage.js";
@@ -63,6 +65,8 @@ export const plugin: LGTMPlugin = {
     registerWatchCommand(program, ctx);
     registerDashboardCommand(program, ctx);
     registerAutoCommand(program, ctx);
+    registerReportCommand(program, ctx);
+    registerStandupCommand(program, ctx);
 
     // Placeholder commands (future tasks)
     program
