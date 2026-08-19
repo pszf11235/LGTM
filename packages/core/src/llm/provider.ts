@@ -88,21 +88,18 @@ export function createLLMProvider(config: LLMConfig): LLMProvider {
     const cached = cache.get(cacheKey);
     if (cached) return cached;
 
-    let result: string;
-
-    switch (config.provider) {
-      case "openai":
-        result = await callOpenAI(prompt, model, config, options);
-        break;
-      case "anthropic":
-        result = await callAnthropic(prompt, model, config, options);
-        break;
-      case "ollama":
-        result = await callOllama(prompt, model, config, options);
-        break;
-      default:
-        throw new Error(`Unknown LLM provider: ${config.provider}`);
-    }
+    const result = await withRetry(async () => {
+      switch (config.provider) {
+        case "openai":
+          return await callOpenAI(prompt, model, config, options);
+        case "anthropic":
+          return await callAnthropic(prompt, model, config, options);
+        case "ollama":
+          return await callOllama(prompt, model, config, options);
+        default:
+          throw new Error(`Unknown LLM provider: ${config.provider}`);
+      }
+    });
 
     cache.set(cacheKey, result);
     return result;
@@ -238,4 +235,48 @@ async function callOllama(
 
   const data = await res.json() as { response: string };
   return data.response ?? "";
+}
+
+
+/**
+ * Retry wrapper with exponential backoff.
+ * Retries on transient errors (429, 500, 503, network timeouts).
+ * Max 3 attempts with 1s, 2s, 4s delays.
+ */
+async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err as Error;
+      const message = lastError.message ?? "";
+
+      // Don't retry on auth errors or client errors (except 429)
+      if (message.includes("401") || message.includes("403") || message.includes("404")) {
+        throw lastError;
+      }
+
+      // Retry on: 429 (rate limit), 500, 502, 503, timeout, network errors
+      const isRetryable =
+        message.includes("429") ||
+        message.includes("500") ||
+        message.includes("502") ||
+        message.includes("503") ||
+        message.includes("timeout") ||
+        message.includes("ECONNREFUSED") ||
+        message.includes("fetch failed");
+
+      if (!isRetryable || attempt === maxAttempts) {
+        throw lastError;
+      }
+
+      // Exponential backoff: 1s, 2s, 4s
+      const delay = Math.pow(2, attempt - 1) * 1000;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+
+  throw lastError!;
 }
