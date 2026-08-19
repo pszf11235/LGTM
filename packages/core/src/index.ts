@@ -85,7 +85,31 @@ async function main() {
         };
       });
 
-    await launchTUI({ tabs, repoName, repoPath });
+    // Check AI availability and watch count for TUI indicators
+    let aiStatus: { available: boolean; provider?: string } | undefined;
+    let watchCount = 0;
+
+    if (ctx.config.ai.enabled) {
+      try {
+        const { createLLMProvider } = await import("./llm/provider.js");
+        const llm = createLLMProvider(ctx.config.ai as any);
+        const available = await llm.isAvailable();
+        aiStatus = { available, provider: ctx.config.ai.provider };
+      } catch {
+        aiStatus = { available: false, provider: ctx.config.ai.provider };
+      }
+    }
+
+    try {
+      const watchDoc = await ctx.store.read("watch.md");
+      if (watchDoc?.data?.repos && Array.isArray(watchDoc.data.repos)) {
+        watchCount = (watchDoc.data.repos as any[]).length > 0 ? -1 : 0; // -1 = needs check
+        // Quick check: just show count of watched repos as indicator
+        // Full PR count would need GitHub API call (deferred to watch status)
+      }
+    } catch { /* no watch config */ }
+
+    await launchTUI({ tabs, repoName, repoPath, watchCount: watchCount === -1 ? undefined : watchCount, aiStatus });
     return;
   }
 

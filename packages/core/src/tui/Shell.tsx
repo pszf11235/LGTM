@@ -25,9 +25,11 @@ interface ShellProps {
   initialTab?: string;
   repoName?: string;
   repoPath?: string;
+  watchCount?: number;       // pending PRs from watcher
+  aiStatus?: { available: boolean; provider?: string };
 }
 
-export function Shell({ tabs, initialTab, repoName, repoPath }: ShellProps) {
+export function Shell({ tabs, initialTab, repoName, repoPath, watchCount, aiStatus }: ShellProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const termWidth = stdout?.columns ?? 80;
@@ -68,7 +70,7 @@ export function Shell({ tabs, initialTab, repoName, repoPath }: ShellProps) {
       <Box>
         <Text>
           {headerBar(
-            `👍 ${theme.bold("lgtm")}`,
+            `👍 ${theme.bold("lgtm")}${watchCount && watchCount > 0 ? `  ${theme.warning(`📬 ${watchCount} PR${watchCount > 1 ? "s" : ""} need review`)}` : ""}`,
             renderTabs(enabledTabs, activeTabIdx),
             termWidth
           )}
@@ -97,6 +99,8 @@ export function Shell({ tabs, initialTab, repoName, repoPath }: ShellProps) {
       <Box justifyContent="space-between" width={termWidth}>
         <Text color="gray">{statusHint}</Text>
         <Text color="gray">
+          {aiStatus ? (aiStatus.available ? theme.success(`AI: ✓ ${aiStatus.provider ?? ""}`) : theme.error("AI: ✗ offline")) : ""}
+          {"  "}
           {activeTabIdx + 1}/{enabledTabs.length}
         </Text>
       </Box>
