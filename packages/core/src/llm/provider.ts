@@ -18,6 +18,15 @@ export interface LLMConnection {
   apiKey?: string;
 }
 
+/** Task types that can be routed to specific models */
+export type LLMTaskType =
+  | "rule_enforcement"
+  | "pr_summary"
+  | "pattern_analysis"
+  | "code_explanation"
+  | "rule_import"
+  | "review_delegation";
+
 export interface LLMConfig {
   /** Primary connection (backward compatible) */
   provider: "openai" | "anthropic" | "ollama";
@@ -25,8 +34,34 @@ export interface LLMConfig {
   baseUrl?: string;
   apiKey?: string;
 
-  /** Multiple named connections (for future task-to-model routing) */
+  /** Multiple named connections (for task-to-model routing) */
   connections?: LLMConnection[];
+
+  /** Route specific task types to named connections */
+  routing?: Partial<Record<LLMTaskType, string>>;
+}
+
+/**
+ * Get a provider for a specific task type.
+ * Resolves via routing config → named connection → falls back to default.
+ */
+export function getProviderForTask(config: LLMConfig, task: LLMTaskType): LLMProvider {
+  if (config.routing && config.connections) {
+    const connectionName = config.routing[task];
+    if (connectionName) {
+      const conn = config.connections.find((c) => c.name === connectionName);
+      if (conn) {
+        return createLLMProvider({
+          provider: conn.provider,
+          model: conn.model,
+          baseUrl: conn.baseUrl,
+          apiKey: conn.apiKey,
+        });
+      }
+    }
+  }
+  // Fallback to default
+  return createLLMProvider(config);
 }
 
 /**
