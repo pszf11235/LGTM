@@ -26,25 +26,54 @@ Current tools review PRs in isolation. But you're juggling related PRs, repeatin
 | Navigate diffs in terminal | ❌ Text only | ✅ Full TUI with cursor + comments |
 | Post reviews to GitHub | ❌ Can't call APIs | ✅ Native integration |
 
+## Install
+
+### Download binary (recommended — no runtime needed)
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-darwin-arm64 -o lgtm
+chmod +x lgtm && sudo mv lgtm /usr/local/bin/
+
+# macOS (Intel)
+curl -L https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-darwin-x64 -o lgtm
+chmod +x lgtm && sudo mv lgtm /usr/local/bin/
+
+# Linux (x64)
+curl -L https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-linux-x64 -o lgtm
+chmod +x lgtm && sudo mv lgtm /usr/local/bin/
+
+# Linux (ARM64 / Raspberry Pi / Graviton)
+curl -L https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-linux-arm64 -o lgtm
+chmod +x lgtm && sudo mv lgtm /usr/local/bin/
+```
+
+Self-contained executable — no Bun, Node, or any runtime required. Just download and run.
+
+### From source (requires Bun)
+
+```bash
+git clone https://github.com/pszf11235/LGTM.git && cd LGTM
+bun install
+bun run lgtm          # Run directly
+bun run build:binary  # Build binary for your platform → dist/lgtm
+```
+
 ## Quick Start
 
 ```bash
-# Install
-git clone https://github.com/pszf11235/lgtm.git && cd lgtm
-bun install
-
 # First-time setup (interactive)
-bun run lgtm init
+lgtm init
 
 # Add PRs to review queue (demo mode for testing)
-bun run lgtm review add 101 102 103 --demo
+lgtm review add 101 102 103 --demo
 
 # Open the TUI
-bun run lgtm
+lgtm
 
 # Or use CLI directly
-bun run lgtm review status
-bun run lgtm review approve 101
+lgtm review status
+lgtm review approve 101
 ```
 
 ## Features
