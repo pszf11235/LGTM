@@ -19,6 +19,7 @@ import { ReviewTab } from "./pages/ReviewTab.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { RulesPage } from "./pages/RulesPage.js";
 import { HistoryPage } from "./pages/HistoryPage.js";
+import { ConfigPage } from "./pages/ConfigPage.js";
 
 /**
  * Review plugin — implements the LGTMPlugin interface.
@@ -48,6 +49,11 @@ export const plugin: LGTMPlugin = {
       label: "History",
       shortcut: "h",
       component: HistoryPage,
+    },
+    {
+      label: "Config",
+      shortcut: "c",
+      component: ConfigPage,
     },
   ],
 
