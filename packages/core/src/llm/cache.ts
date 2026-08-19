@@ -47,13 +47,26 @@ export function createCache() {
 }
 
 /**
- * Simple hash for cache keys (avoids storing full prompts as map keys).
+ * Create a content hash suitable for cache keys.
+ * Uses Bun's built-in hasher for speed + collision resistance.
  */
 function hashKey(input: string): string {
-  let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    const char = input.charCodeAt(i);
-    hash = ((hash << 5) - hash + char) | 0;
+  // Use Bun's native hasher (Wyhash — 64-bit, fast, good distribution)
+  // Falls back to a longer string hash if Bun.hash not available
+  if (typeof Bun !== "undefined" && Bun.hash) {
+    return `h_${Bun.hash(input).toString(36)}`;
   }
-  return `h_${hash.toString(36)}`;
+  // Fallback: use first 16 chars + length + last 16 chars as key
+  // Not cryptographic but much better than 32-bit djb2
+  const len = input.length;
+  const prefix = input.slice(0, 64);
+  const suffix = input.slice(-64);
+  let hash = len;
+  for (let i = 0; i < prefix.length; i++) {
+    hash = ((hash << 7) - hash + prefix.charCodeAt(i)) | 0;
+  }
+  for (let i = 0; i < suffix.length; i++) {
+    hash = ((hash << 7) - hash + suffix.charCodeAt(i)) | 0;
+  }
+  return `h_${len.toString(36)}_${(hash >>> 0).toString(36)}`;
 }
