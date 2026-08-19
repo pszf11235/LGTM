@@ -49,6 +49,7 @@ export function ReviewPage({
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [isCommenting, setIsCommenting] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const [selectionStart, setSelectionStart] = useState<number | null>(null); // visual mode start line
 
   // Flatten diff into renderable lines
   const flatLines = useMemo(() => flattenDiff(diff), [diff]);
@@ -91,7 +92,12 @@ export function ReviewPage({
 
   // Get current line info (for commenting) based on cursor
   function getCurrentLineInfo(): { file: string; line: number } | null {
-    const currentLine = flatLines[cursorLine];
+    return getLineInfoAt(cursorLine);
+  }
+
+  // Get line info at any position
+  function getLineInfoAt(idx: number): { file: string; line: number } | null {
+    const currentLine = flatLines[idx];
     if (!currentLine) return null;
     if (currentLine.type !== "diff-line" || !currentLine.diffLine) return null;
 
@@ -158,11 +164,41 @@ export function ReviewPage({
       return;
     }
 
-    // Comment on current line
+    // Visual selection mode
+    if (input === "v") {
+      if (selectionStart === null) {
+        setSelectionStart(cursorLine);
+      } else {
+        setSelectionStart(null); // toggle off
+      }
+      return;
+    }
+
+    // Escape clears selection
+    if (key.escape && selectionStart !== null) {
+      setSelectionStart(null);
+      return;
+    }
+
+    // Comment on current line (or selection range)
     if (input === "c") {
-      const lineInfo = getCurrentLineInfo();
-      if (lineInfo) {
-        setIsCommenting(true);
+      if (selectionStart !== null) {
+        // Range comment
+        const startLine = Math.min(selectionStart, cursorLine);
+        const endLine = Math.max(selectionStart, cursorLine);
+        const startInfo = getLineInfoAt(startLine);
+        const endInfo = getLineInfoAt(endLine);
+        if (startInfo) {
+          setIsCommenting(true);
+          // Store range info for the comment handler
+          (window as any).__yakCommentRange = { startLine: startInfo.line, endLine: endInfo?.line ?? startInfo.line, file: startInfo.file };
+        }
+        setSelectionStart(null);
+      } else {
+        const lineInfo = getCurrentLineInfo();
+        if (lineInfo) {
+          setIsCommenting(true);
+        }
       }
       return;
     }
@@ -189,6 +225,25 @@ export function ReviewPage({
   });
 
   function handleCommentSubmit(text: string) {
+    // Check for range comment
+    const range = (globalThis as any).__yakCommentRange;
+    if (range) {
+      delete (globalThis as any).__yakCommentRange;
+      const newComment: ReviewComment = {
+        id: crypto.randomUUID(),
+        file: range.file,
+        line: range.startLine,
+        endLine: range.endLine !== range.startLine ? range.endLine : undefined,
+        side: "added",
+        text,
+        createdAt: new Date().toISOString(),
+      };
+      setComments((prev) => [...prev, newComment]);
+      setIsCommenting(false);
+      return;
+    }
+
+    // Single line comment
     const lineInfo = getCurrentLineInfo();
     if (!lineInfo) {
       setIsCommenting(false);
@@ -199,7 +254,7 @@ export function ReviewPage({
       id: crypto.randomUUID(),
       file: lineInfo.file,
       line: lineInfo.line,
-      side: "added", // simplified — could detect from diffLine type
+      side: "added",
       text,
       createdAt: new Date().toISOString(),
     };
@@ -273,6 +328,9 @@ export function ReviewPage({
           {visibleLines.map((line, i) => {
             const globalIdx = scrollOffset + i;
             const isCursor = globalIdx === cursorLine;
+            const isInSelection = selectionStart !== null &&
+              globalIdx >= Math.min(selectionStart, cursorLine) &&
+              globalIdx <= Math.max(selectionStart, cursorLine);
             const hasComment = comments.some(
               (c) => line.diffLine && c.file === line.filePath &&
                 c.line === (line.diffLine.newLine ?? line.diffLine.oldLine)
@@ -280,7 +338,7 @@ export function ReviewPage({
 
             return (
               <Box key={globalIdx} flexDirection="column">
-                <DiffRenderLine line={line} isCurrentLine={isCursor} hasComment={hasComment} />
+                <DiffRenderLine line={line} isCurrentLine={isCursor} hasComment={hasComment} isSelected={isInSelection} />
               </Box>
             );
           })}
@@ -305,7 +363,7 @@ export function ReviewPage({
 }
 
 /** Render a single line */
-function DiffRenderLine({ line, isCurrentLine, hasComment }: { line: RenderLine; isCurrentLine: boolean; hasComment: boolean }) {
+function DiffRenderLine({ line, isCurrentLine, hasComment, isSelected }: { line: RenderLine; isCurrentLine: boolean; hasComment: boolean; isSelected?: boolean }) {
   switch (line.type) {
     case "file-header":
       return (
@@ -324,14 +382,14 @@ function DiffRenderLine({ line, isCurrentLine, hasComment }: { line: RenderLine;
         : String(dl.newLine ?? "").padStart(4);
       const prefix = dl.type === "added" ? "+" : dl.type === "removed" ? "-" : " ";
       const color = dl.type === "added" ? "green" : dl.type === "removed" ? "red" : undefined;
-      const cursor = isCurrentLine ? "▶" : " ";
+      const cursor = isCurrentLine ? "▶" : isSelected ? "┃" : " ";
       const commentMarker = hasComment ? " 💬" : "";
 
       return (
         <Box>
-          <Text color={isCurrentLine ? "cyan" : "gray"}>{cursor}</Text>
+          <Text color={isCurrentLine ? "cyan" : isSelected ? "magenta" : "gray"}>{cursor}</Text>
           <Text color="gray">{lineNum} </Text>
-          <Text color={color}>{prefix} {dl.content}</Text>
+          <Text color={color} inverse={isSelected}>{prefix} {dl.content}</Text>
           {commentMarker && <Text>{commentMarker}</Text>}
         </Box>
       );
