@@ -73,8 +73,11 @@ export interface ReviewComment {
   /** File path */
   file: string;
 
-  /** Line number in the diff */
+  /** Line number in the diff (start of range) */
   line: number;
+
+  /** End line (for multi-line comments, undefined = single line) */
+  endLine?: number;
 
   /** Which side of the diff */
   side: "added" | "removed" | "context";
