@@ -14,6 +14,8 @@ interface LaunchOptions {
   initialTab?: string;
   repoName?: string;
   repoPath?: string;
+  watchCount?: number;
+  aiStatus?: { available: boolean; provider?: string };
 }
 
 /**
@@ -26,6 +28,8 @@ export async function launchTUI(options: LaunchOptions): Promise<void> {
       initialTab: options.initialTab,
       repoName: options.repoName,
       repoPath: options.repoPath,
+      watchCount: options.watchCount,
+      aiStatus: options.aiStatus,
     })
   );
   await waitUntilExit();
