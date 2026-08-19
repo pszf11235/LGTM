@@ -1,14 +1,14 @@
-# Contributing to Yak 🦬
+# Contributing to LGTM 👍
 
 Thanks for wanting to help! Here's how to get started.
 
 ## Development Setup
 
 ```bash
-git clone https://github.com/pszf11235/yak.git
-cd yak
+git clone https://github.com/pszf11235/lgtm.git
+cd lgtm
 bun install
-bun run yak --help
+bun run lgtm --help
 ```
 
 ## Project Structure
@@ -25,9 +25,9 @@ packages/
 ## Adding a Plugin
 
 1. Create `packages/plugins/your-plugin/`
-2. Add `package.json` with `@yak/core` as dependency
-3. Export a `plugin` object implementing `YakPlugin` interface
-4. Your commands auto-register under `yak your-plugin <command>`
+2. Add `package.json` with `@lgtm/core` as dependency
+3. Export a `plugin` object implementing `LGTMPlugin` interface
+4. Your commands auto-register under `lgtm your-plugin <command>`
 
 ## Workflow
 

@@ -1,17 +1,17 @@
 /**
- * `yak ai` — AI connection management and testing.
+ * `lgtm ai` — AI connection management and testing.
  *
  * Commands:
- *   yak ai test     — test the configured AI connection
- *   yak ai status   — show current AI config and availability
+ *   lgtm ai test     — test the configured AI connection
+ *   lgtm ai status   — show current AI config and availability
  */
 
 import type { Command } from "commander";
 import chalk from "chalk";
-import type { YakContext } from "../../plugin.js";
+import type { LGTMContext } from "../../plugin.js";
 import { createLLMProvider, type LLMConfig } from "../../llm/provider.js";
 
-export function registerAICommands(program: Command, ctx: YakContext) {
+export function registerAICommands(program: Command, ctx: LGTMContext) {
   const ai = program
     .command("ai")
     .description("AI connection management and testing");
@@ -20,13 +20,13 @@ export function registerAICommands(program: Command, ctx: YakContext) {
     .command("status")
     .description("Show current AI configuration and availability")
     .action(async () => {
-      console.log(chalk.bold("\n🦬 AI Configuration\n"));
+      console.log(chalk.bold("\n👍 AI Configuration\n"));
 
       const aiConfig = ctx.config.ai;
 
       if (!aiConfig.enabled) {
         console.log(`  Status:   ${chalk.gray("disabled")}`);
-        console.log(chalk.gray(`\n  Enable with: ${chalk.cyan("yak config --edit")} or set in .yakrc.yaml\n`));
+        console.log(chalk.gray(`\n  Enable with: ${chalk.cyan("lgtm config --edit")} or set in .lgtmrc.yaml\n`));
         return;
       }
 
@@ -72,11 +72,11 @@ export function registerAICommands(program: Command, ctx: YakContext) {
 
       if (!aiConfig.enabled) {
         console.log(chalk.red("\n  AI is disabled. Enable it first:\n"));
-        console.log(chalk.gray(`  ${chalk.cyan("yak config --edit")} → select an AI provider\n`));
+        console.log(chalk.gray(`  ${chalk.cyan("lgtm config --edit")} → select an AI provider\n`));
         return;
       }
 
-      console.log(chalk.bold("\n🦬 Testing AI Connection\n"));
+      console.log(chalk.bold("\n👍 Testing AI Connection\n"));
       console.log(`  Provider: ${chalk.cyan(aiConfig.provider ?? "unknown")}`);
       console.log(`  Model:    ${chalk.cyan(aiConfig.model ?? "default")}`);
 
@@ -102,7 +102,7 @@ export function registerAICommands(program: Command, ctx: YakContext) {
       try {
         const start = Date.now();
         const response = await llm.complete(
-          "Respond with exactly: 'yak connection successful' and nothing else.",
+          "Respond with exactly: 'lgtm connection successful' and nothing else.",
           { maxTokens: 20, temperature: 0 }
         );
         const elapsed = Date.now() - start;
@@ -146,7 +146,7 @@ export function registerAICommands(program: Command, ctx: YakContext) {
         const aiConfig = ctx.config.ai;
         const provider = aiConfig.provider ?? "not set";
         const model = aiConfig.model ?? "(default)";
-        console.log(chalk.bold("\n🦬 AI Model\n"));
+        console.log(chalk.bold("\n👍 AI Model\n"));
         console.log(`  Provider: ${chalk.cyan(provider)}`);
         console.log(`  Model:    ${chalk.cyan(model)}`);
 
@@ -159,7 +159,7 @@ export function registerAICommands(program: Command, ctx: YakContext) {
         const providerSuggestions = suggestions[provider];
         if (providerSuggestions) {
           console.log(chalk.gray(`\n  Available: ${providerSuggestions.join(", ")}`));
-          console.log(chalk.gray(`  Set with: ${chalk.cyan("yak ai model <name>")}`));
+          console.log(chalk.gray(`  Set with: ${chalk.cyan("lgtm ai model <name>")}`));
         }
         console.log();
         return;
@@ -173,12 +173,12 @@ export function registerAICommands(program: Command, ctx: YakContext) {
 
         const repoRoot = findGitRoot();
         const bootstrap = loadBootstrap();
-        const yakDir = resolveYakDir(bootstrap, repoRoot);
-        const store = createOKFStore(yakDir);
+        const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+        const store = createOKFStore(lgtmDir);
 
         const doc = await store.read("profile.md");
         if (!doc) {
-          console.log(chalk.red("\n  No profile found. Run `yak init` first.\n"));
+          console.log(chalk.red("\n  No profile found. Run `lgtm init` first.\n"));
           return;
         }
 

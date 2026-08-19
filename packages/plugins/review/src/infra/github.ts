@@ -66,7 +66,7 @@ export function createGitHubAdapter(owner: string, repo: string) {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
       Accept: options?.accept ?? "application/vnd.github.v3+json",
-      "User-Agent": "yak-cli",
+      "User-Agent": "lgtm-cli",
     };
 
     if (options?.body) {

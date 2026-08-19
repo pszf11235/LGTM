@@ -2,7 +2,7 @@
  * TUI Shell — the top-level Ink component.
  *
  * Renders:
- * - Header with yak logo + plugin tabs
+ * - Header with lgtm logo + plugin tabs
  * - Active page content (from selected plugin tab)
  * - Status bar with context-sensitive keybindings
  *
@@ -68,7 +68,7 @@ export function Shell({ tabs, initialTab, repoName, repoPath }: ShellProps) {
       <Box>
         <Text>
           {headerBar(
-            `🦬 ${theme.bold("yak")}`,
+            `👍 ${theme.bold("lgtm")}`,
             renderTabs(enabledTabs, activeTabIdx),
             termWidth
           )}

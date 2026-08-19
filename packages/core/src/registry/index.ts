@@ -1,9 +1,9 @@
 /**
- * Yak Registry — tracks all yak-enabled repos on this machine.
+ * LGTM Registry — tracks all lgtm-enabled repos on this machine.
  *
- * Lives at ~/.yak-registry.md (always central, regardless of storage mode).
- * Auto-registers current repo on every yak invocation.
- * Supports discovery (scan for .yak/ directories) and pruning stale entries.
+ * Lives at ~/.lgtm-registry.md (always central, regardless of storage mode).
+ * Auto-registers current repo on every lgtm invocation.
+ * Supports discovery (scan for .lgtm/ directories) and pruning stale entries.
  */
 
 import fs from "fs";
@@ -25,7 +25,7 @@ interface RegistryData {
   repos: RegistryEntry[];
 }
 
-const REGISTRY_PATH = path.join(os.homedir(), ".yak-registry.md");
+const REGISTRY_PATH = path.join(os.homedir(), ".lgtm-registry.md");
 
 /**
  * Load the registry (or create empty).
@@ -45,15 +45,15 @@ export function loadRegistry(): RegistryEntry[] {
  */
 function saveRegistry(repos: RegistryEntry[]): void {
   const data: RegistryData = {
-    type: "yak/registry",
+    type: "lgtm/registry",
     lastUpdated: new Date().toISOString(),
     repos,
   };
 
   const body = [
-    "# Yak Registry",
+    "# LGTM Registry",
     "",
-    `Tracks ${repos.length} yak-enabled repo(s) on this machine.`,
+    `Tracks ${repos.length} lgtm-enabled repo(s) on this machine.`,
     "",
     ...repos.map((r) => `- **${r.name}** — \`${r.path}\` (last seen: ${r.lastSeen.split("T")[0]})`),
     "",
@@ -67,7 +67,7 @@ function saveRegistry(repos: RegistryEntry[]): void {
 }
 
 /**
- * Register a repo (upsert). Called on every yak invocation.
+ * Register a repo (upsert). Called on every lgtm invocation.
  */
 export function registerRepo(
   repoRoot: string,
@@ -96,7 +96,7 @@ export function registerRepo(
 }
 
 /**
- * Discover yak-enabled repos by scanning directories.
+ * Discover lgtm-enabled repos by scanning directories.
  */
 export function discoverRepos(scanDir: string, maxDepth = 3): string[] {
   const found: string[] = [];
@@ -113,10 +113,10 @@ export function discoverRepos(scanDir: string, maxDepth = 3): string[] {
 
         const full = path.join(dir, entry.name);
 
-        if (entry.name === ".yak") {
-          // Found a yak-enabled repo (parent of .yak/)
+        if (entry.name === ".lgtm") {
+          // Found a lgtm-enabled repo (parent of .lgtm/)
           found.push(dir);
-          return; // don't recurse into .yak/
+          return; // don't recurse into .lgtm/
         }
 
         walk(full, depth + 1);

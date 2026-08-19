@@ -15,7 +15,7 @@ export interface PRRef {
   /** Repository owner (e.g., "pszf11235") */
   owner?: string;
 
-  /** Repository name (e.g., "yak") */
+  /** Repository name (e.g., "lgtm") */
   repo?: string;
 
   /** Full identifier as entered */

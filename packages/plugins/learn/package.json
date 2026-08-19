@@ -1,11 +1,11 @@
 {
-  "name": "@yak/plugin-learn",
+  "name": "@lgtm/plugin-learn",
   "version": "0.1.0",
-  "description": "Yak Learn Plugin — interactive learning paths for new tech stacks (stub)",
+  "description": "LGTM Learn Plugin — interactive learning paths for new tech stacks (stub)",
   "type": "module",
   "main": "./src/index.ts",
   "dependencies": {
-    "@yak/core": "workspace:*",
+    "@lgtm/core": "workspace:*",
     "commander": "^12.1.0"
   }
 }

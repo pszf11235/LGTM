@@ -14,7 +14,7 @@ describe("OKF Store", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = path.join(os.tmpdir(), `yak-test-${Date.now()}`);
+    tmpDir = path.join(os.tmpdir(), `lgtm-test-${Date.now()}`);
     await fs.mkdir(tmpDir, { recursive: true });
   });
 

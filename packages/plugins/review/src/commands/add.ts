@@ -1,5 +1,5 @@
 /**
- * `yak review add <prs...>` — Add PRs to the review queue.
+ * `lgtm review add <prs...>` — Add PRs to the review queue.
  *
  * Fetches metadata (title, changed files) from git, computes feature groups,
  * and persists to the session index. No LLM needed.
@@ -9,11 +9,11 @@
  */
 
 import type { Command } from "commander";
-import type { YakContext } from "@yak/core/plugin.js";
+import type { LGTMContext } from "@lgtm/core/plugin.js";
 import { createQueueManager } from "../domain/queue.js";
 import chalk from "chalk";
 
-export function registerAddCommand(program: Command, ctx: YakContext) {
+export function registerAddCommand(program: Command, ctx: LGTMContext) {
   program
     .command("add <prs...>")
     .description("Add PR(s) to the review queue")
@@ -21,7 +21,7 @@ export function registerAddCommand(program: Command, ctx: YakContext) {
     .option("--demo", "Demo/test mode — skip PR validation, use mock data")
     .action(async (prs: string[], opts: { branch?: boolean; demo?: boolean }) => {
       // Git adapter import (from core package)
-      const { createGitAdapter } = await import("@yak/core/utils/git.js");
+      const { createGitAdapter } = await import("@lgtm/core/utils/git.js");
       const git = createGitAdapter(ctx.repoRoot);
 
       const isRepo = await git.isGitRepo();
@@ -102,7 +102,7 @@ export function registerAddCommand(program: Command, ctx: YakContext) {
 
       // Print results
       const modeLabel = opts.demo ? chalk.gray(" [demo mode]") : "";
-      console.log(chalk.bold(`\n🦬 Added ${prEntries.length} PR(s) to review queue${modeLabel}\n`));
+      console.log(chalk.bold(`\n👍 Added ${prEntries.length} PR(s) to review queue${modeLabel}\n`));
 
       for (const pr of prEntries) {
         const queued = session.prs.find((p) => p.number === pr.number);
@@ -124,7 +124,7 @@ export function registerAddCommand(program: Command, ctx: YakContext) {
       }
 
       console.log(
-        chalk.gray(`\n  Run ${chalk.cyan("yak review status")} to see the full queue.\n`)
+        chalk.gray(`\n  Run ${chalk.cyan("lgtm review status")} to see the full queue.\n`)
       );
     });
 }

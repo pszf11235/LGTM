@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * 🦬 Yak — Stop shaving, start shipping
+ * 👍 LGTM — Looks Good To Me — dev productivity platform
  *
  * Main entry point. Bootstraps the CLI, discovers plugins,
- * and either opens the TUI (bare `yak`) or runs a CLI command.
+ * and either opens the TUI (bare `lgtm`) or runs a CLI command.
  *
  * Run `bun install` first, then `bun run packages/core/src/index.ts --help`
  */
@@ -21,11 +21,11 @@ async function main() {
   const program = new Command();
 
   program
-    .name("yak")
+    .name("lgtm")
     .description(
-      `${chalk.bold("🦬 Yak")} — Stop shaving, start shipping\n\n` +
+      `${chalk.bold("👍 LGTM")} — Looks Good To Me — dev productivity platform\n\n` +
         `A dev productivity platform with plugins.\n` +
-        `Run ${chalk.cyan("yak")} to open the TUI, or ${chalk.cyan("yak <plugin> <command>")} for CLI mode.`
+        `Run ${chalk.cyan("lgtm")} to open the TUI, or ${chalk.cyan("lgtm <plugin> <command>")} for CLI mode.`
     )
     .version("0.1.0");
 
@@ -43,20 +43,20 @@ async function main() {
     }
   }
 
-  // ─── Handle bare `yak` (no args) BEFORE parsing ────────────────────────
+  // ─── Handle bare `lgtm` (no args) BEFORE parsing ────────────────────────
   // Commander doesn't reliably call program.action() when subcommands exist.
   // So we intercept bare invocations here.
   if (process.argv.length <= 2) {
     const { isOnboardingComplete } = await import("./onboarding/flow.js");
-    if (!isOnboardingComplete(ctx.yakDir)) {
+    if (!isOnboardingComplete(ctx.lgtmDir)) {
       const hasProfile = await ctx.store.exists("profile.md");
       if (hasProfile) {
         console.log(
-          chalk.gray("\n  Yak profile is incomplete — resuming setup...\n")
+          chalk.gray("\n  LGTM profile is incomplete — resuming setup...\n")
         );
       } else {
         console.log(
-          chalk.gray("\n  No yak profile found — starting first-time setup...\n")
+          chalk.gray("\n  No lgtm profile found — starting first-time setup...\n")
         );
       }
       const { runOnboarding } = await import("./onboarding/flow.js");
@@ -100,24 +100,24 @@ async function main() {
   // ─── Warn if API key might be in committed files ─────────────────────
   if (ctx.config.storageMode === "repo" && ctx.config.ai.apiKey) {
     console.log(
-      chalk.yellow("  ⚠ Warning: AI API key detected in config. In repo-mode, ensure .yak/ is in .gitignore.\n")
+      chalk.yellow("  ⚠ Warning: AI API key detected in config. In repo-mode, ensure .lgtm/ is in .gitignore.\n")
     );
   }
 
   // ─── Core Commands ─────────────────────────────────────────────────────
 
-  // `yak ai` — AI connection management
+  // `lgtm ai` — AI connection management
   const { registerAICommands } = await import("./cli/commands/ai.js");
   registerAICommands(program, ctx);
 
-  // `yak discover` — repo registry
+  // `lgtm discover` — repo registry
   const { registerDiscoverCommand } = await import("./cli/commands/discover.js");
   registerDiscoverCommand(program);
 
-  // `yak tui [plugin]` → opens TUI on specific tab
+  // `lgtm tui [plugin]` → opens TUI on specific tab
   program
     .command("tui [plugin]")
-    .description("Open the interactive TUI (same as bare `yak`)")
+    .description("Open the interactive TUI (same as bare `lgtm`)")
     .action(async (plugin?: string) => {
       const { launchTUI } = await import("./tui/render.js");
       const path = await import("path");
@@ -142,12 +142,12 @@ async function main() {
       });
     });
 
-  // `yak plugins` → list all plugins with status
+  // `lgtm plugins` → list all plugins with status
   program
     .command("plugins")
     .description("List installed plugins and their status")
     .action(() => {
-      console.log(chalk.bold("\n🦬 Yak Plugins\n"));
+      console.log(chalk.bold("\n👍 LGTM Plugins\n"));
 
       for (const plugin of plugins) {
         const enabled = ctx.config.plugins[plugin.name]?.enabled !== false;
@@ -165,13 +165,13 @@ async function main() {
       console.log();
       console.log(
         chalk.gray(
-          `  Enable/disable: ${chalk.cyan("yak plugins enable <name>")} / ${chalk.cyan("yak plugins disable <name>")}`
+          `  Enable/disable: ${chalk.cyan("lgtm plugins enable <name>")} / ${chalk.cyan("lgtm plugins disable <name>")}`
         )
       );
       console.log();
     });
 
-  // `yak plugins enable/disable <name>`
+  // `lgtm plugins enable/disable <name>`
   program
     .command("plugins:enable <name>")
     .description("Enable a plugin")
@@ -187,15 +187,15 @@ async function main() {
       console.log(chalk.yellow(`○ Plugin '${name}' disabled`));
     });
 
-  // `yak init` → run or resume onboarding
+  // `lgtm init` → run or resume onboarding
   program
     .command("init")
-    .description("Initialize Yak in this project (runs or resumes onboarding)")
+    .description("Initialize LGTM in this project (runs or resumes onboarding)")
     .option("--skip-onboarding", "Skip interactive questions, use defaults")
     .action(async (opts: { skipOnboarding?: boolean }) => {
       if (opts.skipOnboarding) {
         ctx.logger.info("Skipping onboarding — using defaults.");
-        ctx.logger.info("Run `yak init` again without --skip-onboarding to configure.");
+        ctx.logger.info("Run `lgtm init` again without --skip-onboarding to configure.");
         return;
       }
 
@@ -203,7 +203,7 @@ async function main() {
       await runOnboarding();
     });
 
-  // `yak config` → show current config, offer to re-run onboarding to change
+  // `lgtm config` → show current config, offer to re-run onboarding to change
   program
     .command("config")
     .description("View current config or re-run setup to change settings")
@@ -215,8 +215,8 @@ async function main() {
         return;
       }
 
-      console.log(chalk.bold("\n🦬 Yak Config\n"));
-      console.log(`  Storage mode: ${chalk.cyan(ctx.config.storageMode === "farm" ? "yak-farm (~/.yak-farm/)" : "per-repo (.yak/)")}`);
+      console.log(chalk.bold("\n👍 LGTM Config\n"));
+      console.log(`  Storage mode: ${chalk.cyan(ctx.config.storageMode === "farm" ? "lgtm-farm (~/.lgtm-farm/)" : "per-repo (.lgtm/)")}`);
       console.log(`  AI enabled:   ${chalk.cyan(String(ctx.config.ai.enabled))}`);
       if (ctx.config.ai.enabled && ctx.config.ai.provider) {
         console.log(`  AI provider:  ${chalk.cyan(ctx.config.ai.provider)}`);
@@ -239,7 +239,7 @@ async function main() {
       }
 
       console.log(
-        chalk.gray(`\n  Run ${chalk.cyan("yak config --edit")} to change settings.\n`)
+        chalk.gray(`\n  Run ${chalk.cyan("lgtm config --edit")} to change settings.\n`)
       );
     });
 

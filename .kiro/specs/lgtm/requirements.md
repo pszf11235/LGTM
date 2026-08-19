@@ -1,4 +1,4 @@
-# Requirements: Yak Platform + Review Plugin
+# Requirements: LGTM Platform + Review Plugin
 
 ## Overview
 
@@ -16,10 +16,10 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 **Acceptance Criteria:**
 - [ ] Plugin interface defines: name, commands, TUI pages, onboarding (optional)
 - [ ] Core auto-discovers plugins from `packages/plugins/*/`
-- [ ] Plugins register commands under their namespace (`yak <plugin> <command>`)
+- [ ] Plugins register commands under their namespace (`lgtm <plugin> <command>`)
 - [ ] Plugins can access core services (LLM, store, config)
-- [ ] `yak plugins` lists all plugins with enabled/disabled status
-- [ ] Plugins can be enabled/disabled via `yak plugins enable/disable <name>`
+- [ ] `lgtm plugins` lists all plugins with enabled/disabled status
+- [ ] Plugins can be enabled/disabled via `lgtm plugins enable/disable <name>`
 
 ### US-0.2: Generic Onboarding
 **As a** first-time user,
@@ -27,13 +27,13 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 **So that** all plugins can calibrate to my context without asking again.
 
 **Acceptance Criteria:**
-- [ ] `yak init` launches interactive onboarding (TUI or inline prompts)
+- [ ] `lgtm init` launches interactive onboarding (TUI or inline prompts)
 - [ ] Questions: project goals, quality references, feedback style, tech stack, team size, LLM preference
 - [ ] Auto-detects tech stack from repo (package.json, Cargo.toml, go.mod, etc.)
 - [ ] Skippable at any point (Ctrl+C or `--skip-onboarding`)
-- [ ] Results saved to `.yak/profile.md` (OKF format)
+- [ ] Results saved to `.lgtm/profile.md` (OKF format)
 - [ ] Profile accessible to all plugins via core API
-- [ ] Re-runnable: `yak init` overwrites existing profile (with confirmation)
+- [ ] Re-runnable: `lgtm init` overwrites existing profile (with confirmation)
 
 ### US-0.3: Config System
 **As a** user with preferences,
@@ -41,12 +41,12 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 **So that** I can choose between central config or per-repo config and override as needed.
 
 **Acceptance Criteria:**
-- [ ] On first start, user chooses config location: central (`~/.yak/`) or per-repo (`.yak/`)
-- [ ] Choice stored in a bootstrap file (`~/.yakrc` or env var)
-- [ ] Per-project overrides always possible via `.yakrc.yaml` in repo root
-- [ ] Override chain: defaults → central/repo config → plugin config → .yakrc.yaml (repo) → CLI flags
-- [ ] `yak config` shows current resolved config + config location
-- [ ] `yak config set <key> <value>` updates config
+- [ ] On first start, user chooses config location: central (`~/.lgtm/`) or per-repo (`.lgtm/`)
+- [ ] Choice stored in a bootstrap file (`~/.lgtmrc` or env var)
+- [ ] Per-project overrides always possible via `.lgtmrc.yaml` in repo root
+- [ ] Override chain: defaults → central/repo config → plugin config → .lgtmrc.yaml (repo) → CLI flags
+- [ ] `lgtm config` shows current resolved config + config location
+- [ ] `lgtm config set <key> <value>` updates config
 - [ ] Plugins can define their own config keys (namespaced)
 
 ### US-0.4: LLM Provider Abstraction
@@ -84,36 +84,36 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 **So that** I can work through them systematically.
 
 **Acceptance Criteria:**
-- [ ] `yak review add <PR numbers...>` adds PRs to queue
+- [ ] `lgtm review add <PR numbers...>` adds PRs to queue
 - [ ] PRs validated (exist on GitHub or local git)
 - [ ] Duplicate rejection
-- [ ] Queue persisted to `.yak/sessions/<date>/index.md`
+- [ ] Queue persisted to `.lgtm/sessions/<date>/index.md`
 - [ ] Works with PR numbers (GitHub) or branch names (local)
 
 ### US-1.2: Feature Grouping on Ingestion
 **As a** developer reviewing related PRs,
-**I want** Yak to auto-detect which PRs are related,
+**I want** LGTM to auto-detect which PRs are related,
 **So that** I can review them together and catch interaction issues.
 
 **Acceptance Criteria:**
-- [ ] On `yak review add`, analyzes file lists for overlap
+- [ ] On `lgtm review add`, analyzes file lists for overlap
 - [ ] Groups PRs that share: directories, files, endpoints, import chains
-- [ ] Groups shown in `yak review status` output
+- [ ] Groups shown in `lgtm review status` output
 - [ ] Suggests review order based on dependencies
 - [ ] Group info persisted in session index frontmatter
 - [ ] Works without LLM (algorithmic file path analysis)
 
 ### US-1.3: View Review Status
 **Acceptance Criteria:**
-- [ ] `yak review status` shows table: #, Title, State, Group, Files
+- [ ] `lgtm review status` shows table: #, Title, State, Group, Files
 - [ ] Feature groups displayed with rationale
 - [ ] Color-coded states
 - [ ] AI summary shown if available
 
 ### US-1.4: Approve or Flag
 **Acceptance Criteria:**
-- [ ] `yak review approve <PR>` → approved state
-- [ ] `yak review flag <PR> --reason "..."` → flagged state
+- [ ] `lgtm review approve <PR>` → approved state
+- [ ] `lgtm review flag <PR> --reason "..."` → flagged state
 - [ ] In GitHub mode: posts review to PR
 - [ ] Cannot approve unfreviewed PR
 
@@ -123,8 +123,8 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 
 ### US-2.1: TUI Review Interface
 **Acceptance Criteria:**
-- [ ] `yak` (bare command) opens full-screen TUI with tabs for each enabled plugin
-- [ ] `yak tui review` opens TUI directly on the review tab
+- [ ] `lgtm` (bare command) opens full-screen TUI with tabs for each enabled plugin
+- [ ] `lgtm tui review` opens TUI directly on the review tab
 - [ ] TUI has tab navigation: Review | Specify | Learn (disabled tabs greyed out)
 - [ ] All CLI commands are also executable within the TUI (command palette or hotkeys)
 - [ ] Queue page: list PRs, select to review
@@ -159,7 +159,7 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 
 ### US-3.1: Create Rules with Examples
 **Acceptance Criteria:**
-- [ ] `yak review rule add "desc" --enforcement regex|llm`
+- [ ] `lgtm review rule add "desc" --enforcement regex|llm`
 - [ ] Rules include examples (bad code + good code)
 - [ ] Rules saved as individual OKF markdown files
 - [ ] Categories: security/style/testing/architecture/performance/general
@@ -181,7 +181,7 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 
 ### US-3.4: Repo-Wide Scan (On-Demand)
 **Acceptance Criteria:**
-- [ ] `yak review scan` checks whole repo against enabled rules
+- [ ] `lgtm review scan` checks whole repo against enabled rules
 - [ ] User-triggered only (never automatic)
 - [ ] Results presented with options: file issue / open PR / fold into current / ignore
 - [ ] Progress indicator during scan
@@ -189,7 +189,7 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 
 ### US-3.5: Rule Export
 **Acceptance Criteria:**
-- [ ] `yak review rule export --format hook|steering|eslint`
+- [ ] `lgtm review rule export --format hook|steering|eslint`
 - [ ] Hook: shell script for pre-commit
 - [ ] Steering: .kiro/steering markdown
 - [ ] ESLint: JSON config (where applicable)
@@ -200,7 +200,7 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 
 ### US-4.1: Comment Pattern Analysis (Ruleify)
 **Acceptance Criteria:**
-- [ ] After 5+ reviews (or `yak review rules suggest`): LLM analyzes comment history
+- [ ] After 5+ reviews (or `lgtm review rules suggest`): LLM analyzes comment history
 - [ ] Identifies repeated themes (same feedback across different PRs)
 - [ ] Suggests rules with examples extracted from actual comments
 - [ ] User confirms/edits/rejects each suggestion
@@ -208,7 +208,7 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 
 ### US-4.2: AI Summary on Queue
 **Acceptance Criteria:**
-- [ ] When AI enabled: summary generated on `yak review add`
+- [ ] When AI enabled: summary generated on `lgtm review add`
 - [ ] ~1000 tokens per PR, cached by commit SHA
 - [ ] Shown in status + TUI
 - [ ] Graceful fallback if LLM unavailable
@@ -231,7 +231,7 @@ Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The c
 **Acceptance Criteria:**
 - [ ] Detect same-file and same-line conflicts across queued PRs
 - [ ] Show in status: "⚠️ PR #101 and #103 modify src/auth/middleware.ts"
-- [ ] `yak review compare <PR1> <PR2>` for detailed comparison
+- [ ] `lgtm review compare <PR1> <PR2>` for detailed comparison
 - [ ] Algorithmic (no LLM)
 
 ---

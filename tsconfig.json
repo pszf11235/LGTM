@@ -17,8 +17,8 @@
     "jsxImportSource": "react",
     "types": ["bun-types"],
     "paths": {
-      "@yak/core": ["./packages/core/src/index.ts"],
-      "@yak/core/*": ["./packages/core/src/*"]
+      "@lgtm/core": ["./packages/core/src/index.ts"],
+      "@lgtm/core/*": ["./packages/core/src/*"]
     }
   },
   "include": ["packages/**/*.ts", "packages/**/*.tsx"],

@@ -1,14 +1,14 @@
 {
-  "name": "@yak/plugin-review",
+  "name": "@lgtm/plugin-review",
   "version": "0.1.0",
-  "description": "Yak Review Plugin — structured PR review with rules, grouping, and TUI",
+  "description": "LGTM Review Plugin — structured PR review with rules, grouping, and TUI",
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
     "test": "bun test"
   },
   "dependencies": {
-    "@yak/core": "workspace:*",
+    "@lgtm/core": "workspace:*",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "ink": "^5.1.0",

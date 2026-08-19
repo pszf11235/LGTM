@@ -1,7 +1,7 @@
 {
-  "name": "yak",
+  "name": "lgtm",
   "version": "0.1.0",
-  "description": "🦬 Stop shaving, start shipping — a dev productivity platform with plugins",
+  "description": "👍 Looks Good To Me — dev productivity platform — a dev productivity platform with plugins",
   "type": "module",
   "private": true,
   "workspaces": [
@@ -9,14 +9,14 @@
     "packages/plugins/*"
   ],
   "bin": {
-    "yak": "./packages/core/src/index.ts"
+    "lgtm": "./packages/core/src/index.ts"
   },
   "scripts": {
     "dev": "bun run packages/core/src/index.ts",
     "build": "bun build packages/core/src/index.ts --outdir dist --target node --external react-devtools-core --external yoga-wasm-web",
     "test": "bun test",
     "lint": "tsc --noEmit",
-    "yak": "bun run packages/core/src/index.ts"
+    "lgtm": "bun run packages/core/src/index.ts"
   },
   "devDependencies": {
     "bun-types": "^1.2.0",

@@ -1,16 +1,16 @@
 /**
  * Configuration schema and validation.
  *
- * Provides type-safe defaults and validation for YakConfig.
+ * Provides type-safe defaults and validation for LGTMConfig.
  * Types are defined in plugin.ts — this file provides runtime validation.
  */
 
-import type { YakConfig, ProjectProfile } from "../plugin.js";
+import type { LGTMConfig, ProjectProfile } from "../plugin.js";
 
 /**
  * Validate a config object, filling in missing fields with defaults.
  */
-export function validateConfig(raw: Partial<YakConfig>): YakConfig {
+export function validateConfig(raw: Partial<LGTMConfig>): LGTMConfig {
   return {
     storageMode: raw.storageMode ?? "repo",
     plugins: {

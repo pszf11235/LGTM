@@ -1,5 +1,5 @@
 /**
- * `yak review scan` — Run all rules against the entire repo.
+ * `lgtm review scan` — Run all rules against the entire repo.
  *
  * On-demand scan (never automatic). Checks all files matching rule patterns.
  * For regex rules: reads files and matches patterns.
@@ -10,7 +10,7 @@
  */
 
 import type { Command } from "commander";
-import type { YakContext } from "@yak/core/plugin.js";
+import type { LGTMContext } from "@lgtm/core/plugin.js";
 import { createRulesEngine, type Rule, getSkippedLLMRules } from "../domain/rules.js";
 import chalk from "chalk";
 import fs from "fs";
@@ -27,7 +27,7 @@ interface ScanViolation {
   explanation?: string;
 }
 
-export function registerScanCommand(program: Command, ctx: YakContext) {
+export function registerScanCommand(program: Command, ctx: LGTMContext) {
   program
     .command("scan")
     .description("Run all rules against the entire repo")
@@ -38,7 +38,7 @@ export function registerScanCommand(program: Command, ctx: YakContext) {
       let rules = await engine.loadRules();
 
       if (rules.length === 0) {
-        console.log(chalk.gray(`\n  No rules defined. Create some with ${chalk.cyan("yak review rule add")}.\n`));
+        console.log(chalk.gray(`\n  No rules defined. Create some with ${chalk.cyan("lgtm review rule add")}.\n`));
         return;
       }
 
@@ -62,7 +62,7 @@ export function registerScanCommand(program: Command, ctx: YakContext) {
         for (const r of skippedRules) {
           console.log(chalk.gray(`    • ${r.id}: ${r.description}`));
         }
-        console.log(chalk.gray(`    Enable AI with: ${chalk.cyan("yak ai test")}\n`));
+        console.log(chalk.gray(`    Enable AI with: ${chalk.cyan("lgtm ai test")}\n`));
         rules = rules.filter((r) => r.enforcement !== "llm");
       }
 
@@ -71,7 +71,7 @@ export function registerScanCommand(program: Command, ctx: YakContext) {
         return;
       }
 
-      console.log(chalk.bold(`\n🦬 Scanning repo against ${rules.length} rule(s)...\n`));
+      console.log(chalk.bold(`\n👍 Scanning repo against ${rules.length} rule(s)...\n`));
 
       // Gather files to scan
       const allFiles = collectFiles(ctx.repoRoot);
@@ -169,7 +169,7 @@ export function registerScanCommand(program: Command, ctx: YakContext) {
       try {
         const date = new Date().toISOString().split("T")[0];
         const scanData = {
-          type: "yak/scan",
+          type: "lgtm/scan",
           date,
           rules_checked: rules.length,
           files_scanned: filesScanned,
@@ -186,7 +186,7 @@ export function registerScanCommand(program: Command, ctx: YakContext) {
           scanData,
           `# Scan Results: ${date}\n\n${scanBody}`
         );
-        console.log(chalk.gray(`  Results saved to .yak/scans/scan-${date}.md\n`));
+        console.log(chalk.gray(`  Results saved to .lgtm/scans/scan-${date}.md\n`));
       } catch {
         // Non-critical — scan results are also shown in terminal
       }
@@ -199,7 +199,7 @@ export function registerScanCommand(program: Command, ctx: YakContext) {
 function collectFiles(repoRoot: string): string[] {
   const files: string[] = [];
   const ignore = new Set([
-    "node_modules", ".git", "dist", "build", ".yak",
+    "node_modules", ".git", "dist", "build", ".lgtm",
     "coverage", ".next", ".nuxt", "vendor", "__pycache__",
     ".venv", "target", ".cargo",
   ]);

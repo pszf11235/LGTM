@@ -1,9 +1,9 @@
 /**
- * Path resolution for yak data directories.
+ * Path resolution for lgtm data directories.
  *
  * Storage modes:
- * - "farm": central yak-farm (default: ~/.yak-farm/<repo-name>/)
- * - "repo": .yak/ in each repo root (committed to git, team-shareable)
+ * - "farm": central lgtm-farm (default: ~/.lgtm-farm/<repo-name>/)
+ * - "repo": .lgtm/ in each repo root (committed to git, team-shareable)
  *
  * The resolveYakDir() function that handles mode logic lives in config/loader.ts
  * (since it depends on BootstrapConfig). This file provides the sub-path helpers.
@@ -13,17 +13,17 @@ import path from "path";
 import fs from "fs";
 
 /**
- * Ensure the yak directory structure exists.
+ * Ensure the lgtm directory structure exists.
  * Creates all subdirectories needed for operation.
  */
-export function ensureYakDirs(yakDir: string): void {
+export function ensureYakDirs(lgtmDir: string): void {
   const dirs = [
-    yakDir,
-    path.join(yakDir, "rules"),
-    path.join(yakDir, "sessions"),
-    path.join(yakDir, "plugins"),
-    path.join(yakDir, "learnings"),
-    path.join(yakDir, "scans"),
+    lgtmDir,
+    path.join(lgtmDir, "rules"),
+    path.join(lgtmDir, "sessions"),
+    path.join(lgtmDir, "plugins"),
+    path.join(lgtmDir, "learnings"),
+    path.join(lgtmDir, "scans"),
   ];
 
   for (const dir of dirs) {
@@ -33,32 +33,32 @@ export function ensureYakDirs(yakDir: string): void {
 
 /**
  * Get the session directory for a given date.
- * Sessions are organized by date: <yakDir>/sessions/YYYY-MM-DD/
+ * Sessions are organized by date: <lgtmDir>/sessions/YYYY-MM-DD/
  */
-export function getSessionDir(yakDir: string, date?: string): string {
+export function getSessionDir(lgtmDir: string, date?: string): string {
   const dateStr = date ?? new Date().toISOString().split("T")[0];
-  return path.join(yakDir, "sessions", dateStr);
+  return path.join(lgtmDir, "sessions", dateStr);
 }
 
 /**
  * Get the rules directory.
  */
-export function getRulesDir(yakDir: string): string {
-  return path.join(yakDir, "rules");
+export function getRulesDir(lgtmDir: string): string {
+  return path.join(lgtmDir, "rules");
 }
 
 /**
  * Get a plugin's config directory.
  */
-export function getPluginDir(yakDir: string, pluginName: string): string {
-  return path.join(yakDir, "plugins", pluginName);
+export function getPluginDir(lgtmDir: string, pluginName: string): string {
+  return path.join(lgtmDir, "plugins", pluginName);
 }
 
 /**
  * Get the profile file path.
  */
-export function getProfilePath(yakDir: string): string {
-  return path.join(yakDir, "profile.md");
+export function getProfilePath(lgtmDir: string): string {
+  return path.join(lgtmDir, "profile.md");
 }
 
 /**

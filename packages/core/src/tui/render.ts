@@ -1,7 +1,7 @@
 /**
  * TUI Renderer — launches the Ink app.
  *
- * This is the entry point for `yak` (bare) and `yak tui [plugin]`.
+ * This is the entry point for `lgtm` (bare) and `lgtm tui [plugin]`.
  * Creates the Ink instance, renders the Shell with plugin tabs.
  */
 

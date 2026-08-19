@@ -1,10 +1,10 @@
 /**
- * `yak discover` — manage the repo registry.
+ * `lgtm discover` — manage the repo registry.
  *
  * Commands:
- *   yak discover             — show all registered repos
- *   yak discover --scan <dir> — scan for yak-enabled repos
- *   yak discover --prune     — remove stale entries
+ *   lgtm discover             — show all registered repos
+ *   lgtm discover --scan <dir> — scan for lgtm-enabled repos
+ *   lgtm discover --prune     — remove stale entries
  */
 
 import type { Command } from "commander";
@@ -20,7 +20,7 @@ export function registerDiscoverCommand(program: Command) {
   program
     .command("discover")
     .description("Manage the repo registry (list/scan/prune)")
-    .option("-s, --scan <dir>", "Scan a directory for yak-enabled repos")
+    .option("-s, --scan <dir>", "Scan a directory for lgtm-enabled repos")
     .option("-p, --prune", "Remove repos that no longer exist on disk")
     .action(async (opts: { scan?: string; prune?: boolean }) => {
       if (opts.prune) {
@@ -28,7 +28,7 @@ export function registerDiscoverCommand(program: Command) {
         if (removed.length === 0) {
           console.log(chalk.green("\n  ✓ Registry is clean — no stale entries.\n"));
         } else {
-          console.log(chalk.bold(`\n🦬 Pruned ${removed.length} stale repo(s):\n`));
+          console.log(chalk.bold(`\n👍 Pruned ${removed.length} stale repo(s):\n`));
           for (const r of removed) {
             console.log(chalk.gray(`  ✗ ${r}`));
           }
@@ -38,11 +38,11 @@ export function registerDiscoverCommand(program: Command) {
       }
 
       if (opts.scan) {
-        console.log(chalk.gray(`\n  Scanning ${opts.scan} for .yak/ directories...\n`));
+        console.log(chalk.gray(`\n  Scanning ${opts.scan} for .lgtm/ directories...\n`));
         const found = discoverRepos(opts.scan);
 
         if (found.length === 0) {
-          console.log(chalk.gray("  No yak-enabled repos found.\n"));
+          console.log(chalk.gray("  No lgtm-enabled repos found.\n"));
           return;
         }
 
@@ -52,19 +52,19 @@ export function registerDiscoverCommand(program: Command) {
           const name = repoPath.split("/").pop();
           console.log(`  ${chalk.green("+")} ${name} — ${chalk.gray(repoPath)}`);
         }
-        console.log(chalk.gray(`\n  All registered in ~/.yak-registry.md\n`));
+        console.log(chalk.gray(`\n  All registered in ~/.lgtm-registry.md\n`));
         return;
       }
 
       // Default: list registered repos
       const repos = getRegisteredRepos();
       if (repos.length === 0) {
-        console.log(chalk.gray("\n  No repos registered yet. Yak auto-registers on first use.\n"));
-        console.log(chalk.gray(`  Or scan: ${chalk.cyan("yak discover --scan ~/projects")}\n`));
+        console.log(chalk.gray("\n  No repos registered yet. LGTM auto-registers on first use.\n"));
+        console.log(chalk.gray(`  Or scan: ${chalk.cyan("lgtm discover --scan ~/projects")}\n`));
         return;
       }
 
-      console.log(chalk.bold(`\n🦬 Registered Repos (${repos.length})\n`));
+      console.log(chalk.bold(`\n👍 Registered Repos (${repos.length})\n`));
       for (const r of repos) {
         const lastSeen = r.lastSeen?.split("T")[0] ?? "unknown";
         console.log(`  ${chalk.green("●")} ${chalk.bold(r.name.padEnd(20))} ${chalk.gray(r.path)}`);

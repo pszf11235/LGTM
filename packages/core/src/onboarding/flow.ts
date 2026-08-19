@@ -24,8 +24,8 @@ import { findGitRoot } from "../store/paths.js";
 /**
  * Check if onboarding is complete (all required questions answered).
  */
-export function isOnboardingComplete(yakDir: string): boolean {
-  const profile = loadProfile(yakDir);
+export function isOnboardingComplete(lgtmDir: string): boolean {
+  const profile = loadProfile(lgtmDir);
   if (!profile) return false;
 
   // A complete profile has all required fields set to non-default placeholder values
@@ -73,7 +73,7 @@ export async function runOnboarding(): Promise<{
   if (unansweredQuestions.length === 0) {
     // All questions already answered — re-run all for editing
     console.log(
-      `\n${chalk.bold("🦬 Yak Setup")} — updating your configuration.\n`
+      `\n${chalk.bold("👍 LGTM Setup")} — updating your configuration.\n`
     );
     console.log(
       chalk.gray("  Press [s] to keep current value. Ctrl+C to exit.\n")
@@ -81,7 +81,7 @@ export async function runOnboarding(): Promise<{
   } else if (existingProfile) {
     // Partial — resuming
     console.log(
-      `\n${chalk.bold("🦬 Yak Setup")} — continuing where you left off.\n`
+      `\n${chalk.bold("👍 LGTM Setup")} — continuing where you left off.\n`
     );
     console.log(
       chalk.gray("  Press [s] to skip any question. Ctrl+C to exit.\n")
@@ -89,7 +89,7 @@ export async function runOnboarding(): Promise<{
   } else {
     // Fresh start
     console.log(
-      `\n${chalk.bold("🦬 Welcome to Yak!")} Let's set up your workspace.\n`
+      `\n${chalk.bold("👍 Welcome to LGTM!")} Let's set up your workspace.\n`
     );
     console.log(
       chalk.gray("  Press [s] to skip any question. Ctrl+C to exit.\n")
@@ -108,8 +108,8 @@ export async function runOnboarding(): Promise<{
     };
     saveBootstrap(bootstrap);
 
-    const yakDir = resolveYakDir(bootstrap, repoRoot);
-    ensureYakDirs(yakDir);
+    const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+    ensureYakDirs(lgtmDir);
 
     const detectedStack = detectTechStack(repoRoot);
 
@@ -131,11 +131,11 @@ export async function runOnboarding(): Promise<{
       createdAt: existingProfile?.createdAt ?? new Date().toISOString(),
     };
 
-    const store = createOKFStore(yakDir);
-    const cleanData = JSON.parse(JSON.stringify({ type: "yak/profile", ...profile }));
+    const store = createOKFStore(lgtmDir);
+    const cleanData = JSON.parse(JSON.stringify({ type: "lgtm/profile", ...profile }));
     await store.write("profile.md", cleanData, generateProfileBody(profile));
 
-    return { profile, bootstrap, yakDir, detectedStack };
+    return { profile, bootstrap, lgtmDir, detectedStack };
   };
 
   // Determine which questions to ask
@@ -154,7 +154,7 @@ export async function runOnboarding(): Promise<{
     }
 
     // Final save and summary
-    const { profile, bootstrap, yakDir, detectedStack } = await saveProgress();
+    const { profile, bootstrap, lgtmDir, detectedStack } = await saveProgress();
 
     if (detectedStack.length > 0) {
       console.log(
@@ -165,18 +165,18 @@ export async function runOnboarding(): Promise<{
     if (bootstrap.storageMode === "farm") {
       console.log(
         chalk.gray(
-          `  Yak-farm location: ${chalk.cyan(getDefaultFarmPath())}`
+          `  LGTM-farm location: ${chalk.cyan(getDefaultFarmPath())}`
         )
       );
     }
 
     console.log(
-      `\n  ${chalk.green("✓")} Profile saved to ${chalk.cyan(yakDir + "/profile.md")}`
+      `\n  ${chalk.green("✓")} Profile saved to ${chalk.cyan(lgtmDir + "/profile.md")}`
     );
     console.log(
-      `  ${chalk.green("✓")} Storage mode: ${chalk.cyan(bootstrap.storageMode === "farm" ? "yak-farm" : "per-repo (.yak/)")}`
+      `  ${chalk.green("✓")} Storage mode: ${chalk.cyan(bootstrap.storageMode === "farm" ? "lgtm-farm" : "per-repo (.lgtm/)")}`
     );
-    console.log(`\n${chalk.bold("🦬 You're all set!")} Run ${chalk.cyan("yak --help")} to get started.\n`);
+    console.log(`\n${chalk.bold("👍 You're all set!")} Run ${chalk.cyan("lgtm --help")} to get started.\n`);
 
     return { profile, bootstrap };
   } finally {

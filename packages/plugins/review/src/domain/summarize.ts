@@ -6,7 +6,7 @@
  * Graceful: returns null if LLM unavailable (feature degrades, doesn't break).
  */
 
-import type { LLMProvider } from "@yak/core/plugin.js";
+import type { LLMProvider } from "@lgtm/core/plugin.js";
 import type { ParsedDiff } from "./diff-parser.js";
 import { getDiffStats } from "./diff-parser.js";
 

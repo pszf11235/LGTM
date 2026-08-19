@@ -31,15 +31,15 @@ export function ReviewTab({ onStatusHint }: ReviewTabProps) {
 
     // Save review to OKF store
     try {
-      const { createOKFStore } = await import("@yak/core/store/okf.js");
-      const { findGitRoot } = await import("@yak/core/store/paths.js");
-      const { loadBootstrap, resolveYakDir } = await import("@yak/core/config/loader.js");
+      const { createOKFStore } = await import("@lgtm/core/store/okf.js");
+      const { findGitRoot } = await import("@lgtm/core/store/paths.js");
+      const { loadBootstrap, resolveYakDir } = await import("@lgtm/core/config/loader.js");
       const { createQueueManager } = await import("../domain/queue.js");
 
       const repoRoot = findGitRoot();
       const bootstrap = loadBootstrap();
-      const yakDir = resolveYakDir(bootstrap, repoRoot);
-      const store = createOKFStore(yakDir);
+      const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+      const store = createOKFStore(lgtmDir);
       const queue = createQueueManager(store);
 
       const date = new Date().toISOString().split("T")[0];
@@ -47,7 +47,7 @@ export function ReviewTab({ onStatusHint }: ReviewTabProps) {
       // Save review markdown
       if (comments && comments.length > 0 || action !== "back") {
         const reviewData = {
-          type: "yak/review",
+          type: "lgtm/review",
           pr: page.prNumber,
           title: page.prTitle,
           state: action === "back" ? "in-progress" : action,

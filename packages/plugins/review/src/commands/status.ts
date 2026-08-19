@@ -1,15 +1,15 @@
 /**
- * `yak review status` — Show the current review queue.
+ * `lgtm review status` — Show the current review queue.
  *
  * Displays a table of queued PRs with states, feature groups, and file counts.
  */
 
 import type { Command } from "commander";
-import type { YakContext } from "@yak/core/plugin.js";
+import type { LGTMContext } from "@lgtm/core/plugin.js";
 import { createQueueManager } from "../domain/queue.js";
 import chalk from "chalk";
 
-export function registerStatusCommand(program: Command, ctx: YakContext) {
+export function registerStatusCommand(program: Command, ctx: LGTMContext) {
   program
     .command("status")
     .description("Show review queue status with feature groups")
@@ -20,13 +20,13 @@ export function registerStatusCommand(program: Command, ctx: YakContext) {
       if (session.prs.length === 0) {
         console.log(
           chalk.gray(
-            `\n  No PRs in queue. Add some with ${chalk.cyan("yak review add <numbers...>")}\n`
+            `\n  No PRs in queue. Add some with ${chalk.cyan("lgtm review add <numbers...>")}\n`
           )
         );
         return;
       }
 
-      console.log(chalk.bold(`\n🦬 Review Queue — ${session.date}\n`));
+      console.log(chalk.bold(`\n👍 Review Queue — ${session.date}\n`));
 
       // Show feature groups first
       if (session.featureGroups.length > 0) {

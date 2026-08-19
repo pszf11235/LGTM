@@ -7,7 +7,7 @@
  * Uses LLM to identify patterns (or simple text matching as fallback).
  */
 
-import type { OKFStore, LLMProvider } from "@yak/core/plugin.js";
+import type { OKFStore, LLMProvider } from "@lgtm/core/plugin.js";
 import type { ReviewComment } from "./types.js";
 import { createRulesEngine, type Rule } from "./rules.js";
 
@@ -76,7 +76,7 @@ async function collectAllComments(
       if (reviewFile.endsWith("index.md")) continue;
 
       const review = await store.read(reviewFile);
-      if (!review || review.data.type !== "yak/review") continue;
+      if (!review || review.data.type !== "lgtm/review") continue;
 
       const prNumber = (review.data.pr as number) ?? 0;
 

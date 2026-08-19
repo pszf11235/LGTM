@@ -1,5 +1,5 @@
 /**
- * @yak/plugin-learn (stub)
+ * @lgtm/plugin-learn (stub)
  *
  * Interactive learning paths for new tech stacks.
  * AI-generated project-based curricula.
@@ -8,14 +8,14 @@
  */
 
 import type { Command } from "commander";
-import type { YakPlugin, YakContext } from "@yak/core/plugin.js";
+import type { LGTMPlugin, LGTMContext } from "@lgtm/core/plugin.js";
 
-export const plugin: YakPlugin = {
+export const plugin: LGTMPlugin = {
   name: "learn",
   description: "Interactive learning paths — AI-generated curricula for any tech stack",
   version: "0.1.0",
 
-  registerCommands(program: Command, ctx: YakContext): void {
+  registerCommands(program: Command, ctx: LGTMContext): void {
     program
       .command("start")
       .description("Start a new learning path")

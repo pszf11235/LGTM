@@ -1,6 +1,6 @@
-# 🦬 Yak — Stop Shaving, Start Shipping
+# 👍 LGTM — Looks Good To Me
 
-> A personal dev productivity platform with plugins. The tool that eliminates yak shaving.
+> A personal dev productivity platform with plugins. The tool that eliminates lgtm shaving.
 
 ## What Is Yak?
 
@@ -8,18 +8,18 @@ Yak is a **CLI + TUI platform** for developer productivity — a single tool wit
 
 ## Why "Yak"?
 
-**Yak shaving** = the endless chain of prerequisite tasks before you can do what you actually want. Yak is the tool that breaks that chain.
+**Yak shaving** = the endless chain of prerequisite tasks before you can do what you actually want. LGTM is the tool that breaks that chain.
 
 ```
-Without Yak:  "I need to review 5 PRs" → open GitHub → context switch × 5 → forget what PR #2 did → yak shave
-With Yak:     "yak review add 101-105" → structured review → rules accumulate → less yak shaving over time
+Without Yak:  "I need to review 5 PRs" → open GitHub → context switch × 5 → forget what PR #2 did → lgtm shave
+With Yak:     "lgtm review add 101-105" → structured review → rules accumulate → less lgtm shaving over time
 ```
 
 ## Architecture: Core + Plugins
 
 ```
 ┌─────────────────────────────────────────────┐
-│               🦬 Yak                         │
+│               👍 LGTM                         │
 │       Dev Productivity Platform              │
 ├─────────────────────────────────────────────┤
 │                                              │
@@ -48,18 +48,18 @@ With Yak:     "yak review add 101-105" → structured review → rules accumulat
 - Onboarding flow (generic, overrideable per plugin)
 
 ### What plugins provide:
-- Their own commands (namespaced: `yak review add`, `yak specify analyze`)
+- Their own commands (namespaced: `lgtm review add`, `lgtm specify analyze`)
 - Their own TUI pages (registered into the shell)
 - Their own domain logic, rules, and storage
 - Access to all core services
 
 ## Onboarding
 
-On first run, Yak asks questions to understand your project context:
+On first run, LGTM asks questions to understand your project context:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  🦬 Welcome to Yak! Let's set up your workspace.            │
+│  👍 Welcome to LGTM! Let's set up your workspace.            │
 │                                                              │
 │  1/6  What are this project's goals?                         │
 │                                                              │
@@ -86,49 +86,49 @@ This creates a **project profile** that all plugins use. Plugins can extend with
 ### Override Chain
 
 ```
-Generic profile → Plugin config → Per-repo .yakrc.yaml → CLI flags
+Generic profile → Plugin config → Per-repo .lgtmrc.yaml → CLI flags
 ```
 
 ## CLI Usage
 
 ```bash
 # First time setup
-yak init                           # interactive onboarding
+lgtm init                           # interactive onboarding
 
 # Plugin management
-yak plugins                        # list plugins + status
-yak plugins enable specify         # enable a plugin
-yak plugins disable learn          # disable
+lgtm plugins                        # list plugins + status
+lgtm plugins enable specify         # enable a plugin
+lgtm plugins disable learn          # disable
 
-# TUI (primary interface — just run `yak`)
-yak                                # opens TUI with tabs for each plugin
-yak tui                            # same as above (explicit)
-yak tui review                     # opens TUI directly on review tab
+# TUI (primary interface — just run `lgtm`)
+lgtm                                # opens TUI with tabs for each plugin
+lgtm tui                            # same as above (explicit)
+lgtm tui review                     # opens TUI directly on review tab
 
 # All CLI commands are also executable within the TUI
 # CLI is for scripting/quick actions, TUI is the interactive experience
 
 # Review plugin (native git/gh — no LLM needed to fetch PRs)
-yak review add 101 102 103         # queue PRs
-yak review status                  # show queue with feature groups
-yak review approve 101             # mark approved
-yak review flag 103 --reason "..." # flag with reason
-yak review rule add "..."          # create review rule
-yak review scan                    # repo-wide rule check
+lgtm review add 101 102 103         # queue PRs
+lgtm review status                  # show queue with feature groups
+lgtm review approve 101             # mark approved
+lgtm review flag 103 --reason "..." # flag with reason
+lgtm review rule add "..."          # create review rule
+lgtm review scan                    # repo-wide rule check
 
 # Future plugins
-yak specify analyze ./src          # codebase analysis
-yak specify focus ./src/auth       # zoom into a module
-yak learn start --topic "Rust"     # start learning path
+lgtm specify analyze ./src          # codebase analysis
+lgtm specify focus ./src/auth       # zoom into a module
+lgtm learn start --topic "Rust"     # start learning path
 
 # Global
-yak config                         # view/edit config
-yak profile                        # view/edit project profile
+lgtm config                         # view/edit config
+lgtm profile                        # view/edit project profile
 ```
 
 ## First Plugin: Review
 
-The PR review harness. Full details in `.kiro/specs/yak/requirements.md`.
+The PR review harness. Full details in `.kiro/specs/lgtm/requirements.md`.
 
 Key features:
 - **Queue & workflow** — structured review of multiple PRs

@@ -1,17 +1,17 @@
 /**
- * Re-export all public types from @yak/core.
+ * Re-export all public types from @lgtm/core.
  *
  * Plugins should import types from here:
- *   import type { YakPlugin, YakContext } from "@yak/core/plugin.js";
+ *   import type { LGTMPlugin, LGTMContext } from "@lgtm/core/plugin.js";
  *
  * Or from the package root:
- *   import type { YakPlugin } from "@yak/core";
+ *   import type { LGTMPlugin } from "@lgtm/core";
  */
 
 export type {
-  YakPlugin,
-  YakContext,
-  YakConfig,
+  LGTMPlugin,
+  LGTMContext,
+  LGTMConfig,
   ProjectProfile,
   TUIPage,
   OnboardingStep,

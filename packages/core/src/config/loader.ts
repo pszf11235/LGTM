@@ -3,57 +3,57 @@
  *
  * Resolution order (last wins):
  * 1. Built-in defaults
- * 2. Storage config from bootstrap (.yak/ or yak-farm)
+ * 2. Storage config from bootstrap (.lgtm/ or lgtm-farm)
  * 3. Plugin-specific config
- * 4. Repo override (.yakrc.yaml in repo root — always checked)
+ * 4. Repo override (.lgtmrc.yaml in repo root — always checked)
  * 5. CLI flags (handled by Commander, not here)
  *
- * On first `yak init`, user chooses storage mode:
- * - "farm": All yak data in one place (the "yak-farm", default: ~/.yak-farm/)
- * - "repo": Each repo has its own .yak/ (committed to git, team-shareable)
+ * On first `lgtm init`, user chooses storage mode:
+ * - "farm": All lgtm data in one place (the "lgtm-farm", default: ~/.lgtm-farm/)
+ * - "repo": Each repo has its own .lgtm/ (committed to git, team-shareable)
  *
- * Either way, ~/.yakrc stores the choice + a registry of known repos (Task 21).
+ * Either way, ~/.lgtmrc stores the choice + a registry of known repos (Task 21).
  */
 
 import fs from "fs";
 import path from "path";
 import os from "os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import type { YakConfig, ProjectProfile } from "../plugin.js";
+import type { LGTMConfig, ProjectProfile } from "../plugin.js";
 import { findGitRoot, getProfilePath } from "../store/paths.js";
 
 /**
- * Bootstrap config stored in ~/.yakrc.
+ * Bootstrap config stored in ~/.lgtmrc.
  * This is the ONLY central file — determines where everything else lives.
  */
 export interface BootstrapConfig {
   /**
    * Storage mode:
-   * - "farm": All yak data in one central location (the "yak-farm")
-   *           Default: ~/.yak-farm/
+   * - "farm": All lgtm data in one central location (the "lgtm-farm")
+   *           Default: ~/.lgtm-farm/
    *           Good for: keeping everything in one place, cross-repo queries, personal use
-   * - "repo": Each repo has its own .yak/ directory (committed to git)
+   * - "repo": Each repo has its own .lgtm/ directory (committed to git)
    *           Good for: sharing config/rules with team, per-repo reviews tracked in git
    */
   storageMode: "farm" | "repo";
 
-  /** Custom path for yak-farm (default: ~/.yak-farm/) — only used in farm mode */
+  /** Custom path for lgtm-farm (default: ~/.lgtm-farm/) — only used in farm mode */
   farmPath?: string;
 }
 
 /**
- * Default yak-farm location.
+ * Default lgtm-farm location.
  */
 export function getDefaultFarmPath(): string {
-  return path.join(os.homedir(), ".yak-farm");
+  return path.join(os.homedir(), ".lgtm-farm");
 }
 
 /**
- * Load the bootstrap config from ~/.yakrc.
+ * Load the bootstrap config from ~/.lgtmrc.
  * Returns defaults if file doesn't exist (first run).
  */
 export function loadBootstrap(): BootstrapConfig {
-  const bootstrapPath = path.join(os.homedir(), ".yakrc");
+  const bootstrapPath = path.join(os.homedir(), ".lgtmrc");
 
   try {
     const raw = fs.readFileSync(bootstrapPath, "utf-8");
@@ -69,18 +69,18 @@ export function loadBootstrap(): BootstrapConfig {
 }
 
 /**
- * Save bootstrap config to ~/.yakrc.
+ * Save bootstrap config to ~/.lgtmrc.
  */
 export function saveBootstrap(config: BootstrapConfig): void {
-  const bootstrapPath = path.join(os.homedir(), ".yakrc");
+  const bootstrapPath = path.join(os.homedir(), ".lgtmrc");
 
   const lines = [
-    "# Yak bootstrap config",
-    "# Created by `yak init`",
+    "# LGTM bootstrap config",
+    "# Created by `lgtm init`",
     "#",
     "# storageMode:",
-    '#   "farm" = all yak data in one place (the yak-farm)',
-    '#   "repo" = .yak/ per repo (committed to git)',
+    '#   "farm" = all lgtm data in one place (the lgtm-farm)',
+    '#   "repo" = .lgtm/ per repo (committed to git)',
     "",
     `storageMode: ${config.storageMode}`,
   ];
@@ -94,10 +94,10 @@ export function saveBootstrap(config: BootstrapConfig): void {
 }
 
 /**
- * Resolve the yak data directory based on storage mode.
+ * Resolve the lgtm data directory based on storage mode.
  *
- * - Farm mode: ~/.yak-farm/<repo-name>/ (or custom farmPath)
- * - Repo mode: <repoRoot>/.yak/
+ * - Farm mode: ~/.lgtm-farm/<repo-name>/ (or custom farmPath)
+ * - Repo mode: <repoRoot>/.lgtm/
  */
 export function resolveYakDir(
   config: BootstrapConfig,
@@ -108,24 +108,24 @@ export function resolveYakDir(
     const repoName = path.basename(repoRoot);
     return path.join(farmBase, repoName);
   }
-  return path.join(repoRoot, ".yak");
+  return path.join(repoRoot, ".lgtm");
 }
 
 /**
- * Load the repo-level override (.yakrc.yaml in repo root).
+ * Load the repo-level override (.lgtmrc.yaml in repo root).
  * Always checked regardless of storage mode — teams can commit shared config.
  */
-function loadRepoOverride(repoRoot: string): Partial<YakConfig> {
+function loadRepoOverride(repoRoot: string): Partial<LGTMConfig> {
   const candidates = [
-    path.join(repoRoot, ".yakrc.yaml"),
-    path.join(repoRoot, ".yakrc.yml"),
-    path.join(repoRoot, ".yak", "config.yaml"),
+    path.join(repoRoot, ".lgtmrc.yaml"),
+    path.join(repoRoot, ".lgtmrc.yml"),
+    path.join(repoRoot, ".lgtm", "config.yaml"),
   ];
 
   for (const filePath of candidates) {
     try {
       const raw = fs.readFileSync(filePath, "utf-8");
-      return (parseYaml(raw) as Partial<YakConfig>) ?? {};
+      return (parseYaml(raw) as Partial<LGTMConfig>) ?? {};
     } catch {
       continue;
     }
@@ -137,7 +137,7 @@ function loadRepoOverride(repoRoot: string): Partial<YakConfig> {
 /**
  * Get the default config (built-in).
  */
-export function getDefaultConfig(): YakConfig {
+export function getDefaultConfig(): LGTMConfig {
   return {
     storageMode: "repo",
     plugins: {
@@ -152,21 +152,21 @@ export function getDefaultConfig(): YakConfig {
 }
 
 /**
- * Load and resolve the full Yak configuration.
+ * Load and resolve the full LGTM configuration.
  * Merges all layers in order.
  */
-export function loadConfig(): YakConfig {
+export function loadConfig(): LGTMConfig {
   const defaults = getDefaultConfig();
   const bootstrap = loadBootstrap();
   const repoRoot = findGitRoot();
   const repoOverride = loadRepoOverride(repoRoot);
 
   // Load profile (has AI preference from onboarding)
-  const yakDir = resolveYakDir(bootstrap, repoRoot);
-  const profile = loadProfile(yakDir);
+  const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+  const profile = loadProfile(lgtmDir);
 
   // Merge: defaults ← profile ← repo override
-  const config: YakConfig = {
+  const config: LGTMConfig = {
     ...defaults,
     storageMode: bootstrap.storageMode,
     plugins: {
@@ -184,11 +184,11 @@ export function loadConfig(): YakConfig {
 }
 
 /**
- * Load the project profile from the yak data dir.
+ * Load the project profile from the lgtm data dir.
  * Returns null if no profile exists (not yet initialized).
  */
-export function loadProfile(yakDir: string): ProjectProfile | null {
-  const profilePath = getProfilePath(yakDir);
+export function loadProfile(lgtmDir: string): ProjectProfile | null {
+  const profilePath = getProfilePath(lgtmDir);
 
   try {
     const raw = fs.readFileSync(profilePath, "utf-8");

@@ -1,11 +1,11 @@
 {
-  "name": "@yak/plugin-specify",
+  "name": "@lgtm/plugin-specify",
   "version": "0.1.0",
-  "description": "Yak Specify Plugin — codebase intelligence and agent handoff (stub)",
+  "description": "LGTM Specify Plugin — codebase intelligence and agent handoff (stub)",
   "type": "module",
   "main": "./src/index.ts",
   "dependencies": {
-    "@yak/core": "workspace:*",
+    "@lgtm/core": "workspace:*",
     "commander": "^12.1.0"
   }
 }

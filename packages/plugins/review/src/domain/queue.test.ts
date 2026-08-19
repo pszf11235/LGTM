@@ -9,14 +9,14 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { createQueueManager } from "./queue.js";
-import { createOKFStore } from "@yak/core/store/okf.js";
+import { createOKFStore } from "@lgtm/core/store/okf.js";
 
 describe("Queue Manager", () => {
   let tmpDir: string;
   let store: ReturnType<typeof createOKFStore>;
 
   beforeEach(() => {
-    tmpDir = path.join(os.tmpdir(), `yak-queue-test-${Date.now()}`);
+    tmpDir = path.join(os.tmpdir(), `lgtm-queue-test-${Date.now()}`);
     fs.mkdirSync(tmpDir, { recursive: true });
     store = createOKFStore(tmpDir);
   });

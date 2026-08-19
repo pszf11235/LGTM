@@ -1,13 +1,13 @@
 /**
- * `yak review flag <pr>` — Flag a PR with issues.
+ * `lgtm review flag <pr>` — Flag a PR with issues.
  */
 
 import type { Command } from "commander";
-import type { YakContext } from "@yak/core/plugin.js";
+import type { LGTMContext } from "@lgtm/core/plugin.js";
 import { createQueueManager } from "../domain/queue.js";
 import chalk from "chalk";
 
-export function registerFlagCommand(program: Command, ctx: YakContext) {
+export function registerFlagCommand(program: Command, ctx: LGTMContext) {
   program
     .command("flag <pr>")
     .description("Flag a PR with issues")
