@@ -93,26 +93,41 @@ export function QueuePage({ onStatusHint, onOpenReview }: QueuePageProps) {
       const { parseDiff } = await import("../domain/diff-parser.js");
       const { createGitAdapter } = await import("@lgtm/core/utils/git.js");
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
+      const { createOKFStore } = await import("@lgtm/core/store/okf.js");
+      const { loadBootstrap, resolveYakDir } = await import("@lgtm/core/config/loader.js");
+      const { loadCachedDiff } = await import("../commands/add.js");
 
       const repoRoot = findGitRoot();
-      const git = createGitAdapter(repoRoot);
+      const bootstrap = loadBootstrap();
+      const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+      const store = createOKFStore(lgtmDir);
 
-      // Try to get real diff
-      const branchName = `pr-${pr.number}`;
       let rawDiff = "";
-      try {
-        rawDiff = await git.getDiff(branchName);
-      } catch {
-        // No real branch — use a demo diff
-        rawDiff = generateDemoDiff(pr.number);
+      let title = pr.title;
+
+      // 1. Try cached GitHub diff (fetched during `lgtm review add`)
+      const cached = await loadCachedDiff(store, pr.number);
+      if (cached) {
+        rawDiff = cached.rawDiff;
+        title = cached.title || pr.title;
+      } else {
+        // 2. Try local git branch
+        const git = createGitAdapter(repoRoot);
+        const branchName = `pr-${pr.number}`;
+        try {
+          rawDiff = await git.getDiff(branchName);
+        } catch {
+          // 3. Fallback to demo diff
+          rawDiff = generateDemoDiff(pr.number);
+        }
       }
 
       const diff = parseDiff(rawDiff);
       if (onOpenReview) {
-        onOpenReview(pr.number, pr.title, diff, pr.featureGroup);
+        onOpenReview(pr.number, title, diff, pr.featureGroup);
       }
     } catch {
-      // Fallback to demo diff
+      // Final fallback to demo diff
       const { parseDiff } = await import("../domain/diff-parser.js");
       const diff = parseDiff(generateDemoDiff(pr.number));
       if (onOpenReview) {

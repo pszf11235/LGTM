@@ -1,10 +1,11 @@
 /**
  * `lgtm review add <prs...>` — Add PRs to the review queue.
  *
- * Fetches metadata (title, changed files) from git, computes feature groups,
- * and persists to the session index. No LLM needed.
+ * Resolution order:
+ * 1. Check for local branch (pr-<N>, pr/<N>, etc.)
+ * 2. If not found locally, fetch from GitHub API (metadata + diff)
+ * 3. Cache the diff for TUI review
  *
- * Validates that PRs exist (branch found in git or GitHub).
  * Use --demo to bypass validation for testing.
  */
 
@@ -18,9 +19,9 @@ export function registerAddCommand(program: Command, ctx: LGTMContext) {
     .command("add <prs...>")
     .description("Add PR(s) to the review queue")
     .option("-b, --branch", "Treat arguments as branch names instead of PR numbers")
+    .option("-r, --repo <owner/repo>", "GitHub repo (default: detected from git remote)")
     .option("--demo", "Demo/test mode — skip PR validation, use mock data")
-    .action(async (prs: string[], opts: { branch?: boolean; demo?: boolean }) => {
-      // Git adapter import (from core package)
+    .action(async (prs: string[], opts: { branch?: boolean; repo?: string; demo?: boolean }) => {
       const { createGitAdapter } = await import("@lgtm/core/utils/git.js");
       const git = createGitAdapter(ctx.repoRoot);
 
@@ -33,6 +34,22 @@ export function registerAddCommand(program: Command, ctx: LGTMContext) {
       }
 
       const queue = createQueueManager(ctx.store);
+
+      // Resolve GitHub repo for API fetch
+      let ghOwner: string | null = null;
+      let ghRepo: string | null = null;
+
+      if (opts.repo) {
+        const parts = opts.repo.split("/");
+        if (parts.length === 2) {
+          [ghOwner, ghRepo] = parts;
+        }
+      } else if (!opts.demo) {
+        const detected = await detectRepoFromRemote(ctx.repoRoot);
+        if (detected) {
+          [ghOwner, ghRepo] = detected;
+        }
+      }
 
       // Build PR metadata
       const prEntries: Array<{
@@ -49,7 +66,7 @@ export function registerAddCommand(program: Command, ctx: LGTMContext) {
           continue;
         }
 
-        // Demo mode: create mock PR data
+        // ── Demo mode ────────────────────────────────────────────────────
         if (opts.demo) {
           prEntries.push({
             number: opts.branch ? prs.indexOf(pr) + 1 : prNumber,
@@ -60,40 +77,79 @@ export function registerAddCommand(program: Command, ctx: LGTMContext) {
           continue;
         }
 
-        // Real mode: validate PR exists
+        // ── Real mode: try local first, then GitHub ──────────────────────
         const branchName = opts.branch ? pr : await findPRBranch(git, prNumber);
-        let filesChanged: string[] = [];
-        let title = opts.branch ? pr : `PR #${prNumber}`;
 
-        if (!branchName) {
+        if (branchName) {
+          // Found locally — use git diff
+          let filesChanged: string[] = [];
+          let title = opts.branch ? pr : `PR #${prNumber}`;
+
+          try {
+            filesChanged = await git.getChangedFiles(branchName);
+          } catch (err) {
+            ctx.logger.warn(`PR #${prNumber} (${branchName}) — could not get diff: ${(err as Error).message}`);
+            continue;
+          }
+
+          prEntries.push({
+            number: opts.branch ? prs.indexOf(pr) + 1 : prNumber,
+            title,
+            filesChanged,
+            source: "local",
+          });
+        } else if (ghOwner && ghRepo) {
+          // Not found locally — fetch from GitHub API
+          console.log(chalk.gray(`  Fetching PR #${prNumber} from GitHub...`));
+
+          try {
+            const { createGitHubAdapter } = await import("../infra/github.js");
+            const github = createGitHubAdapter(ghOwner, ghRepo);
+
+            const prData = await github.fetchPR(prNumber);
+            const rawDiff = await github.fetchDiff(prNumber);
+            const changedFiles = await github.fetchChangedFiles(prNumber);
+
+            // Cache the diff for TUI review later
+            await cachePRDiff(ctx, prNumber, rawDiff, prData);
+
+            console.log(chalk.green(
+              `  ✓ PR #${prNumber}: "${prData.title}" (+${prData.additions} -${prData.deletions}, ${prData.changedFiles} files)`
+            ));
+
+            prEntries.push({
+              number: prNumber,
+              title: prData.title,
+              filesChanged: changedFiles,
+              source: "github",
+            });
+          } catch (err) {
+            const msg = (err as Error).message;
+            if (msg.includes("404")) {
+              ctx.logger.error(`PR #${prNumber} not found in ${ghOwner}/${ghRepo}.`);
+            } else if (msg.includes("token")) {
+              ctx.logger.error(`GitHub auth required. Set GITHUB_TOKEN or run: lgtm auth login github`);
+              break; // No point trying more PRs
+            } else {
+              ctx.logger.error(`Failed to fetch PR #${prNumber}: ${msg}`);
+            }
+            continue;
+          }
+        } else {
+          // No local branch AND no GitHub access
           ctx.logger.warn(
-            `PR #${prNumber} — branch not found locally. ` +
-            `Fetch it with 'git fetch origin pull/${prNumber}/head:pr-${prNumber}' ` +
-            `or use --demo for testing.`
+            `PR #${prNumber} — not found locally and no GitHub access.\n` +
+            `    Set GITHUB_TOKEN or use --repo owner/repo to fetch from GitHub.`
           );
           continue;
         }
-
-        try {
-          filesChanged = await git.getChangedFiles(branchName);
-          if (filesChanged.length === 0) {
-            ctx.logger.warn(`PR #${prNumber} (${branchName}) — no changes detected against main.`);
-          }
-        } catch (err) {
-          ctx.logger.warn(`PR #${prNumber} (${branchName}) — could not get diff: ${(err as Error).message}`);
-          continue;
-        }
-
-        prEntries.push({
-          number: opts.branch ? prs.indexOf(pr) + 1 : prNumber,
-          title,
-          filesChanged,
-          source: "local",
-        });
       }
 
       if (prEntries.length === 0) {
-        ctx.logger.error("No valid PRs to add. Use --demo to add mock PRs for testing.");
+        ctx.logger.error("No valid PRs to add.");
+        if (!ghOwner) {
+          console.log(chalk.gray(`  Tip: Set GITHUB_TOKEN to auto-fetch PRs from GitHub.\n`));
+        }
         return;
       }
 
@@ -109,7 +165,8 @@ export function registerAddCommand(program: Command, ctx: LGTMContext) {
         const group = queued?.featureGroup
           ? chalk.gray(` [${queued.featureGroup}]`)
           : "";
-        console.log(`  ${chalk.green("+")} #${pr.number}: ${pr.title} (${pr.filesChanged.length} files)${group}`);
+        const sourceIcon = pr.source === "github" ? chalk.cyan("⬇") : chalk.green("●");
+        console.log(`  ${sourceIcon} #${pr.number}: ${pr.title} (${pr.filesChanged.length} files)${group}`);
       }
 
       // Show groups if any
@@ -124,14 +181,101 @@ export function registerAddCommand(program: Command, ctx: LGTMContext) {
       }
 
       console.log(
-        chalk.gray(`\n  Run ${chalk.cyan("lgtm review status")} to see the full queue.\n`)
+        chalk.gray(`\n  Run ${chalk.cyan("lgtm")} to open the TUI and review.\n`)
       );
     });
 }
 
+// ─── GitHub Diff Caching ────────────────────────────────────────────────────
+
+/**
+ * Cache a PR's raw diff and metadata in the OKF store.
+ * This allows the TUI to load the real diff without re-fetching.
+ */
+async function cachePRDiff(
+  ctx: LGTMContext,
+  prNumber: number,
+  rawDiff: string,
+  prData: { title: string; head: { ref: string; sha: string }; base: { ref: string }; additions: number; deletions: number; changedFiles: number }
+) {
+  const cacheData = {
+    type: "lgtm/pr-cache",
+    pr: prNumber,
+    title: prData.title,
+    head_ref: prData.head.ref,
+    head_sha: prData.head.sha,
+    base_ref: prData.base.ref,
+    additions: prData.additions,
+    deletions: prData.deletions,
+    changed_files: prData.changedFiles,
+    fetched_at: new Date().toISOString(),
+  };
+
+  // Store raw diff in a markdown file (frontmatter = metadata, body = diff)
+  await ctx.store.write(
+    `cache/pr-${prNumber}.md`,
+    cacheData,
+    `# PR #${prNumber} — ${prData.title}\n\nCached diff (${prData.additions}+ ${prData.deletions}-):\n\n\`\`\`diff\n${rawDiff}\n\`\`\``
+  );
+}
+
+/**
+ * Load a cached PR diff from the store.
+ * Returns null if not cached.
+ */
+export async function loadCachedDiff(
+  store: { read: (path: string) => Promise<{ data: Record<string, unknown>; content: string } | null> },
+  prNumber: number
+): Promise<{ rawDiff: string; title: string; sha: string } | null> {
+  try {
+    const doc = await store.read(`cache/pr-${prNumber}.md`);
+    if (!doc || doc.data.type !== "lgtm/pr-cache") return null;
+
+    // Extract diff from the markdown code block
+    const diffMatch = doc.content.match(/```diff\n([\s\S]*?)\n```/);
+    if (!diffMatch) return null;
+
+    return {
+      rawDiff: diffMatch[1],
+      title: doc.data.title as string ?? `PR #${prNumber}`,
+      sha: doc.data.head_sha as string ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Repo Detection ─────────────────────────────────────────────────────────
+
+/**
+ * Detect owner/repo from the current git remote.
+ */
+async function detectRepoFromRemote(repoRoot: string): Promise<[string, string] | null> {
+  try {
+    const { execSync } = require("child_process");
+    const remote = execSync("git remote get-url origin", {
+      cwd: repoRoot,
+      encoding: "utf-8",
+    }).trim();
+
+    // HTTPS: https://github.com/owner/repo.git
+    const httpsMatch = remote.match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
+    if (httpsMatch) return [httpsMatch[1], httpsMatch[2]];
+
+    // SSH: git@github.com:owner/repo.git
+    const sshMatch = remote.match(/git@github\.com:([^/]+)\/([^/.]+?)(?:\.git)?$/);
+    if (sshMatch) return [sshMatch[1], sshMatch[2]];
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Local Branch Detection ─────────────────────────────────────────────────
+
 /**
  * Try to find a local branch for a PR number.
- * Checks: pr-<N>, pr/<N>, feature branches with PR number in name.
  */
 async function findPRBranch(
   git: { getBranches: () => Promise<{ all: string[] }> },
@@ -139,30 +283,18 @@ async function findPRBranch(
 ): Promise<string | null> {
   try {
     const { all } = await git.getBranches();
-
-    // Try common PR branch patterns
-    const candidates = [
-      `pr-${prNumber}`,
-      `pr/${prNumber}`,
-      `pull/${prNumber}`,
-    ];
-
+    const candidates = [`pr-${prNumber}`, `pr/${prNumber}`, `pull/${prNumber}`];
     for (const candidate of candidates) {
       if (all.includes(candidate)) return candidate;
     }
-
-    // Also check if any branch contains the PR number (e.g., feat/issue-101)
-    // This is a weaker heuristic — skip for now to avoid false matches
     return null;
   } catch {
     return null;
   }
 }
 
-/**
- * Generate demo file paths for testing.
- * Creates realistic-looking file paths based on PR number.
- */
+// ─── Demo Data ──────────────────────────────────────────────────────────────
+
 function generateDemoFiles(prNumber: number): string[] {
   const groups = [
     ["src/auth/login.ts", "src/auth/register.ts", "src/auth/middleware.ts"],
@@ -171,8 +303,5 @@ function generateDemoFiles(prNumber: number): string[] {
     ["src/utils/helpers.ts", "src/utils/validation.ts", "tests/utils.test.ts"],
     ["src/config/app.ts", "src/config/database.ts", ".env.example"],
   ];
-
-  // Use PR number to pick a consistent set
-  const idx = (prNumber - 1) % groups.length;
-  return groups[idx];
+  return groups[(prNumber - 1) % groups.length];
 }
