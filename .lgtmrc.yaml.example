@@ -18,6 +18,25 @@ ai:
   # model: gpt-4o-mini    # model name
   # baseUrl: http://localhost:11434  # for ollama
 
+# AI-powered PR review delegation (lgtm review auto)
+review:
+  ai_review:
+    # Minimum severity to report: low | medium | high | critical
+    severity_threshold: high
+
+    # Random delay range between individual comment posts (seconds)
+    # Prevents spam detection when posting many comments
+    comment_delay: [20, 90]
+
+    # Pause posting when GitHub API rate limit remaining drops below this
+    rate_limit_threshold: 10
+
+    # Formatting rules applied to all AI-generated comments
+    formatting:
+      no_em_dashes: true       # Replace — with hyphens
+      no_semicolons: true      # Replace ; with periods
+      no_severity_labels: true # Strip [HIGH] / CRITICAL: prefixes
+
 # Storage mode is set globally via ~/.lgtmrc (chosen during `lgtm init`):
 #   "farm" = all lgtm data in ~/.lgtm-farm/ (one place for everything)
 #   "repo" = .lgtm/ per repo (committed to git, team-shareable)
