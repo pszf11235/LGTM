@@ -178,11 +178,24 @@ async function handlePKCEFlow(provider: AuthProvider, scopeOverride?: string) {
     return;
   }
 
-  // For PKCE flow, we need a local redirect server
-  // For now, fall back to API key entry with guidance
-  console.log(chalk.gray("  Browser OAuth (PKCE) coming soon for this service."));
-  console.log(chalk.gray(`  For now, use an API key:\n`));
-  offerApiKeyFallback(provider);
+  // Use PKCE flow with localhost callback
+  const { loginWithPKCE } = await import("../../auth/pkce-flow.js");
+
+  const result = await loginWithPKCE({
+    authorizeUrl: provider.oauth!.authorizeUrl,
+    tokenUrl: provider.oauth!.tokenUrl,
+    clientId,
+    scopes: scopeOverride ?? provider.oauth!.defaultScopes,
+  });
+
+  if (result) {
+    saveToken(provider.id, result.accessToken);
+    console.log(chalk.green(`\n  ✓ Login successful! Token saved.\n`));
+    await showUserInfo(provider, result.accessToken);
+  } else {
+    console.log(chalk.red(`\n  ✗ Login failed.\n`));
+    offerApiKeyFallback(provider);
+  }
 }
 
 async function handleApiKeyFlow(provider: AuthProvider, keyFromFlag?: string) {
