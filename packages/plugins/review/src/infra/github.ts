@@ -31,20 +31,26 @@ export interface GitHubPR {
 export function createGitHubAdapter(owner: string, repo: string) {
   const baseUrl = "https://api.github.com";
 
-  function getToken(): string | null {
-    // Check env var first
-    if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
-    if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
+  // Cache token on first resolution (avoid execSync per request)
+  let cachedToken: string | null | undefined = undefined;
 
-    // Try `gh auth token`
+  function getToken(): string | null {
+    if (cachedToken !== undefined) return cachedToken;
+
+    // Check env var first
+    if (process.env.GITHUB_TOKEN) { cachedToken = process.env.GITHUB_TOKEN; return cachedToken; }
+    if (process.env.GH_TOKEN) { cachedToken = process.env.GH_TOKEN; return cachedToken; }
+
+    // Try `gh auth token` (only once)
     try {
       const { execSync } = require("child_process");
       const token = execSync("gh auth token", { encoding: "utf-8" }).trim();
-      if (token) return token;
+      if (token) { cachedToken = token; return cachedToken; }
     } catch {
       // gh not available or not logged in
     }
 
+    cachedToken = null;
     return null;
   }
 
