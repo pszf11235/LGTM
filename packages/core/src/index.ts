@@ -99,11 +99,23 @@ async function main() {
     return;
   }
 
+  // ─── Auto-register this repo ─────────────────────────────────────────
+  try {
+    const { registerRepo } = await import("./registry/index.js");
+    registerRepo(ctx.repoRoot, { storageMode: ctx.config.storageMode });
+  } catch {
+    // Non-critical — don't block startup
+  }
+
   // ─── Core Commands ─────────────────────────────────────────────────────
 
   // `yak ai` — AI connection management
   const { registerAICommands } = await import("./cli/commands/ai.js");
   registerAICommands(program, ctx);
+
+  // `yak discover` — repo registry
+  const { registerDiscoverCommand } = await import("./cli/commands/discover.js");
+  registerDiscoverCommand(program);
 
   // `yak tui [plugin]` → opens TUI on specific tab
   program
