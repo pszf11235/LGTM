@@ -6,6 +6,7 @@
  *   lgtm review watch list               — show watched repos + pending PRs
  *   lgtm review watch remove <owner/repo> — stop watching
  *   lgtm review watch status             — show PRs needing attention
+ *   lgtm review watch auto               — auto-review new PRs with AI
  *   lgtm review watch --once             — single check (good for cron)
  */
 
@@ -152,6 +153,240 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
       }
       console.log(chalk.gray(`\n  Add to queue: ${chalk.cyan("lgtm review add <numbers...>")}\n`));
     });
+
+  // ── watch auto — poll and auto-review new PRs ──────────────────────────
+  watch
+    .command("auto")
+    .description("Auto-review new PRs from watched repos using AI")
+    .option("--severity <level>", "Minimum severity: low, medium, high, critical", "high")
+    .option("--dry-run", "Show findings without posting to GitHub")
+    .option("--interval <minutes>", "Poll interval in minutes (default: 15, 0 = single run)", "0")
+    .option("--no-batch", "Post comments individually with delays")
+    .action(async (opts: { severity?: string; dryRun?: boolean; interval?: string; batch?: boolean }) => {
+      const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+      if (!token) {
+        ctx.logger.error("Set GITHUB_TOKEN to use watch auto.");
+        return;
+      }
+
+      if (!ctx.llm) {
+        ctx.logger.error("AI is not configured. Run `lgtm ai test` to set up.");
+        return;
+      }
+
+      const aiAvailable = await ctx.llm.isAvailable();
+      if (!aiAvailable) {
+        ctx.logger.error("AI provider is not reachable. Check your API key.");
+        return;
+      }
+
+      const config = await loadWatchConfig(ctx.store);
+      if (config.length === 0) {
+        console.log(chalk.gray(`\n  No repos being watched. Add one: ${chalk.cyan("lgtm review watch add owner/repo")}\n`));
+        return;
+      }
+
+      const interval = parseInt(opts.interval ?? "0", 10);
+
+      console.log(chalk.bold(`\n🤖 LGTM Watch Auto-Review\n`));
+      console.log(chalk.gray(`  Watching ${config.length} repo(s)`));
+      console.log(chalk.gray(`  Severity: ${opts.severity ?? "high"}`));
+      console.log(chalk.gray(`  Mode: ${opts.dryRun ? "dry-run" : opts.batch === false ? "individual" : "batched"}`));
+      if (interval > 0) {
+        console.log(chalk.gray(`  Polling every ${interval} minute(s)`));
+      } else {
+        console.log(chalk.gray(`  Single run (use --interval to poll)`));
+      }
+      console.log("");
+
+      // Run the auto-review cycle
+      await runAutoReviewCycle(ctx, config, token, opts);
+
+      // If interval > 0, poll
+      if (interval > 0) {
+        console.log(chalk.gray(`\n  Next check in ${interval} minute(s)... (Ctrl+C to stop)\n`));
+        const timer = setInterval(async () => {
+          console.log(chalk.gray(`\n─── ${new Date().toLocaleTimeString()} ───\n`));
+          const freshConfig = await loadWatchConfig(ctx.store);
+          await runAutoReviewCycle(ctx, freshConfig, token, opts);
+          console.log(chalk.gray(`\n  Next check in ${interval} minute(s)...\n`));
+        }, interval * 60 * 1000);
+
+        // Clean exit on Ctrl+C
+        process.on("SIGINT", () => {
+          clearInterval(timer);
+          console.log(chalk.gray("\n  Stopped watching.\n"));
+          process.exit(0);
+        });
+
+        // Keep process alive
+        await new Promise(() => {});
+      }
+    });
+}
+
+/**
+ * Run one auto-review cycle across all watched repos.
+ * Finds PRs not yet reviewed, runs AI review, and posts findings.
+ */
+async function runAutoReviewCycle(
+  ctx: LGTMContext,
+  watchedRepos: WatchedRepo[],
+  token: string,
+  opts: { severity?: string; dryRun?: boolean; batch?: boolean }
+) {
+  const { createGitHubAdapter } = await import("../infra/github.js");
+  const { parseDiff } = await import("../domain/diff-parser.js");
+  const { generateAutoReview } = await import("../domain/auto-review.js");
+  const { postReviewFindings } = await import("../domain/post-review.js");
+  const { fetchExistingComments } = await import("../domain/post-review.js");
+  const { createRulesEngine } = await import("../domain/rules.js");
+  const { getProviderForTask } = await import("@lgtm/core/llm/provider.js");
+
+  // Load rules once for the whole cycle
+  const engine = createRulesEngine(ctx.store);
+  const rules = await engine.loadRules();
+  const enabledRules = rules.filter((r) => r.enabled);
+
+  // Resolve LLM provider for review_delegation task
+  let llm = ctx.llm!;
+  try {
+    llm = getProviderForTask(ctx.config.ai as any, "review_delegation");
+  } catch { /* fallback to default */ }
+
+  // Track which PRs we've already reviewed (from store)
+  const reviewedPRs = await loadReviewedPRs(ctx.store);
+
+  let totalReviewed = 0;
+  let totalFindings = 0;
+
+  for (const watched of watchedRepos) {
+    const repoStr = `${watched.owner}/${watched.repo}`;
+
+    try {
+      const openPRs = await fetchOpenPRs(watched);
+      const newPRs = openPRs.filter((pr) => !reviewedPRs.has(`${repoStr}#${pr.number}`));
+
+      if (newPRs.length === 0) {
+        console.log(chalk.gray(`  ${repoStr}: no new PRs`));
+        continue;
+      }
+
+      console.log(chalk.bold(`  ${repoStr}: ${newPRs.length} new PR(s) to review`));
+
+      const github = createGitHubAdapter(watched.owner, watched.repo);
+
+      for (const pr of newPRs) {
+        console.log(chalk.gray(`\n    → PR #${pr.number}: ${pr.title}`));
+
+        try {
+          // Fetch diff
+          const rawDiff = await github.fetchDiff(pr.number);
+          if (!rawDiff || rawDiff.trim().length === 0) {
+            console.log(chalk.gray(`      (empty diff — skipping)`));
+            await markReviewed(ctx.store, repoStr, pr.number);
+            continue;
+          }
+
+          const diff = parseDiff(rawDiff);
+          if (diff.files.length === 0) {
+            console.log(chalk.gray(`      (no parseable files — skipping)`));
+            await markReviewed(ctx.store, repoStr, pr.number);
+            continue;
+          }
+
+          // Fetch existing comments for dedup
+          const existingComments = await fetchExistingComments(pr.number, watched.owner, watched.repo);
+
+          // Run AI review
+          const severity = (opts.severity ?? "high") as any;
+          const result = await generateAutoReview(
+            diff,
+            enabledRules,
+            ctx.profile,
+            llm,
+            existingComments.map((c) => ({ file: c.file, line: c.line, body: c.body })),
+            { severityThreshold: severity }
+          );
+
+          if (result.findings.length === 0) {
+            console.log(chalk.green(`      ✓ No issues found`));
+          } else {
+            console.log(chalk.yellow(`      ${result.findings.length} finding(s)`));
+            totalFindings += result.findings.length;
+
+            // Post findings
+            const postResult = await postReviewFindings(
+              pr.number,
+              result,
+              github,
+              {
+                dryRun: opts.dryRun ?? false,
+                batchMode: opts.batch !== false,
+                commentDelay: [20, 90],
+                rateLimitThreshold: 10,
+              },
+              {
+                info: (msg) => console.log(chalk.gray(`      ${msg}`)),
+                warn: (msg) => console.log(chalk.yellow(`      ${msg}`)),
+                error: (msg) => console.log(chalk.red(`      ${msg}`)),
+              }
+            );
+
+            if (opts.dryRun) {
+              console.log(chalk.cyan(`      (dry-run — not posted)`));
+            } else if (postResult.posted > 0) {
+              console.log(chalk.green(`      ✓ Posted ${postResult.posted} comment(s)`));
+            }
+          }
+
+          // Mark as reviewed
+          await markReviewed(ctx.store, repoStr, pr.number);
+          totalReviewed++;
+        } catch (err) {
+          console.log(chalk.red(`      ✗ Error: ${(err as Error).message}`));
+        }
+      }
+    } catch (err) {
+      console.log(chalk.yellow(`  ⚠ ${repoStr}: ${(err as Error).message}`));
+    }
+  }
+
+  // Summary
+  if (totalReviewed > 0) {
+    console.log(chalk.bold(`\n  ─── Summary: ${totalReviewed} PR(s) reviewed, ${totalFindings} finding(s) ───`));
+  } else {
+    console.log(chalk.gray(`\n  No new PRs to review.`));
+  }
+}
+
+/**
+ * Load the set of PRs already auto-reviewed (to avoid re-reviewing).
+ */
+async function loadReviewedPRs(store: OKFStore): Promise<Set<string>> {
+  try {
+    const doc = await store.read("auto-reviewed.md");
+    if (!doc?.data?.reviewed || !Array.isArray(doc.data.reviewed)) return new Set();
+    return new Set(doc.data.reviewed as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Mark a PR as auto-reviewed so we don't review it again.
+ */
+async function markReviewed(store: OKFStore, repo: string, prNumber: number): Promise<void> {
+  const existing = await loadReviewedPRs(store);
+  existing.add(`${repo}#${prNumber}`);
+
+  const cleanData = JSON.parse(JSON.stringify({
+    type: "lgtm/auto-reviewed",
+    lastUpdated: new Date().toISOString(),
+    reviewed: Array.from(existing),
+  }));
+
+  await store.write("auto-reviewed.md", cleanData, "# Auto-Reviewed PRs\n\nPRs that have been auto-reviewed (won't be reviewed again).");
 }
 
 async function loadWatchConfig(store: OKFStore): Promise<WatchedRepo[]> {
