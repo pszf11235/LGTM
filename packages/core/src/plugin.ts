@@ -92,7 +92,7 @@ export interface TUIPage {
    * React component to render for this page.
    * Receives the YakContext as props.
    */
-  component: React.ComponentType<{ ctx: YakContext }>;
+  component: React.ComponentType<any>;
 }
 
 /**
