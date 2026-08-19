@@ -112,9 +112,17 @@ export function createOKFStore(rootDir: string): OKFStore {
 
   /**
    * Resolve a relative path against the store root.
+   * Throws if the resolved path escapes the root (path traversal protection).
    */
   function resolve(relativePath: string): string {
-    return path.join(rootDir, relativePath);
+    const resolved = path.resolve(rootDir, relativePath);
+    const normalizedRoot = path.resolve(rootDir);
+
+    if (!resolved.startsWith(normalizedRoot + path.sep) && resolved !== normalizedRoot) {
+      throw new Error(`Path traversal detected: '${relativePath}' resolves outside store root`);
+    }
+
+    return resolved;
   }
 
   return { read, write, exists, list };
