@@ -32,10 +32,12 @@ export function createGitHubAdapter(owner: string, repo: string) {
   const baseUrl = "https://api.github.com";
 
   // Cache token on first resolution (avoid execSync per request)
-  let cachedToken: string | null | undefined = undefined;
+  let cachedToken: string | null = null;
+  let tokenResolved = false;
 
   function getToken(): string | null {
-    if (cachedToken !== undefined) return cachedToken;
+    if (tokenResolved) return cachedToken;
+    tokenResolved = true;
 
     // Check env var first
     if (process.env.GITHUB_TOKEN) { cachedToken = process.env.GITHUB_TOKEN; return cachedToken; }
