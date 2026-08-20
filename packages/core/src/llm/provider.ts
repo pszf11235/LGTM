@@ -109,9 +109,9 @@ export function createLLMProvider(config: LLMConfig): LLMProvider {
     try {
       switch (config.provider) {
         case "openai":
-          return !!(config.apiKey ?? process.env.OPENAI_API_KEY);
+          return !!(config.apiKey ?? process.env.OPENAI_API_KEY ?? loadSavedKey("openai"));
         case "anthropic":
-          return !!(config.apiKey ?? process.env.ANTHROPIC_API_KEY);
+          return !!(config.apiKey ?? process.env.ANTHROPIC_API_KEY ?? loadSavedKey("anthropic") ?? loadSavedKey("claude"));
         case "ollama": {
           const url = config.baseUrl ?? "http://localhost:11434";
           const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(3000) });
@@ -136,8 +136,8 @@ async function callOpenAI(
   config: LLMConfig,
   options?: { maxTokens?: number; temperature?: number; systemPrompt?: string }
 ): Promise<string> {
-  const apiKey = config.apiKey ?? process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OpenAI API key not found (set OPENAI_API_KEY)");
+  const apiKey = config.apiKey ?? process.env.OPENAI_API_KEY ?? loadSavedKey("openai");
+  if (!apiKey) throw new Error("OpenAI API key not found. Run: lgtm auth login openai");
 
   const baseUrl = config.baseUrl ?? "https://api.openai.com/v1";
 
@@ -175,8 +175,8 @@ async function callAnthropic(
   config: LLMConfig,
   options?: { maxTokens?: number; temperature?: number; systemPrompt?: string }
 ): Promise<string> {
-  const apiKey = config.apiKey ?? process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("Anthropic API key not found (set ANTHROPIC_API_KEY)");
+  const apiKey = config.apiKey ?? process.env.ANTHROPIC_API_KEY ?? loadSavedKey("anthropic") ?? loadSavedKey("claude");
+  if (!apiKey) throw new Error("Anthropic API key not found. Run: lgtm auth login claude");
 
   const body = {
     model,
@@ -279,4 +279,30 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
   }
 
   throw lastError!;
+}
+
+// ─── Credential Resolution ───────────────────────────────────────────────
+
+/**
+ * Load a saved API key from ~/.lgtm-credentials.
+ * This bridges the auth layer with the LLM layer.
+ *
+ * Resolution order for API keys (first wins):
+ * 1. config.apiKey (from .lgtmrc.yaml or connection config)
+ * 2. Environment variable (OPENAI_API_KEY, ANTHROPIC_API_KEY)
+ * 3. Saved credential from `lgtm auth login` (~/.lgtm-credentials)
+ */
+function loadSavedKey(provider: string): string | null {
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const os = require("os");
+
+    const credFile = path.join(os.homedir(), ".lgtm-credentials");
+    const raw = fs.readFileSync(credFile, "utf-8");
+    const creds = JSON.parse(raw);
+    return creds[provider] ?? null;
+  } catch {
+    return null;
+  }
 }

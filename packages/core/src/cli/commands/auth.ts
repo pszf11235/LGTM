@@ -206,7 +206,32 @@ async function handleApiKeyFlow(provider: AuthProvider, keyFromFlag?: string) {
     return;
   }
 
-  offerApiKeyFallback(provider);
+  // Interactive: prompt the user for their API key
+  console.log(`  Get your API key from:`);
+  console.log(chalk.cyan(`    ${provider.keyUrl}\n`));
+
+  const readline = await import("readline");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+  const key = await new Promise<string>((resolve) => {
+    rl.question(`  Paste your ${provider.name} API key: `, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+
+  if (!key) {
+    console.log(chalk.gray("\n  No key entered. Skipped.\n"));
+    return;
+  }
+
+  saveToken(provider.id, key);
+  console.log(chalk.green(`\n  ✓ API key saved to ~/.lgtm-credentials\n`));
+
+  // Verify the key works
+  console.log(chalk.gray("  Verifying connection..."));
+  await showUserInfo(provider, key);
+  console.log(chalk.gray(`\n  Your AI features are now ready. Test with: ${chalk.cyan("lgtm ai test")}\n`));
 }
 
 function offerApiKeyFallback(provider: AuthProvider) {

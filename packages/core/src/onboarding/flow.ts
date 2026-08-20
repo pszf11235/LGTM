@@ -217,6 +217,37 @@ async function askQuestion(
       return null;
     }
 
+    // Skip API key if provider is none or ollama (no key needed)
+    if (q.id === "aiApiKey") {
+      if (!answers?.aiProvider || answers.aiProvider === "none" || answers.aiProvider === "ollama") {
+        return null;
+      }
+      // Check if key already exists (env var or saved)
+      const envVar = answers.aiProvider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+      if (process.env[envVar]) {
+        console.log(chalk.green(`  ✓ ${envVar} found in environment — skipping.`));
+        return null;
+      }
+      try {
+        const { loadToken } = await import("../auth/github-oauth.js");
+        const existing = loadToken(answers.aiProvider) || loadToken(answers.aiProvider === "anthropic" ? "claude" : answers.aiProvider);
+        if (existing) {
+          console.log(chalk.green(`  ✓ Key already saved in ~/.lgtm-credentials — skipping.`));
+          return null;
+        }
+      } catch { /* continue to prompt */ }
+
+      // Show where to get the key
+      const keyUrls: Record<string, string> = {
+        openai: "https://platform.openai.com/api-keys",
+        anthropic: "https://console.anthropic.com/settings/keys",
+      };
+      const url = keyUrls[answers.aiProvider];
+      if (url) {
+        console.log(chalk.gray(`\n  Get your key from: ${chalk.cyan(url)}`));
+      }
+    }
+
     // Show model suggestions based on provider
     let hint = currentValue ? chalk.gray(` (current: ${currentValue})`) : "";
     if (q.id === "aiModel" && !currentValue) {
@@ -230,6 +261,20 @@ async function askQuestion(
     if (answer.toLowerCase() === "s" || answer === "") {
       return currentValue ?? null;
     }
+
+    // If it's an API key, save it to credentials file
+    if (q.id === "aiApiKey" && answer && answers?.aiProvider) {
+      try {
+        const { saveToken } = await import("../auth/github-oauth.js");
+        const credId = answers.aiProvider === "anthropic" ? "claude" : answers.aiProvider;
+        saveToken(credId, answer);
+        console.log(chalk.green(`  ✓ API key saved securely to ~/.lgtm-credentials`));
+      } catch (err) {
+        console.log(chalk.yellow(`  ⚠ Could not save key: ${(err as Error).message}`));
+      }
+      return answer; // Store in answers but won't be written to profile.md
+    }
+
     return answer;
   }
 
