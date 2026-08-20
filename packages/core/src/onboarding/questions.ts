@@ -138,4 +138,10 @@ export const ONBOARDING_QUESTIONS: OnboardingQuestion[] = [
     type: "text",
     default: "",
   },
+  {
+    id: "aiApiKey",
+    question: "Paste your API key (saved securely to ~/.lgtm-credentials):",
+    type: "text",
+    default: "",
+  },
 ];
