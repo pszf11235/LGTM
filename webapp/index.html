@@ -366,6 +366,17 @@
         <button class="btn-primary" onclick="saveToken()">Save</button>
       </div>
       <div class="form-row">
+        <input type="password" id="openai-key-input" placeholder="OpenAI API Key (sk-...)" />
+        <button class="btn-secondary" onclick="saveAIKey('openai')">Save</button>
+        <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--muted);font-size:0.8rem;align-self:center;">Get key ↗</a>
+      </div>
+      <div class="form-row">
+        <input type="password" id="anthropic-key-input" placeholder="Anthropic API Key (sk-ant-...)" />
+        <button class="btn-secondary" onclick="saveAIKey('anthropic')">Save</button>
+        <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--muted);font-size:0.8rem;align-self:center;">Get key ↗</a>
+      </div>
+      <div id="ai-status" style="font-size:0.8rem;color:var(--muted);margin-top:0.25rem;"></div>
+      <div class="form-row" style="margin-top:0.75rem;">
         <input type="text" id="repo-input" placeholder="owner/repo (e.g. pszf11235/LGTM)" />
         <button class="btn-secondary" onclick="addRepo()">Add Repo</button>
       </div>
@@ -403,12 +414,20 @@
     // ─── State ────────────────────────────────────────────────────────────
     let token = localStorage.getItem('lgtm_token') || '';
     let repos = JSON.parse(localStorage.getItem('lgtm_repos') || '[]');
+    let aiKeys = JSON.parse(localStorage.getItem('lgtm_ai_keys') || '{}');
 
     // ─── Init ─────────────────────────────────────────────────────────────
     (function init() {
       if (token) {
         document.getElementById('token-input').value = '••••••••••••••••';
       }
+      if (aiKeys.openai) {
+        document.getElementById('openai-key-input').value = '••••••••••••••••';
+      }
+      if (aiKeys.anthropic) {
+        document.getElementById('anthropic-key-input').value = '••••••••••••••••';
+      }
+      updateAIStatus();
       renderRepos();
       updateRunButton();
       setupTabs();
@@ -434,6 +453,29 @@
         input.value = '••••••••••••••••';
       }
       updateRunButton();
+    }
+
+    function saveAIKey(provider) {
+      const inputId = provider === 'openai' ? 'openai-key-input' : 'anthropic-key-input';
+      const input = document.getElementById(inputId);
+      if (input.value && !input.value.startsWith('••')) {
+        aiKeys[provider] = input.value.trim();
+        localStorage.setItem('lgtm_ai_keys', JSON.stringify(aiKeys));
+        input.value = '••••••••••••••••';
+        updateAIStatus();
+      }
+    }
+
+    function updateAIStatus() {
+      const el = document.getElementById('ai-status');
+      const parts = [];
+      if (aiKeys.openai) parts.push('<span style="color:var(--green)">✓ OpenAI</span>');
+      if (aiKeys.anthropic) parts.push('<span style="color:var(--green)">✓ Anthropic</span>');
+      if (parts.length > 0) {
+        el.innerHTML = 'AI Keys: ' + parts.join(' · ');
+      } else {
+        el.innerHTML = '<span style="color:var(--muted)">No AI keys configured (optional — needed for auto-review)</span>';
+      }
     }
 
     function addRepo() {
