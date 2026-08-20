@@ -162,6 +162,50 @@ export async function runOnboarding(): Promise<{
       );
     }
 
+    // ── AI Auto-Discovery ──────────────────────────────────────────────
+    // Vibe Island-style: detect available providers without asking
+    try {
+      const { discoverAIProviders } = await import("./detect-ai.js");
+      const discovery = await discoverAIProviders();
+
+      if (discovery.hasAI && discovery.recommended) {
+        const rec = discovery.recommended;
+        console.log(
+          `  ${chalk.green("✓")} AI auto-detected: ${chalk.cyan(rec.name)} ${chalk.gray(`(${rec.detail ?? rec.source})`)}`
+        );
+
+        // Auto-configure the profile with discovered provider
+        if (!answers.aiProvider || answers.aiProvider === "none") {
+          answers.aiProvider = rec.id;
+          answers.aiModel = rec.defaultModel;
+          await saveProgress(); // Re-save with AI config
+
+          // If there are multiple providers, mention them
+          if (discovery.providers.length > 1) {
+            const others = discovery.providers
+              .filter((p) => p.id !== rec.id && p.available)
+              .map((p) => p.name);
+            if (others.length > 0) {
+              console.log(chalk.gray(`    Also available: ${others.join(", ")}`));
+            }
+          }
+        }
+      } else if (discovery.providers.length > 0) {
+        // Found providers but none available (missing keys, not running)
+        const names = discovery.providers.map((p) => `${p.name} (${p.detail ?? "not reachable"})`);
+        console.log(chalk.yellow(`  ⚠ Found AI providers but none reachable:`));
+        for (const name of names) {
+          console.log(chalk.gray(`    • ${name}`));
+        }
+        console.log(chalk.gray(`    Run ${chalk.cyan("lgtm auth login openai")} to configure.`));
+      } else {
+        console.log(chalk.gray(`  ○ No AI providers detected. AI features disabled.`));
+        console.log(chalk.gray(`    Enable later: ${chalk.cyan("lgtm auth login openai")} or start Ollama locally.`));
+      }
+    } catch {
+      // AI discovery failed — non-critical, don't block onboarding
+    }
+
     if (bootstrap.storageMode === "farm") {
       console.log(
         chalk.gray(
