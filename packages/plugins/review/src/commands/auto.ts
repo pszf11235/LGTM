@@ -272,7 +272,12 @@ async function detectRepoFromRemote(repoRoot: string): Promise<[string, string] 
 }
 
 /**
- * Load auto-review config from .lgtmrc.yaml or defaults.
+ * Load auto-review config from .lgtmrc.yaml (repo root) or OKF store fallback.
+ *
+ * Resolution order:
+ * 1. .lgtmrc.yaml in repo root (review.ai_review section)
+ * 2. .lgtm/config.yaml in OKF store (legacy)
+ * 3. Built-in defaults
  */
 async function loadAutoReviewConfig(ctx: LGTMContext): Promise<{
   commentDelay: [number, number];
@@ -283,7 +288,40 @@ async function loadAutoReviewConfig(ctx: LGTMContext): Promise<{
     noSeverityLabels: boolean;
   };
 }> {
-  // Try to load from store (config may have review.ai_review section)
+  // Try .lgtmrc.yaml in repo root first (the documented config location)
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const { parse: parseYaml } = require("yaml");
+
+    const candidates = [
+      path.join(ctx.repoRoot, ".lgtmrc.yaml"),
+      path.join(ctx.repoRoot, ".lgtmrc.yml"),
+    ];
+
+    for (const filePath of candidates) {
+      try {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        const parsed = parseYaml(raw);
+        const aiReview = parsed?.review?.ai_review;
+        if (aiReview) {
+          return {
+            commentDelay: Array.isArray(aiReview.comment_delay)
+              ? [aiReview.comment_delay[0] ?? 20, aiReview.comment_delay[1] ?? 90]
+              : [20, 90],
+            rateLimitThreshold: aiReview.rate_limit_threshold ?? 10,
+            formatting: {
+              noEmDashes: aiReview.formatting?.no_em_dashes ?? true,
+              noSemicolons: aiReview.formatting?.no_semicolons ?? true,
+              noSeverityLabels: aiReview.formatting?.no_severity_labels ?? true,
+            },
+          };
+        }
+      } catch { continue; }
+    }
+  } catch { /* no yaml parser or no file */ }
+
+  // Fallback: try OKF store config.yaml (legacy path)
   try {
     const configDoc = await ctx.store.read("config.yaml");
     if (configDoc?.data?.review) {
@@ -303,9 +341,7 @@ async function loadAutoReviewConfig(ctx: LGTMContext): Promise<{
         };
       }
     }
-  } catch {
-    // No config — use defaults
-  }
+  } catch { /* fallback to defaults */ }
 
   return {
     commentDelay: [20, 90],
