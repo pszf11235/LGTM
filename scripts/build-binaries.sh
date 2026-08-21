@@ -49,6 +49,8 @@ case "${1:-all}" in
 esac
 
 # Build each target
+# Note: react-devtools-core and yoga-wasm-web are resolved via stubs/ (empty modules)
+# installed as devDependencies. No --external flags needed — stubs get bundled in.
 for target in "${TARGETS[@]}"; do
   if [ "$target" = "current" ]; then
     outfile="$OUTDIR/lgtm"
