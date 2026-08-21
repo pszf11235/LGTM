@@ -41,7 +41,7 @@ jobs:
       - name: Build binary
         run: |
           mkdir -p dist
-          bun build packages/core/src/index.ts --compile --target=${{ matrix.target }} --outfile dist/${{ matrix.artifact }}
+          bun build packages/core/src/index.ts --compile --target=${{ matrix.target }} --outfile dist/${{ matrix.artifact }} --external react-devtools-core --external yoga-wasm-web
 
       - name: Generate checksum
         run: |
