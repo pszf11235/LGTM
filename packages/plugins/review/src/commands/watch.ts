@@ -103,9 +103,9 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
   watch
     .command("status")
     .alias("check")
-    .description("Check for PRs needing attention")
-    .option("--once", "Single check (don't poll)")
-    .action(async () => {
+    .description("Check for PRs needing attention (new since last check)")
+    .option("--all", "Show all open PRs, not just new ones since last check")
+    .action(async (opts: { all?: boolean }) => {
       const config = await loadWatchConfig(ctx.store);
       if (config.length === 0) {
         console.log(chalk.gray(`\n  No repos being watched.\n`));
@@ -119,9 +119,18 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
       for (const watched of config) {
         try {
           const prs = await fetchOpenPRs(watched);
+          const previousCheck = watched.lastChecked;
           watched.lastChecked = new Date().toISOString();
 
           for (const pr of prs) {
+            // Filter: only show PRs created or updated since last check
+            // On first run (no lastChecked), show all. --all bypasses filter.
+            if (previousCheck && !opts.all) {
+              const prDate = new Date(pr.created_at);
+              const lastCheck = new Date(previousCheck);
+              if (prDate < lastCheck) continue; // skip PRs from before last check
+            }
+
             allPending.push({
               repo: `${watched.owner}/${watched.repo}`,
               number: pr.number,

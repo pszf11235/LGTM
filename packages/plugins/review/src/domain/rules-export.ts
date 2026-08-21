@@ -116,7 +116,14 @@ export function exportAsSteering(rules: Rule[]): string {
 }
 
 /**
- * Export regex rules as ESLint no-restricted-syntax config.
+ * Export regex rules as ESLint config (with limitations).
+ *
+ * NOTE: ESLint's no-restricted-syntax uses AST selectors, not regex patterns.
+ * This export provides the rule metadata and patterns as documentation,
+ * but cannot directly enforce regex patterns via ESLint.
+ *
+ * For actual regex enforcement in ESLint, use eslint-plugin-regexp or
+ * keep using the lgtm git hook export (--format hook) which uses grep.
  */
 export function exportAsESLint(rules: Rule[]): string {
   const regexRules = rules.filter(
@@ -126,8 +133,6 @@ export function exportAsESLint(rules: Rule[]): string {
   const eslintRules: Array<{ selector: string; message: string }> = [];
 
   for (const rule of regexRules) {
-    // ESLint no-restricted-syntax uses AST selectors, not regex.
-    // We approximate by using a comment with the pattern.
     eslintRules.push({
       selector: `// Pattern: ${rule.pattern}`,
       message: `[${rule.severity}] ${rule.description} (lgtm rule: ${rule.id})`,
@@ -135,6 +140,7 @@ export function exportAsESLint(rules: Rule[]): string {
   }
 
   const config = {
+    _WARNING: "This config cannot enforce regex patterns via ESLint. Use 'lgtm review rule export --format hook' for regex enforcement, or install eslint-plugin-regexp.",
     rules: {
       "no-restricted-syntax": [
         "warn",
@@ -143,7 +149,9 @@ export function exportAsESLint(rules: Rule[]): string {
     },
     _lgtmMetadata: {
       generated: new Date().toISOString(),
-      note: "Regex patterns listed as comments — ESLint uses AST selectors. Consider eslint-plugin-regexp for regex-based checks.",
+      exportFormat: "eslint",
+      limitation: "ESLint no-restricted-syntax uses AST selectors, not regex. Patterns below are for reference only.",
+      recommendation: "Use --format hook for grep-based enforcement, or eslint-plugin-regexp for ESLint-native regex checking.",
       rules: regexRules.map((r) => ({
         id: r.id,
         description: r.description,

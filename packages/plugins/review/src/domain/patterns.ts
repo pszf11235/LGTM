@@ -52,38 +52,69 @@ export async function analyzeCommentPatterns(
 
 /**
  * Collect all comments from review session files.
+ * Sessions are stored at sessions/YYYY-MM-DD/pr-N.md (date subdirectories).
+ * Also handles flat structure (sessions/pr-N.md) for backward compat.
  */
 async function collectAllComments(
   store: OKFStore
 ): Promise<Array<{ text: string; file: string; pr: number }>> {
   const comments: Array<{ text: string; file: string; pr: number }> = [];
 
-  // Scan sessions directories
-  const sessionDirs = await store.list("sessions");
+  // Strategy 1: Scan for date subdirectories (sessions/YYYY-MM-DD/)
+  // Since store.list() only returns .md files, we need to discover subdirs
+  // by looking for index.md files at the sessions level AND in subdirs.
+  try {
+    const fs = await import("fs");
+    const path = await import("path");
 
-  for (const sessionFile of sessionDirs) {
-    // Session index files list PRs
-    if (!sessionFile.endsWith("index.md")) continue;
+    // Get the store's root directory by reading a known path
+    // We'll use a filesystem scan as store.list() can't recurse
+    const topFiles = await store.list("sessions");
 
-    const doc = await store.read(sessionFile);
-    if (!doc) continue;
-
-    // Find PR review files in same directory
-    const dir = sessionFile.replace("/index.md", "");
-    const reviewFiles = await store.list(dir);
-
-    for (const reviewFile of reviewFiles) {
-      if (reviewFile.endsWith("index.md")) continue;
-
-      const review = await store.read(reviewFile);
-      if (!review || review.data.type !== "lgtm/review") continue;
-
-      const prNumber = (review.data.pr as number) ?? 0;
-
-      // Extract comments from markdown body
-      const extracted = extractCommentsFromMarkdown(review.content, prNumber);
-      comments.push(...extracted);
+    // Check flat files first (backward compat: sessions/pr-N.md)
+    for (const sessionFile of topFiles) {
+      if (sessionFile.endsWith("index.md")) {
+        // This is sessions/index.md — check for pr files in same dir
+        const dir = sessionFile.replace("/index.md", "");
+        const dirFiles = await store.list(dir);
+        for (const reviewFile of dirFiles) {
+          if (reviewFile.endsWith("index.md")) continue;
+          const review = await store.read(reviewFile);
+          if (!review || review.data.type !== "lgtm/review") continue;
+          const prNumber = (review.data.pr as number) ?? 0;
+          const extracted = extractCommentsFromMarkdown(review.content, prNumber);
+          comments.push(...extracted);
+        }
+      } else {
+        // Flat file: sessions/pr-N.md (backward compat)
+        const review = await store.read(sessionFile);
+        if (!review || review.data.type !== "lgtm/review") continue;
+        const prNumber = (review.data.pr as number) ?? 0;
+        const extracted = extractCommentsFromMarkdown(review.content, prNumber);
+        comments.push(...extracted);
+      }
     }
+
+    // Strategy 2: Try date subdirectories (sessions/YYYY-MM-DD/)
+    // Attempt to list files from recent date directories
+    const today = new Date();
+    for (let daysBack = 0; daysBack < 90; daysBack++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - daysBack);
+      const dateStr = d.toISOString().split("T")[0];
+      const dateDirFiles = await store.list(`sessions/${dateStr}`);
+
+      for (const reviewFile of dateDirFiles) {
+        if (reviewFile.endsWith("index.md")) continue;
+        const review = await store.read(reviewFile);
+        if (!review || review.data.type !== "lgtm/review") continue;
+        const prNumber = (review.data.pr as number) ?? 0;
+        const extracted = extractCommentsFromMarkdown(review.content, prNumber);
+        comments.push(...extracted);
+      }
+    }
+  } catch {
+    // If filesystem access fails, fall back to flat scan only
   }
 
   return comments;

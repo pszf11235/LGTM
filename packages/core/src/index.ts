@@ -217,16 +217,19 @@ async function main() {
   program
     .command("plugins:enable <name>")
     .description("Enable a plugin")
-    .action((name: string) => {
-      // Will persist to config in Task 3
+    .action(async (name: string) => {
+      await persistPluginState(ctx.repoRoot, name, true);
       console.log(chalk.green(`✓ Plugin '${name}' enabled`));
+      console.log(chalk.gray(`  Saved to .lgtmrc.yaml. Restart lgtm to apply.`));
     });
 
   program
     .command("plugins:disable <name>")
     .description("Disable a plugin")
-    .action((name: string) => {
+    .action(async (name: string) => {
+      await persistPluginState(ctx.repoRoot, name, false);
       console.log(chalk.yellow(`○ Plugin '${name}' disabled`));
+      console.log(chalk.gray(`  Saved to .lgtmrc.yaml. Restart lgtm to apply.`));
     });
 
   // `lgtm init` → run or resume onboarding
@@ -293,3 +296,34 @@ main().catch((err) => {
   console.error(chalk.red(`\n❌ Fatal error: ${err.message}\n`));
   process.exit(1);
 });
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Persist plugin enable/disable state to .lgtmrc.yaml in repo root.
+ * Creates the file if it doesn't exist.
+ */
+async function persistPluginState(repoRoot: string, pluginName: string, enabled: boolean): Promise<void> {
+  const fs = await import("fs");
+  const path = await import("path");
+  const { parse: parseYaml, stringify: stringifyYaml } = await import("yaml");
+
+  const configPath = path.default.join(repoRoot, ".lgtmrc.yaml");
+
+  let config: Record<string, any> = {};
+  try {
+    const raw = fs.default.readFileSync(configPath, "utf-8");
+    config = parseYaml(raw) ?? {};
+  } catch {
+    // File doesn't exist — create fresh
+  }
+
+  // Ensure plugins section exists
+  if (!config.plugins || typeof config.plugins !== "object") {
+    config.plugins = {};
+  }
+
+  config.plugins[pluginName] = { enabled };
+
+  fs.default.writeFileSync(configPath, stringifyYaml(config), "utf-8");
+}

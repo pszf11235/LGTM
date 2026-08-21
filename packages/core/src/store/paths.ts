@@ -22,7 +22,7 @@ export function ensureYakDirs(lgtmDir: string): void {
     path.join(lgtmDir, "rules"),
     path.join(lgtmDir, "sessions"),
     path.join(lgtmDir, "plugins"),
-    path.join(lgtmDir, "learnings"),
+    path.join(lgtmDir, "cache"),
     path.join(lgtmDir, "scans"),
   ];
 
