@@ -1,17 +1,20 @@
 /**
  * TUI Shell — the top-level Ink component.
  *
- * Renders:
- * - Header with lgtm logo + plugin tabs
- * - Active page content (from selected plugin tab)
- * - Status bar with context-sensitive keybindings
+ * Layout:
+ * - Line 1: Tool name + version (👍 lgtm v0.1.0)
+ * - Line 2: Tabs (left-aligned, active highlighted)
+ * - Line 3: Context (repo name + path)
+ * - Content: Active page (scrollable)
+ * - Status: Left = page shortcuts/flash, Right = position + "←→ tabs"
  *
- * OpenCode-style: full-screen, minimal chrome, keyboard-driven.
+ * Navigation: Tab/Shift+Tab OR ←/→ arrows switch tabs.
+ * Quit: Only Ctrl+C (pages handle q for back/no-op).
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
-import { theme, borderLine, headerBar } from "./theme.js";
+import { theme, borderLine } from "./theme.js";
 
 export interface TabDefinition {
   name: string;
@@ -25,9 +28,9 @@ interface ShellProps {
   initialTab?: string;
   repoName?: string;
   repoPath?: string;
-  watchCount?: number;       // pending PRs from watcher
+  watchCount?: number;
   aiStatus?: { available: boolean; provider?: string };
-  webappUrl?: string;        // URL of the embedded webapp server
+  webappUrl?: string;
 }
 
 export function Shell({ tabs, initialTab, repoName, repoPath, watchCount, aiStatus, webappUrl }: ShellProps) {
@@ -41,45 +44,52 @@ export function Shell({ tabs, initialTab, repoName, repoPath, watchCount, aiStat
     ? enabledTabs.findIndex((t) => t.name === initialTab)
     : 0;
   const [activeTabIdx, setActiveTabIdx] = useState(Math.max(0, initialIdx));
-  const [statusHint, setStatusHint] = useState("ctrl+c quit  tab switch");
+  const [statusHint, setStatusHint] = useState("←→ switch tabs  ctrl+c quit");
 
   useInput((input, key) => {
-    // Tab key: cycle through tabs
-    if (key.tab) {
+    // Tab / Shift+Tab: cycle through tabs
+    if (key.tab && !key.shift) {
       setActiveTabIdx((prev) => (prev + 1) % enabledTabs.length);
       return;
     }
-
-    // Shift+Tab: cycle backwards
-    if (key.shift && key.tab) {
-      setActiveTabIdx(
-        (prev) => (prev - 1 + enabledTabs.length) % enabledTabs.length
-      );
+    if (key.tab && key.shift) {
+      setActiveTabIdx((prev) => (prev - 1 + enabledTabs.length) % enabledTabs.length);
       return;
     }
 
-    // Ctrl+C: always quit (global escape hatch)
-    // Note: 'q' is NOT handled here — pages handle their own q key.
-    // Shell only exits via Ctrl+C. Pages use q for "back" navigation.
+    // Left/Right arrows: switch tabs
+    if (key.leftArrow) {
+      setActiveTabIdx((prev) => (prev - 1 + enabledTabs.length) % enabledTabs.length);
+      return;
+    }
+    if (key.rightArrow) {
+      setActiveTabIdx((prev) => (prev + 1) % enabledTabs.length);
+      return;
+    }
   });
 
   const ActivePage = enabledTabs[activeTabIdx]?.component;
 
   return (
     <Box flexDirection="column" height={termHeight}>
-      {/* Header */}
+      {/* Title line */}
       <Box>
-        <Text>
-          {headerBar(
-            `👍 ${theme.bold("lgtm")}${watchCount && watchCount > 0 ? `  ${theme.warning(`📬 ${watchCount} PR${watchCount > 1 ? "s" : ""} need review`)}` : ""}`,
-            renderTabs(enabledTabs, activeTabIdx),
-            termWidth
-          )}
+        <Text bold>{"  "}👍 {theme.bold("lgtm")} <Text color="gray">v0.1.0</Text></Text>
+      </Box>
+
+      {/* Tabs line (left-aligned) */}
+      <Box>
+        <Text>{"  "}{renderTabs(enabledTabs, activeTabIdx)}</Text>
+      </Box>
+
+      {/* Context line */}
+      <Box>
+        <Text color="gray">
+          {"  "}reviewing: {repoName ?? "unknown"}  {repoPath ?? ""}
         </Text>
       </Box>
-      <Box>
-        <Text>{theme.muted(`reviewing: ${repoName ?? "unknown"}  ${repoPath ? theme.muted(repoPath) : ""}`)}</Text>
-      </Box>
+
+      {/* Separator */}
       <Box>
         <Text>{borderLine(termWidth)}</Text>
       </Box>
@@ -98,13 +108,13 @@ export function Shell({ tabs, initialTab, repoName, repoPath, watchCount, aiStat
         <Text>{borderLine(termWidth)}</Text>
       </Box>
       <Box justifyContent="space-between" width={termWidth}>
-        <Text color="gray">{statusHint}</Text>
+        <Text color="gray">{"  "}{statusHint}</Text>
         <Text color="gray">
           {webappUrl ? theme.primary(`🌐 ${webappUrl}`) : ""}
           {"  "}
-          {aiStatus ? (aiStatus.available ? theme.success(`AI: ✓ ${aiStatus.provider ?? ""}`) : theme.error("AI: ✗ offline")) : ""}
+          {aiStatus ? (aiStatus.available ? theme.success(`AI: ✓ ${aiStatus.provider ?? ""}`) : theme.error("AI: ✗")) : ""}
           {"  "}
-          {activeTabIdx + 1}/{enabledTabs.length}
+          {activeTabIdx + 1}/{enabledTabs.length}{"  "}←→ tabs{"  "}
         </Text>
       </Box>
     </Box>
@@ -117,5 +127,5 @@ function renderTabs(tabs: TabDefinition[], activeIdx: number): string {
       if (i === activeIdx) return theme.tab.active(tab.label);
       return theme.tab.inactive(tab.label);
     })
-    .join("");
+    .join(" ");
 }
