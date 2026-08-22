@@ -13,9 +13,11 @@
 - [ ] Export from `packages/core/src/tui/hooks/index.ts`
 - [ ] Tests: scroll boundary behavior, auto-scroll follows cursor
 
-## Task 2: Fix Shell — quit behavior and persistent tab hint
+## Task 2: Fix Shell — quit behavior, tab navigation, and layout
+- [ ] Restructure header: line 1 = "👍 lgtm v0.1.0", line 2 = tabs (left-aligned), line 3 = context
+- [ ] Add left/right arrow keys for tab switching (in addition to Tab/Shift+Tab)
 - [ ] Remove `q` handler from Shell (let pages handle it)
-- [ ] Always show "Tab ›" on right side of status bar
+- [ ] Always show "←→ tabs" on right side of status bar
 - [ ] Show position indicator (page number: "3/6") next to tab hint
 - [ ] Keep Ctrl+C as the only hard quit (already works)
 - [ ] `q` at top-level pages: no-op (don't exit)

@@ -4,7 +4,8 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ 👍 lgtm   [Dashboard] [Review] [Rules] [Repos] [History] [Config]       │ ← Header
+│ 👍 lgtm v0.1.0                                                          │ ← Title
+│ [Dashboard] [Review] [Rules] [Repos] [History] [Config]                 │ ← Tabs (left-aligned)
 │ reviewing: my-project  ~/projects/my-project                            │ ← Context
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
@@ -15,15 +16,17 @@
 │                                                                          │
 │                                                                          │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ ↑↓ navigate  a accept  s skip  r rescan           12/47  Tab ›          │ ← Status
+│ ↑↓ navigate  a accept  s skip  r rescan           12/47  ←→ tabs        │ ← Status
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Zones
 
-1. **Header** (2 lines): Logo + tabs + context line (repo name, path)
-2. **Content** (variable, fills remaining): Page-specific scrollable content
-3. **Status** (1 line): Left = contextual shortcuts, Right = position + tab hint
+1. **Title** (1 line): Tool name + version (`👍 lgtm v0.1.0`)
+2. **Tabs** (1 line): Left-aligned tab labels, active tab highlighted
+3. **Context** (1 line): Repo name + path
+4. **Content** (variable, fills remaining): Page-specific scrollable content
+5. **Status** (1 line): Left = contextual shortcuts, Right = position + "←→ tabs"
 
 ## Scrolling Architecture
 

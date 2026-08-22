@@ -8,7 +8,8 @@ supports inline accept/deny/unwatch, and runs a background scan on tab open.
 ## TUI Layout
 
 ```
-👍 lgtm    [Dashboard] [Review] [Rules] [Repos] [History] [Config]
+👍 lgtm v0.1.0
+[Dashboard] [Review] [Rules] [Repos] [History] [Config]
 reviewing: my-project  /Users/pascal/projects/my-project
 ──────────────────────────────────────────────────────────────────────
 
@@ -26,7 +27,7 @@ reviewing: my-project  /Users/pascal/projects/my-project
   ⚠ 2 repos removed (no longer on disk)
 
 ──────────────────────────────────────────────────────────────────────
-↑↓ navigate  a accept  s skip  w unwatch  r rescan  A accept all new  q quit
+↑↓ navigate  a accept  s skip  w unwatch  r rescan  A all new    ←→ tabs
 ```
 
 ## Sort Order (applies to both CLI and TUI)

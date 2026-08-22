@@ -92,17 +92,19 @@ Redesign the TUI interaction model to fix the 12 identified UX issues (see `docs
 **So that** I can always navigate without memorizing.
 
 **Acceptance Criteria:**
-- Right side of status bar always shows: "Tab ›"
-- Active tab highlighted in header (current behavior — keep)
-- Current tab name + position: "3/6" somewhere visible
+- Right side of status bar always shows: "←→ tabs"
+- Left/right arrow keys switch tabs (in addition to Tab/Shift+Tab)
+- Active tab highlighted in tab bar (current behavior — keep)
+- Tabs are left-aligned on their own line (below the tool name/version)
+- Tool name + version on a separate line above the tabs: `👍 lgtm v0.1.0`
 
 ## Keyboard Map (Redesigned)
 
 ### Global (Shell level — always active)
 | Key | Action |
 |-----|--------|
-| `Tab` | Next tab |
-| `Shift+Tab` | Previous tab |
+| `Tab` / `→` | Next tab |
+| `Shift+Tab` / `←` | Previous tab |
 | `Ctrl+C` | Quit TUI |
 
 ### Page level (applies to ALL tab pages)
