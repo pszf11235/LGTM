@@ -17,31 +17,44 @@
 - [ ] Return `ScannedRepo` objects with all metadata populated
 - [ ] Tests: enrichment of real git repos, handles repos with no remote
 
-## Task 3: Interactive CLI picker
-- [ ] Add `--ingest` flag to `lgtm discover` command
-- [ ] After scan, filter out already-registered repos (check registry)
-- [ ] Display repos grouped by parent directory
-- [ ] Mark "recommended" (activity < 7 days) and "stale" (> 90 days)
-- [ ] Keyboard input: `[a]` accept, `[s]` skip, `[A]` accept all recommended, `[q]` done
-- [ ] On accept: register in `~/.lgtm-registry.md` + add to watch
+## Task 3: Reconcile against registry (prune + status)
+- [ ] Extend `RegistryEntry` interface with `status: "active" | "denied" | "removed"`
+- [ ] On ingest: load registry, compare against scan results
+- [ ] Identify new repos (on disk but not in registry)
+- [ ] Identify removed repos (in registry but path no longer exists)
+- [ ] Auto-prune: remove deleted repos from watch list and registry
+- [ ] Show warning for removed repos: "⚠ N repos no longer found on disk"
+- [ ] Mark watched repos: cross-reference with `watch.md` to show 👁 indicator
+- [ ] `--prune` flag to only clean up without full interactive picker
+- [ ] Tests: reconciliation logic, prune removes from watch, idempotent
+
+## Task 4: Interactive CLI picker with watched status
+- [ ] Add `--ingest` flag to `lgtm discover` command (triggerable any time)
+- [ ] Display repos grouped by parent directory with status indicators:
+  - `👁` = currently watching
+  - `✦` = new (needs decision)
+  - `○` = previously skipped/denied
+  - `⚠` = removed from disk
+- [ ] Keyboard input: `[a]` accept, `[s]` skip, `[w]` unwatch, `[A]` accept all new, `[q]` done
+- [ ] On accept: register with `status: active` + add to watch
 - [ ] On deny: register with `status: denied`
-- [ ] Final summary: "Added N repos. Skipping M."
+- [ ] On unwatch: remove from watch list, keep in registry as `denied`
+- [ ] Re-accept previously denied repos (status flips to active)
+- [ ] Final summary: "Watching N repos. Added M new. Removed K stale."
+- [ ] Tests: picker state transitions, accept/deny/unwatch
 
-## Task 4: Registry status tracking
-- [ ] Extend `RegistryEntry` interface with `status: "active" | "denied" | "stale"`
-- [ ] Update `registerRepo()` to set status
-- [ ] Add `denyRepo(path)` function
-- [ ] On re-run: filter out repos already in registry (unless `--all` flag)
-- [ ] Tests: idempotent registration, denied repos hidden on re-run
-
-## Task 5: Smart recommendations
+## Task 5: Smart recommendations and filtering
 - [ ] Sort repos: recent activity first, GitHub/GitLab over local-only
 - [ ] Add `--recommended` flag: auto-accept all repos with activity < 7 days
-- [ ] Badge display in picker: ✦ (recommended), ⚠ (stale), ✓ (already tracked)
-- [ ] Tests: sorting logic, recommendation threshold
+- [ ] Add `--new-only` flag: only show repos needing a decision (hide watched/denied)
+- [ ] Add `--all` flag: show everything including denied (for re-review)
+- [ ] Badge display: ✦ (recommended), stale label (>90 days)
+- [ ] Tests: sorting logic, recommendation threshold, flag filtering
 
 ## Task 6: TUI Dashboard integration
 - [ ] Add "New repos found" indicator to Dashboard page header
 - [ ] On click/Enter: show inline picker (same accept/deny UX)
+- [ ] Show watched repos with 👁 in the list
 - [ ] Accepted repos immediately appear in watch list
-- [ ] Scan runs in background on TUI launch (non-blocking)
+- [ ] Removed repos show a warning notification
+- [ ] Background scan on TUI launch (non-blocking)

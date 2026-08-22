@@ -72,23 +72,42 @@ Two modes:
 
 Display format:
 ```
-  Discovered 23 repos (8 new, 15 already tracked)
+  Discovered 23 repos (3 new, 12 watching, 6 skipped, 2 removed)
 
   ~/projects/
-    ✦ frontend-app      github.com/org/frontend   2 days ago    TypeScript
-    ✦ backend-api       github.com/org/backend    5 hours ago   Go
-      mobile-app        github.com/org/mobile     3 months ago  Swift (stale)
+    👁 frontend-app      github.com/org/frontend   2 days ago    TypeScript
+    👁 backend-api       github.com/org/backend    5 hours ago   Go
+    ✦ new-service        github.com/org/new-svc    1 day ago     Rust        [NEW]
+      mobile-app         github.com/org/mobile     3 months ago  Swift       (stale)
 
   ~/work/
-    ✦ internal-tool     gitlab.com/team/tool      1 day ago     Python
-      archived-thing    (no remote)               1 year ago    — (stale)
+    ✦ internal-tool      gitlab.com/team/tool      1 day ago     Python      [NEW]
+    👁 data-pipeline     github.com/org/pipeline   12 hours ago  Python
+      archived-thing     (no remote)               1 year ago    —           (stale)
 
-  ✦ = recommended (active in last 7 days)
+  ⚠ Removed (no longer on disk):
+    ✗ old-project        was at ~/projects/old-project
+    ✗ deleted-repo       was at ~/work/deleted-repo
 
-  [a] accept  [s] skip  [A] accept all recommended  [q] done
+  👁 = watching  ✦ = new (needs decision)  ○ = skipped  ⚠ = removed
+
+  Showing 2 new repos for review:
+  [a] accept  [s] skip  [A] accept all new  [q] done
 ```
 
 ### 4. Registry Integration
+
+**Every ingest run performs a full reconciliation:**
+
+1. **Scan** filesystem → get current repos on disk
+2. **Compare** against registry → identify new, existing, and removed
+3. **Prune** removed repos (path no longer exists) → remove from watch + registry
+4. **Present** full state to user with clear status indicators
+
+Repo states in `~/.lgtm-registry.md`:
+- `status: active` — accepted and being watched
+- `status: denied` — user explicitly skipped (hidden on re-run unless `--all`)
+- `status: removed` — path no longer exists (auto-cleaned)
 
 Accepted repos:
 - Added to `~/.lgtm-registry.md` with `status: active`
@@ -97,7 +116,14 @@ Accepted repos:
 
 Denied repos:
 - Added to `~/.lgtm-registry.md` with `status: denied`
-- Not shown again on subsequent runs (unless `--all`)
+- Not shown for decision on subsequent runs (unless `--all`)
+- Can be re-accepted at any time (status flips back to active)
+
+Removed repos:
+- Detected when registered path no longer has a `.git/` directory
+- Automatically removed from watch list
+- Shown as warning: "⚠ 2 repos no longer found on disk"
+- Removed from registry (or marked `status: removed` for audit trail)
 
 ### 5. Watch Integration
 
