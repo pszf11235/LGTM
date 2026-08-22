@@ -46,13 +46,13 @@ export function HistoryPage({ onStatusHint }: HistoryPageProps) {
     try {
       const { createOKFStore } = await import("@lgtm/core/store/okf.js");
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
-      const { loadBootstrap, resolveYakDir } = await import("@lgtm/core/config/loader.js");
+      const { loadBootstrap, resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
       const fs = await import("fs");
       const path = await import("path");
 
       const repoRoot = findGitRoot();
       const bootstrap = loadBootstrap();
-      const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+      const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
       const sessionsDir = path.default.join(lgtmDir, "sessions");
 
       if (!fs.default.existsSync(sessionsDir)) {
@@ -91,11 +91,11 @@ export function HistoryPage({ onStatusHint }: HistoryPageProps) {
     try {
       const { createOKFStore } = await import("@lgtm/core/store/okf.js");
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
-      const { loadBootstrap, resolveYakDir } = await import("@lgtm/core/config/loader.js");
+      const { loadBootstrap, resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
 
       const repoRoot = findGitRoot();
       const bootstrap = loadBootstrap();
-      const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+      const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
       const store = createOKFStore(lgtmDir);
 
       // List all pr-*.md files in this session directory

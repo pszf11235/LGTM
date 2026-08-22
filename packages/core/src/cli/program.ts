@@ -10,7 +10,7 @@ import { Command } from "commander";
 import path from "path";
 import fs from "fs";
 import type { LGTMPlugin, LGTMContext, LGTMConfig, Logger } from "../plugin.js";
-import { loadConfig, loadBootstrap, loadProfile, resolveYakDir } from "../config/loader.js";
+import { loadConfig, loadBootstrap, loadProfile, resolveLgtmDir } from "../config/loader.js";
 import { createOKFStore } from "../store/okf.js";
 import { findGitRoot } from "../store/paths.js";
 
@@ -113,7 +113,7 @@ export function buildBootstrapContext(): LGTMContext {
   const repoRoot = findGitRoot();
   const config = loadConfig();
   const bootstrap = loadBootstrap();
-  const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+  const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
   const store = createOKFStore(lgtmDir);
   const profile = loadProfile(lgtmDir);
 

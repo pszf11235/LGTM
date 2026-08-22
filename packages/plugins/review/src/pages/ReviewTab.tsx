@@ -33,12 +33,12 @@ export function ReviewTab({ onStatusHint }: ReviewTabProps) {
     try {
       const { createOKFStore } = await import("@lgtm/core/store/okf.js");
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
-      const { loadBootstrap, resolveYakDir } = await import("@lgtm/core/config/loader.js");
+      const { loadBootstrap, resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
       const { createQueueManager } = await import("../domain/queue.js");
 
       const repoRoot = findGitRoot();
       const bootstrap = loadBootstrap();
-      const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+      const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
       const store = createOKFStore(lgtmDir);
       const queue = createQueueManager(store);
 

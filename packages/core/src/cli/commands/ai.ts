@@ -167,13 +167,13 @@ export function registerAICommands(program: Command, ctx: LGTMContext) {
 
       // Set model in profile
       try {
-        const { loadBootstrap, resolveYakDir } = await import("../../config/loader.js");
+        const { loadBootstrap, resolveLgtmDir } = await import("../../config/loader.js");
         const { findGitRoot } = await import("../../store/paths.js");
         const { createOKFStore } = await import("../../store/okf.js");
 
         const repoRoot = findGitRoot();
         const bootstrap = loadBootstrap();
-        const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+        const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
         const store = createOKFStore(lgtmDir);
 
         const doc = await store.read("profile.md");

@@ -2,7 +2,7 @@
 
 ## Architecture Overview
 
-Yak is a monorepo with a thin core and domain-specific plugins.
+LGTM is a monorepo with a thin core and domain-specific plugins.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

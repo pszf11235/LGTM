@@ -5,7 +5,7 @@
 export { createOKFStore, stringifyOKF, parseOKF } from "./okf.js";
 export type { OKFDocument } from "./okf.js";
 export {
-  ensureYakDirs,
+  ensureLgtmDirs,
   getSessionDir,
   getRulesDir,
   getPluginDir,

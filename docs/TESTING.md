@@ -51,7 +51,7 @@ ls dist/
 
 ```bash
 # Fresh start (wipes all LGTM data)
-task slaughter
+task reset
 
 # Run interactive onboarding
 bun run lgtm init
@@ -543,7 +543,7 @@ bun run lgtm smoke --json
 
 ```bash
 # 1. Fresh start
-task slaughter:local
+task reset:local
 
 # 2. Initialize
 bun run lgtm init
