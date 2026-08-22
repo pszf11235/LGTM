@@ -327,3 +327,40 @@ export function pruneIngestRegistry(): IngestRegistryEntry[] {
   saveIngestRegistry(kept);
   return removed;
 }
+
+
+
+// ─── Sorting ────────────────────────────────────────────────────────────────
+
+/**
+ * Sort repos by relevance:
+ * 1. Status: new first (needs decision), then watching, then denied
+ * 2. Activity: most recent commit first
+ * 3. Platform: github > gitlab > bitbucket > local
+ * 4. Name: alphabetical tiebreaker
+ */
+export function sortRepos<T extends { status: RepoStatus; lastCommitDate?: string; platform?: string; name: string }>(
+  repos: T[]
+): T[] {
+  const statusOrder: Record<RepoStatus, number> = { new: 0, watching: 1, denied: 2, removed: 3 };
+  const platformOrder: Record<string, number> = { github: 0, gitlab: 1, bitbucket: 2, other: 3 };
+
+  return [...repos].sort((a, b) => {
+    // 1. Status priority
+    const statusDiff = statusOrder[a.status] - statusOrder[b.status];
+    if (statusDiff !== 0) return statusDiff;
+
+    // 2. Activity (most recent first)
+    const aDate = a.lastCommitDate ? new Date(a.lastCommitDate).getTime() : 0;
+    const bDate = b.lastCommitDate ? new Date(b.lastCommitDate).getTime() : 0;
+    if (aDate !== bDate) return bDate - aDate; // descending
+
+    // 3. Platform priority
+    const aPlatform = platformOrder[a.platform ?? "other"] ?? 3;
+    const bPlatform = platformOrder[b.platform ?? "other"] ?? 3;
+    if (aPlatform !== bPlatform) return aPlatform - bPlatform;
+
+    // 4. Name alphabetical
+    return a.name.localeCompare(b.name);
+  });
+}

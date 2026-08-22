@@ -2,12 +2,13 @@
  * Dashboard TUI Page — shows what needs your attention.
  *
  * Sections: PRs to review, Activity on your work, Replies awaiting
- * Navigate with arrows, Enter to open link, d to dismiss.
+ * Navigate with arrows, x to dismiss, r to refresh.
  */
 
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput } from "ink";
 import type { AttentionItem } from "../domain/attention.js";
+import { useScrollableList, useFlash } from "@lgtm/core/tui/hooks/index.js";
 
 interface DashboardPageProps {
   onStatusHint: (hint: string) => void;
@@ -15,13 +16,16 @@ interface DashboardPageProps {
 
 export function DashboardPage({ onStatusHint }: DashboardPageProps) {
   const [items, setItems] = useState<AttentionItem[]>([]);
-  const [selectedIdx, setSelectedIdx] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { exit } = useApp();
+  const { flash, showFlash } = useFlash();
+
+  const {
+    selectedIdx, visibleItems, moveDown, moveUp, pageDown, pageUp, goTop, goBottom, position,
+  } = useScrollableList(items, { reservedLines: 9 });
 
   useEffect(() => {
-    onStatusHint("↑↓ navigate  enter open  d dismiss  r refresh  q quit");
+    onStatusHint("↑↓ navigate  x dismiss  r refresh  d/u page");
     loadItems();
   }, []);
 
@@ -58,20 +62,17 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
   }
 
   useInput((input, key) => {
-    if (key.downArrow || input === "j") {
-      setSelectedIdx((prev) => Math.min(prev + 1, items.length - 1));
-    }
-    if (key.upArrow || input === "k") {
-      setSelectedIdx((prev) => Math.max(prev - 1, 0));
-    }
-    if (input === "q") {
-      exit();
-    }
+    if (key.downArrow || input === "j") moveDown();
+    if (key.upArrow || input === "k") moveUp();
+    if (input === "d") pageDown();
+    if (input === "u") pageUp();
+    if (input === "g") goTop();
+    if (input === "G") goBottom();
     if (input === "r") {
+      showFlash("Refreshing...", "gray");
       loadItems();
     }
-    if (input === "d" && items[selectedIdx]) {
-      // Dismiss selected item
+    if (input === "x" && items[selectedIdx]) {
       dismissSelected();
     }
   });
@@ -93,16 +94,16 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
 
       await dismissItem(store, item.id);
       setItems((prev) => prev.filter((i) => i.id !== item.id));
-      if (selectedIdx >= items.length - 1) {
-        setSelectedIdx(Math.max(0, selectedIdx - 1));
-      }
-    } catch { /* silent */ }
+      showFlash(`✓ Dismissed: ${item.title}`, "green");
+    } catch {
+      showFlash("✗ Failed to dismiss", "red");
+    }
   }
 
   if (loading) {
     return (
       <Box paddingY={1}>
-        <Text color="gray">Fetching attention items from watched repos...</Text>
+        <Text color="gray">  Fetching attention items from watched repos...</Text>
       </Box>
     );
   }
@@ -110,8 +111,8 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
   if (error) {
     return (
       <Box paddingY={1} flexDirection="column">
-        <Text color="red">Error: {error}</Text>
-        <Text color="gray">Set GITHUB_TOKEN and add repos: lgtm review watch add owner/repo</Text>
+        <Text color="red">  Error: {error}</Text>
+        <Text color="gray">  Set GITHUB_TOKEN and add repos: lgtm review watch add owner/repo</Text>
       </Box>
     );
   }
@@ -119,8 +120,8 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
   if (items.length === 0) {
     return (
       <Box paddingY={1} flexDirection="column">
-        <Text color="green">✓ All clear! Nothing needs your attention.</Text>
-        <Text color="gray">Watch repos: lgtm review watch add owner/repo</Text>
+        <Text color="green">  ✓ All clear! Nothing needs your attention.</Text>
+        <Text color="gray">  Watch repos: lgtm review watch add owner/repo</Text>
       </Box>
     );
   }
@@ -128,11 +129,15 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
-        <Text bold>📬 {items.length} item(s) need attention</Text>
+        <Text bold>  📬 {items.length} item(s) need attention</Text>
+        <Text color="gray">  {position}</Text>
       </Box>
 
-      {items.map((item, i) => {
-        const isSelected = i === selectedIdx;
+      {flash && <Text color={flash.color}>  {flash.text}</Text>}
+
+      {visibleItems.map((item, i) => {
+        const realIdx = i + (selectedIdx - visibleItems.indexOf(items[selectedIdx]) >= 0 ? 0 : 0);
+        const isSelected = items.indexOf(item) === selectedIdx;
         const urgencyColor =
           item.urgency === "high" ? "red" :
           item.urgency === "medium" ? "yellow" : "green";
@@ -140,7 +145,7 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
         return (
           <Box key={item.id} flexDirection="column" marginBottom={0}>
             <Text inverse={isSelected} bold={isSelected}>
-              {isSelected ? "❯ " : "  "}
+              {isSelected ? "▸ " : "  "}
               <Text color={urgencyColor}>●</Text>
               {" "}#{item.prNumber} {item.title}
             </Text>
@@ -150,18 +155,9 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
             <Text color="gray">
               {"    "}{item.context}
             </Text>
-            {isSelected && (
-              <Text color="cyan">{"    "}{item.url}</Text>
-            )}
           </Box>
         );
       })}
-
-      <Box marginTop={1}>
-        <Text color="gray">
-          {items.filter((i) => i.urgency === "high").length} urgent · {items.filter((i) => i.urgency === "medium").length} medium · {items.filter((i) => i.urgency === "low").length} low
-        </Text>
-      </Box>
     </Box>
   );
 }

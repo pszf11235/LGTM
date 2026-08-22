@@ -6,8 +6,9 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput } from "ink";
 import type { ParsedDiff } from "../domain/diff-parser.js";
+import { useScrollableList, useFlash } from "@lgtm/core/tui/hooks/index.js";
 
 interface QueuePageProps {
   onStatusHint: (hint: string) => void;
@@ -25,12 +26,15 @@ interface DisplayPR {
 
 export function QueuePage({ onStatusHint, onOpenReview }: QueuePageProps) {
   const [prs, setPrs] = useState<DisplayPR[]>([]);
-  const [selectedIdx, setSelectedIdx] = useState(0);
   const [loading, setLoading] = useState(true);
-  const { exit } = useApp();
+  const { flash, showFlash } = useFlash();
+
+  const {
+    selectedIdx, visibleItems, moveDown, moveUp, pageDown, pageUp, goTop, goBottom, position,
+  } = useScrollableList(prs, { reservedLines: 9 });
 
   useEffect(() => {
-    onStatusHint("↑↓ navigate  enter review  a approve  f flag  q quit");
+    onStatusHint("↑↓ navigate  enter review  d/u page  g/G top/bottom");
     loadQueue();
   }, []);
 
@@ -68,21 +72,17 @@ export function QueuePage({ onStatusHint, onOpenReview }: QueuePageProps) {
   }
 
   useInput((input, key) => {
-    if (key.downArrow || input === "j") {
-      if (prs.length > 0) setSelectedIdx((prev) => Math.min(prev + 1, prs.length - 1));
-    }
-    if (key.upArrow || input === "k") {
-      if (prs.length > 0) setSelectedIdx((prev) => Math.max(prev - 1, 0));
-    }
-    // q: quit the TUI from queue page
-    if (input === "q") {
-      exit();
-    }
+    if (key.downArrow || input === "j") moveDown();
+    if (key.upArrow || input === "k") moveUp();
+    if (input === "d") pageDown();
+    if (input === "u") pageUp();
+    if (input === "g") goTop();
+    if (input === "G") goBottom();
     // Enter: open review for selected PR
     if (key.return && onOpenReview && prs.length > 0) {
       const selected = prs[selectedIdx];
       if (selected) {
-        // Load diff for this PR (in demo mode, create a sample diff)
+        showFlash("Loading diff...", "gray");
         loadDiffAndOpen(selected);
       }
     }
@@ -157,9 +157,11 @@ export function QueuePage({ onStatusHint, onOpenReview }: QueuePageProps) {
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
-        <Text bold>Review Queue</Text>
-        <Text color="gray"> — {prs.length} PR(s)</Text>
+        <Text bold>  Review Queue</Text>
+        <Text color="gray"> — {prs.length} PR(s)  {position}</Text>
       </Box>
+
+      {flash && <Text color={flash.color}>  {flash.text}</Text>}
 
       {/* Table header */}
       <Box>
