@@ -74,6 +74,69 @@ cat ~/.lgtmrc              # Should show storageMode
 cat .lgtm/profile.md       # Should show your answers as YAML frontmatter
 ```
 
+### Skip Init (new)
+
+```bash
+# Fresh start
+task reset
+
+# Run init, then press 'q' at the "Skip setup" prompt
+bun run lgtm init
+# → At the first prompt, press [q] to skip
+```
+
+**Expected**:
+- Prints: "Press [q] to skip setup and use defaults, or [Enter] to continue"
+- Pressing `q` applies sensible defaults (repo mode, production, direct, solo, AI auto-detected)
+- Prints: "✓ Using defaults. Run `lgtm config --edit` to customize."
+- TUI launches immediately after
+
+**Verify**:
+```bash
+cat .lgtm/profile.md       # Should show defaults applied (goal: production, etc.)
+```
+
+### TUI Auto-Launch After Init (new)
+
+```bash
+# Fresh start
+task reset
+
+# Run full init (answer all questions, or skip with 'q')
+bun run lgtm init
+```
+
+**Expected**: After onboarding completes (either full or skipped), the TUI launches automatically. You should see the full-screen TUI without needing to run `lgtm` again.
+
+**Preservation checks**:
+- `bun run lgtm init --skip-onboarding` should NOT launch TUI (just prints info message)
+- `bun run lgtm config --edit` should re-run questions but NOT launch TUI after
+
+### AI Provider Auto-Discovery (new)
+
+```bash
+# Test with Codex API key
+export CODEX_API_KEY="sk-your-codex-key"
+task reset && bun run lgtm init
+# → Should auto-detect Codex as "Codex CLI (OpenAI)" provider
+
+# Test with Claude Code installed
+# (Requires `claude` binary on PATH and credentials in ~/.claude/)
+task reset && bun run lgtm init
+# → Should auto-detect Claude Code as Anthropic provider
+
+# Test slow discovery feedback
+# (If you have Ollama installed but stopped)
+task reset && bun run lgtm init
+# → At the AI question, should show "⏳ Detecting AI providers..." spinner
+#   while waiting for localhost:11434 timeout
+```
+
+**Expected**:
+- `CODEX_API_KEY` registers as a full provider (not just "tools detected")
+- Claude Code detected even with newer credential formats (`~/.claude/config.json`)
+- Spinner/feedback shown when auto-discovery takes >500ms
+
 ---
 
 ## 3. Configuration
@@ -380,6 +443,7 @@ bun run lgtm tui
 | **Rules** | Browse rules, toggle enable/disable with Enter |
 | **History** | Past review sessions |
 | **Config** | View profile, config, paths (new in #79!) |
+| **AI** | Manage AI providers, switch models, test connection (new!) |
 
 **Keyboard shortcuts**:
 - `Tab` / `Shift+Tab` — switch tabs
@@ -397,6 +461,34 @@ bun run lgtm tui
 6. Navigate files (n/N), hunks (h/H)
 7. Press `c` to add a comment at current line
 8. Press `a` to approve, `f` to flag
+
+### TUI AI Management Tab (new)
+
+1. Open TUI: `bun run lgtm`
+2. Navigate to the **AI** tab (press Tab until you reach it)
+3. Test these actions:
+
+| Key | Action | Expected |
+|-----|--------|----------|
+| `r` | Re-discover providers | Shows "Discovering..." then updates provider list |
+| `s` | Switch provider | Cycles through available providers, shows "Switched to..." |
+| `m` | Change model | Shows guidance to use `lgtm config --edit` for custom model |
+| `t` | Test connection | Shows "Testing..." then ✓ online or ✗ offline |
+
+**Expected layout**:
+- **Current Configuration** section: shows active provider, model, source, connection status
+- **Detected Providers** section: lists all discovered providers with ● (available) or ○ (offline) indicators
+- **Actions** section: keyboard shortcuts
+- Status bar shows: `[r] re-discover  [s] switch provider  [m] change model  [t] test connection`
+
+**Without AI configured**:
+- Should show "No AI provider configured" with helpful message
+- Pressing [r] runs discovery and populates the list if providers are found
+
+**With multiple providers** (e.g., both `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` set):
+- Provider list shows both
+- [s] cycles between them
+- Active provider marked with "← active"
 
 ---
 
@@ -505,6 +597,8 @@ bun test --coverage
 ```
 
 **Test files to verify pass**:
+- `packages/core/src/__tests__/bug-conditions.test.ts` — bug condition exploration (7 tests, all 5 bugs)
+- `packages/core/src/__tests__/preservation.test.ts` — preservation properties (37 tests)
 - `packages/core/src/config/loader.test.ts` — config resolution
 - `packages/core/src/llm/cache.test.ts` — LLM caching
 - `packages/core/src/onboarding/detect.test.ts` — stack detection
@@ -635,6 +729,7 @@ bun run lgtm smoke --verbose
 | Feature | CLI | TUI | Webapp | Needs GitHub Token | Needs AI |
 |---------|:---:|:---:|:------:|:-----------------:|:--------:|
 | Init / Onboarding | ✓ | — | — | — | — |
+| AI Management Tab | — | ✓ | — | — | — |
 | Config viewer | ✓ | ✓ | — | — | — |
 | Review queue | ✓ | ✓ | — | — | — |
 | PR diff viewer | — | ✓ | — | ✓ | — |
