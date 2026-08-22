@@ -22,6 +22,7 @@ import { RulesPage } from "./pages/RulesPage.js";
 import { HistoryPage } from "./pages/HistoryPage.js";
 import { ConfigPage } from "./pages/ConfigPage.js";
 import { ScanResultsPage } from "./pages/ScanResultsPage.js";
+import { DiscoverPage } from "./pages/DiscoverPage.js";
 
 /**
  * Review plugin — implements the LGTMPlugin interface.
@@ -46,6 +47,11 @@ export const plugin: LGTMPlugin = {
       label: "Rules",
       shortcut: "u",
       component: RulesPage,
+    },
+    {
+      label: "Repos",
+      shortcut: "p",
+      component: DiscoverPage,
     },
     {
       label: "History",

@@ -1,12 +1,14 @@
 /**
  * Rules Browser Page — TUI page for browsing and managing rules.
  *
- * Lists all rules with enable/disable toggle, trigger counts, details.
+ * Lists all rules with enable/disable toggle. Enter toggles the selected rule.
+ * Scrollable with viewport clipping.
  */
 
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput } from "ink";
 import type { Rule } from "../domain/rules.js";
+import { useScrollableList, useFlash } from "@lgtm/core/tui/hooks/index.js";
 
 interface RulesPageProps {
   onStatusHint: (hint: string) => void;
@@ -14,12 +16,15 @@ interface RulesPageProps {
 
 export function RulesPage({ onStatusHint }: RulesPageProps) {
   const [rules, setRules] = useState<Rule[]>([]);
-  const [selectedIdx, setSelectedIdx] = useState(0);
   const [loading, setLoading] = useState(true);
-  const { exit } = useApp();
+  const { flash, showFlash } = useFlash();
+
+  const {
+    selectedIdx, visibleItems, moveDown, moveUp, pageDown, pageUp, goTop, goBottom, position,
+  } = useScrollableList(rules, { reservedLines: 8 });
 
   useEffect(() => {
-    onStatusHint("↑↓ navigate  enter toggle  d detail  q quit");
+    onStatusHint("↑↓ navigate  enter toggle  d/u page  g/G top/bottom");
     loadRules();
   }, []);
 
@@ -42,27 +47,50 @@ export function RulesPage({ onStatusHint }: RulesPageProps) {
     setLoading(false);
   }
 
+  async function toggleRule() {
+    const rule = rules[selectedIdx];
+    if (!rule) return;
+
+    try {
+      const { createOKFStore } = await import("@lgtm/core/store/okf.js");
+      const { findGitRoot } = await import("@lgtm/core/store/paths.js");
+      const { loadBootstrap, resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
+      const { createRulesEngine } = await import("../domain/rules.js");
+
+      const repoRoot = findGitRoot();
+      const bootstrap = loadBootstrap();
+      const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
+      const store = createOKFStore(lgtmDir);
+      const engine = createRulesEngine(store);
+
+      await engine.setEnabled(rule.id, !rule.enabled);
+      const newEnabled = !rule.enabled;
+      setRules((prev) => prev.map((r) => r.id === rule.id ? { ...r, enabled: newEnabled } : r));
+      showFlash(`${newEnabled ? "✓ Enabled" : "○ Disabled"}: ${rule.description}`, newEnabled ? "green" : "gray");
+    } catch {
+      showFlash("✗ Failed to toggle rule", "red");
+    }
+  }
+
   useInput((input, key) => {
-    if (key.downArrow || input === "j") {
-      setSelectedIdx((prev) => Math.min(prev + 1, rules.length - 1));
-    }
-    if (key.upArrow || input === "k") {
-      setSelectedIdx((prev) => Math.max(prev - 1, 0));
-    }
-    if (input === "q") {
-      exit();
-    }
+    if (key.downArrow || input === "j") moveDown();
+    if (key.upArrow || input === "k") moveUp();
+    if (input === "d") pageDown();
+    if (input === "u") pageUp();
+    if (input === "g") goTop();
+    if (input === "G") goBottom();
+    if (key.return) toggleRule();
   });
 
   if (loading) {
-    return <Text color="gray">Loading rules...</Text>;
+    return <Text color="gray">  Loading rules...</Text>;
   }
 
   if (rules.length === 0) {
     return (
       <Box flexDirection="column" paddingY={1}>
-        <Text color="gray">No rules defined.</Text>
-        <Text color="gray">Create with: lgtm review rule add "description"</Text>
+        <Text color="gray">  No rules defined.</Text>
+        <Text color="gray">  Create with: lgtm review rule add "description"</Text>
       </Box>
     );
   }
@@ -70,11 +98,14 @@ export function RulesPage({ onStatusHint }: RulesPageProps) {
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
-        <Text bold>Rules ({rules.length})</Text>
+        <Text bold>  Rules ({rules.length})</Text>
+        <Text color="gray">  {position}</Text>
       </Box>
 
-      {rules.map((rule, i) => {
-        const isSelected = i === selectedIdx;
+      {flash && <Text color={flash.color}>  {flash.text}</Text>}
+
+      {visibleItems.map((rule) => {
+        const isSelected = rules.indexOf(rule) === selectedIdx;
         const icon = rule.enabled ? "●" : "○";
         const sevColor = rule.severity === "error" ? "red" : "yellow";
         const triggered = rule.timesTriggered > 0 ? ` (×${rule.timesTriggered})` : "";
@@ -82,7 +113,7 @@ export function RulesPage({ onStatusHint }: RulesPageProps) {
         return (
           <Box key={rule.id} flexDirection="column">
             <Text inverse={isSelected} bold={isSelected}>
-              {isSelected ? "❯ " : "  "}
+              {isSelected ? "▸ " : "  "}
               <Text color={rule.enabled ? "green" : "gray"}>{icon}</Text>
               {" "}{rule.id.padEnd(14)} <Text color={sevColor}>{rule.severity.padEnd(5)}</Text>
               {" "}{rule.category.padEnd(12)}
