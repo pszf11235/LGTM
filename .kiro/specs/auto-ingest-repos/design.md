@@ -1,0 +1,133 @@
+# Auto-Ingest Repos — Design
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│             lgtm discover --ingest                       │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│  ┌──────────────┐    ┌───────────────┐    ┌──────────┐ │
+│  │  Scanner     │───▶│  Enricher     │───▶│  Picker  │ │
+│  │  (find .git) │    │  (remote,date)│    │  (TUI)   │ │
+│  └──────────────┘    └───────────────┘    └──────────┘ │
+│         │                                       │       │
+│         ▼                                       ▼       │
+│  ~/.lgtm-registry.md                    watch.md        │
+│  (all known repos)                (watched repos)       │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Component Design
+
+### 1. Scanner (`packages/core/src/registry/scanner.ts`)
+
+Walks the filesystem looking for `.git/` directories.
+
+```ts
+interface ScannedRepo {
+  path: string;           // absolute path to repo root
+  name: string;           // directory name
+  remote?: string;        // origin URL (GitHub, GitLab, etc.)
+  owner?: string;         // extracted from remote
+  repoName?: string;      // extracted from remote
+  platform?: "github" | "gitlab" | "bitbucket" | "other";
+  lastCommitDate?: string; // ISO date of most recent commit
+  defaultBranch?: string;  // main, master, etc.
+  language?: string;       // primary language (from file extensions)
+  isMonorepo?: boolean;    // has workspaces/packages/
+}
+
+interface ScanOptions {
+  roots?: string[];       // directories to scan (defaults to common locations)
+  maxDepth?: number;      // how deep to recurse (default: 4)
+  excludePatterns?: string[]; // dirs to skip
+}
+
+function scanForRepos(opts: ScanOptions): AsyncGenerator<ScannedRepo>;
+```
+
+**Default scan roots** (in order):
+1. `~/projects`, `~/dev`, `~/code`, `~/repos`, `~/src`, `~/work`
+2. `~/Desktop`, `~/Documents` (lower priority)
+3. Current working directory (always)
+
+**Exclude**: `node_modules`, `.cache`, `vendor`, `dist`, `build`, `Library`, `.Trash`
+
+### 2. Enricher
+
+For each found `.git/` directory:
+1. Read `.git/config` → extract `[remote "origin"]` URL
+2. Parse remote URL → owner, repo, platform (reuse `utils/git.ts` → `parseGitUrl()`)
+3. Run `git log -1 --format=%aI` → last commit date
+4. Check for monorepo indicators: `package.json#workspaces`, `Cargo.toml#[workspace]`, `go.work`
+5. Detect primary language from file extension frequency (quick heuristic)
+
+### 3. Picker (Interactive UI)
+
+Two modes:
+- **CLI mode** (`lgtm discover --ingest`): readline-based accept/deny
+- **TUI mode** (Dashboard tab): Ink-based list with keyboard navigation
+
+Display format:
+```
+  Discovered 23 repos (8 new, 15 already tracked)
+
+  ~/projects/
+    ✦ frontend-app      github.com/org/frontend   2 days ago    TypeScript
+    ✦ backend-api       github.com/org/backend    5 hours ago   Go
+      mobile-app        github.com/org/mobile     3 months ago  Swift (stale)
+
+  ~/work/
+    ✦ internal-tool     gitlab.com/team/tool      1 day ago     Python
+      archived-thing    (no remote)               1 year ago    — (stale)
+
+  ✦ = recommended (active in last 7 days)
+
+  [a] accept  [s] skip  [A] accept all recommended  [q] done
+```
+
+### 4. Registry Integration
+
+Accepted repos:
+- Added to `~/.lgtm-registry.md` with `status: active`
+- Added to `watch.md` in the current LGTM storage dir
+- Auto-registered so `lgtm review add repo-name#42` works (short form)
+
+Denied repos:
+- Added to `~/.lgtm-registry.md` with `status: denied`
+- Not shown again on subsequent runs (unless `--all`)
+
+### 5. Watch Integration
+
+After accepting, repos are added to the watcher the same way `lgtm review watch add` works:
+```ts
+// Reuse existing watch infrastructure
+await addToWatch(owner, repo);
+```
+
+This means `lgtm review watch status` and `lgtm review report` immediately include them.
+
+## Configuration
+
+```yaml
+# .lgtmrc.yaml
+discover:
+  scanRoots:
+    - ~/projects
+    - ~/work
+  maxDepth: 4
+  excludePatterns:
+    - "**/archive/**"
+    - "**/old/**"
+  recommendedThresholdDays: 7
+  staleThresholdDays: 90
+```
+
+## Dependencies
+
+- `packages/core/src/registry/index.ts` — existing registry (load, save, register)
+- `packages/core/src/utils/git.ts` — existing `parseGitUrl()`
+- `packages/plugins/review/src/commands/watch.ts` — existing watch add logic
+- `packages/core/src/cli/commands/discover.ts` — existing discover command (will be extended)
