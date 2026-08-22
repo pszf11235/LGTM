@@ -1,0 +1,349 @@
+{
+  "pbtResults": {
+    "1. Write bug condition exploration tests": {
+      "status": "passed",
+      "failingExample": "All 6 tests FAILED as expected, confirming all 5 bugs exist:\n- Bug 1: init action block contains NO call to launchTUI (received action handler without launchTUI)\n- Bug 2: No spinner/Detecting/Promise.race feedback before await aiDiscoveryPromise (hasSpinnerOrFeedback = false)\n- Bug 3: CODEX_API_KEY=\"sk-test-codex-key\" set but discoverAIProviders() returns no provider with detectedVia containing \"codex\" (codexProvider = undefined)\n- Bug 3b: ~/.claude/config.json with {claudeApiKey} not detected (claudeProvider = undefined)\n- Bug 4: No skip-all affordance text found between welcome message and question loop (hasSkipAffordance = false)\n- Bug 5: No AI tab registered in TUI setup section, AITab.tsx file doesn't exist (hasAITab = false, exists = false)",
+      "lastRunTimestamp": 1787420491127
+    },
+    "2. Write preservation property tests (BEFORE implementing fixes)": {
+      "status": "passed",
+      "lastRunTimestamp": 1787420828517
+    }
+  },
+  "executionHistory": {
+    "1. Write bug condition exploration tests": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313961
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420320724
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420675352
+      }
+    ],
+    "2. Write preservation property tests (BEFORE implementing fixes)": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313966
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420687604
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420853811
+      }
+    ],
+    "3.1 Extract shared TUI launch helper": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313968
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420678480
+      }
+    ],
+    "3.2 Wire TUI launch into `init` command handler": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313978
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420679333
+      }
+    ],
+    "3.3 Verify bug condition exploration test for Bug 1 now passes": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313980
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420680456
+      }
+    ],
+    "3.4 Verify preservation tests still pass for Bug 1": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313982
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420681325
+      }
+    ],
+    "4.1 Add spinner/wait indicator before AI discovery await": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313985
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420859776
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420946199
+      }
+    ],
+    "4.2 Verify bug condition exploration test for Bug 2 now passes": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313987
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420948861
+      }
+    ],
+    "4.3 Verify preservation tests still pass for Bug 2": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313989
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420951569
+      }
+    ],
+    "5.1 Register Codex as proper provider in `checkEnvVars()`": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313992
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420960423
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421156400
+      }
+    ],
+    "5.2 Implement robust Claude Code credential discovery in `checkClaudeCode()`": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313994
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421159352
+      }
+    ],
+    "5.3 Verify bug condition exploration test for Bug 3 now passes": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313996
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421162050
+      }
+    ],
+    "5.4 Verify preservation tests still pass for Bug 3": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420313998
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421164840
+      }
+    ],
+    "6.1 Add skip-all prompt before first onboarding question": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420314000
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421168360
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421299784
+      }
+    ],
+    "6.2 Implement skip logic with sensible defaults": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420314002
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421302768
+      }
+    ],
+    "6.3 Verify bug condition exploration test for Bug 4 now passes": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420314005
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421305606
+      }
+    ],
+    "6.4 Verify preservation tests still pass for Bug 4": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420314007
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421308349
+      }
+    ],
+    "7.1 Create AITab component": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420314009
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421312138
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421470620
+      }
+    ],
+    "7.2 Register AI tab in Shell and index.ts": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420314015
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421473503
+      }
+    ],
+    "7.3 Verify bug condition exploration test for Bug 5 now passes": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420314018
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421476291
+      }
+    ],
+    "7.4 Verify preservation tests still pass for Bug 5": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420314020
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421479344
+      }
+    ],
+    "8. Checkpoint — Ensure all tests pass": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420314023
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421482556
+      },
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421612691
+      }
+    ],
+    "3. Fix for No TUI Launch After Init (Bug 1)": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420681332
+      }
+    ],
+    "4. Fix for No Feedback During Autodiscovery Wait (Bug 2)": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787420951576
+      }
+    ],
+    "5. Fix for Incomplete AI Agent Detection (Bug 3)": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421164842
+      }
+    ],
+    "6. Fix for No Skip Affordance During Init (Bug 4)": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421308352
+      }
+    ],
+    "7. Fix for No AI Management Screen in TUI (Bug 5)": [
+      {
+        "executionId": "2ea6dcb5-6151-4b45-9c46-e5748d2f44bb",
+        "chatSessionId": "d7c891f1-7b17-4b8b-b536-852085552801",
+        "timestamp": 1787421479347
+      }
+    ]
+  }
+}

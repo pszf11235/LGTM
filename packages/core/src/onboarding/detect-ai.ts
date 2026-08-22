@@ -190,8 +190,18 @@ function checkEnvVars(providers: DetectedProvider[], tools: string[]) {
   }
 
   // Codex (uses OPENAI_API_KEY — note if CODEX_API_KEY also exists)
-  if (process.env.CODEX_API_KEY) {
+  const codexKey = process.env.CODEX_API_KEY;
+  if (codexKey) {
     tools.push("Codex CLI");
+    // Register Codex as a proper provider if the key is different from OPENAI_API_KEY
+    // (or if OPENAI_API_KEY is not set at all)
+    if (codexKey !== openaiKey) {
+      providers.push({
+        id: "openai", name: "Codex CLI (OpenAI)", detectedVia: "CODEX_API_KEY env var",
+        source: "env", available: true, keyHint: maskKey(codexKey), apiKey: codexKey,
+        defaultModel: "gpt-4o-mini",
+      });
+    }
   }
 }
 
@@ -225,58 +235,79 @@ function checkLGTMCredentials(providers: DetectedProvider[], tools: string[]) {
 async function checkClaudeCode(providers: DetectedProvider[], tools: string[]) {
   // Claude Code stores credentials in ~/.claude/ (after `claude login`)
   // The credential is OAuth-based and stored in a credentials file
-  const claudeDir = path.join(os.homedir(), ".claude");
+  // Use process.env.HOME as primary (respects runtime overrides), fallback to os.homedir()
+  const homeDir = process.env.HOME || os.homedir();
+  const claudeDir = path.join(homeDir, ".claude");
 
   // Check if claude CLI exists
   try {
     const { execSync } = require("child_process");
     execSync("which claude", { stdio: "ignore" });
     tools.push("Claude Code CLI");
+  } catch { /* claude not installed */ }
 
-    // Check for Claude Code credentials
-    // Claude Code uses OAuth and stores tokens in ~/.claude/credentials.json or similar
-    const credPaths = [
-      path.join(claudeDir, "credentials.json"),
-      path.join(claudeDir, ".credentials"),
-      path.join(claudeDir, "auth.json"),
-    ];
+  // Check for Claude Code credentials regardless of whether CLI binary is on PATH
+  // (credential files may exist from previous installations or different PATH configs)
+  const credPaths = [
+    path.join(claudeDir, "credentials.json"),
+    path.join(claudeDir, ".credentials"),
+    path.join(claudeDir, "auth.json"),
+    path.join(claudeDir, "config.json"),
+    path.join(homeDir, ".config", "claude", "credentials.json"),
+    path.join(claudeDir, "settings.local.json"),
+  ];
 
-    for (const credPath of credPaths) {
-      try {
-        const raw = fs.readFileSync(credPath, "utf-8");
-        const data = JSON.parse(raw);
-        // Claude Code OAuth tokens can be used as API keys in some cases
-        if (data.apiKey || data.token || data.access_token) {
-          const key = data.apiKey ?? data.token ?? data.access_token;
-          if (!providers.some((p) => p.id === "anthropic")) {
-            providers.push({
-              id: "anthropic", name: "Anthropic (Claude Code)", detectedVia: "Claude Code CLI credentials",
-              source: "cli-config", available: true, keyHint: maskKey(key), apiKey: key,
-              defaultModel: "claude-sonnet-4-20250514",
-              detail: "Borrowed from Claude Code",
-            });
-          }
-          break;
+  for (const credPath of credPaths) {
+    try {
+      const raw = fs.readFileSync(credPath, "utf-8");
+      const data = JSON.parse(raw);
+      // Parse multiple JSON structures for credential extraction
+      const key = data.apiKey ?? data.claudeApiKey ?? data.token ?? data.access_token ?? data.credentials?.apiKey;
+      if (key) {
+        if (!providers.some((p) => p.id === "anthropic")) {
+          providers.push({
+            id: "anthropic", name: "Anthropic (Claude Code)", detectedVia: "Claude Code CLI credentials",
+            source: "cli-config", available: true, keyHint: maskKey(key), apiKey: key,
+            defaultModel: "claude-sonnet-4-20250514",
+            detail: "Borrowed from Claude Code",
+          });
         }
-      } catch { /* not this path */ }
-    }
+        break;
+      }
+    } catch { /* not this path */ }
+  }
 
-    // Also check if ANTHROPIC_CONFIG_DIR is set (Claude Code respects this)
-    const configDir = process.env.ANTHROPIC_CONFIG_DIR ?? claudeDir;
-    if (configDir !== claudeDir) {
+  // Also check if ANTHROPIC_CONFIG_DIR is set (Claude Code respects this)
+  const configDir = process.env.ANTHROPIC_CONFIG_DIR ?? claudeDir;
+  if (configDir !== claudeDir && !providers.some((p) => p.id === "anthropic")) {
+    try {
+      const settingsRaw = fs.readFileSync(path.join(configDir, "settings.json"), "utf-8");
+      const settings = JSON.parse(settingsRaw);
+      const key = settings.apiKey ?? settings.claudeApiKey ?? settings.token ?? settings.access_token ?? settings.credentials?.apiKey;
+      if (key) {
+        providers.push({
+          id: "anthropic", name: "Anthropic", detectedVia: "Claude Code config dir",
+          source: "cli-config", available: true, keyHint: maskKey(key), apiKey: key,
+          defaultModel: "claude-sonnet-4-20250514",
+        });
+      }
+    } catch { /* no settings */ }
+    // Also try credentials.json in the ANTHROPIC_CONFIG_DIR
+    if (!providers.some((p) => p.id === "anthropic")) {
       try {
-        const settingsRaw = fs.readFileSync(path.join(configDir, "settings.json"), "utf-8");
-        const settings = JSON.parse(settingsRaw);
-        if (settings.apiKey && !providers.some((p) => p.id === "anthropic")) {
+        const credRaw = fs.readFileSync(path.join(configDir, "credentials.json"), "utf-8");
+        const cred = JSON.parse(credRaw);
+        const key = cred.apiKey ?? cred.claudeApiKey ?? cred.token ?? cred.access_token ?? cred.credentials?.apiKey;
+        if (key) {
           providers.push({
             id: "anthropic", name: "Anthropic", detectedVia: "Claude Code config dir",
-            source: "cli-config", available: true, keyHint: maskKey(settings.apiKey), apiKey: settings.apiKey,
+            source: "cli-config", available: true, keyHint: maskKey(key), apiKey: key,
             defaultModel: "claude-sonnet-4-20250514",
           });
         }
-      } catch { /* no settings */ }
+      } catch { /* no credentials */ }
     }
-  } catch { /* claude not installed */ }
+  }
 }
 
 function checkContinueDev(providers: DetectedProvider[], tools: string[]) {
