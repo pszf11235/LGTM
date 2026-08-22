@@ -153,11 +153,63 @@ export async function runOnboarding(): Promise<{
   // Determine which questions to ask
   const questionsToAsk = unansweredQuestions.length > 0 ? unansweredQuestions : ONBOARDING_QUESTIONS;
 
+  // ── Skip-all affordance: only shown on fresh start ──────────────────
+  if (!existingProfile) {
+    console.log(chalk.gray("  Press [q] to skip setup and use defaults, or [Enter] to continue\n"));
+
+    const shouldSkip = await waitForSkipOrContinue();
+    if (shouldSkip) {
+      // Apply sensible defaults
+      answers.storageMode = "repo";
+      answers.goal = "production";
+      answers.feedbackStyle = "direct";
+      answers.teamSize = "solo";
+
+      // Await AI discovery and auto-configure if possible
+      const discovery = await aiDiscoveryPromise;
+      const available = discovery?.providers.filter((p) => p.available) ?? [];
+      if (available.length >= 1) {
+        const primary = available[0];
+        answers.aiProvider = primary.id;
+        answers.aiModel = primary.defaultModel;
+        if (primary.apiKey) {
+          try {
+            const { saveToken } = await import("../auth/github-oauth.js");
+            const credId = primary.id === "anthropic" ? "claude" : primary.id;
+            saveToken(credId, primary.apiKey);
+          } catch { /* non-critical */ }
+        }
+      } else {
+        answers.aiProvider = "none";
+      }
+
+      const { profile, bootstrap } = await saveProgress();
+      console.log(`  ${chalk.green("✓")} Using defaults. Run ${chalk.cyan("`lgtm config --edit`")} to customize.\n`);
+      rl.close();
+      return { profile, bootstrap };
+    }
+  }
+
   try {
     for (const q of questionsToAsk) {
       // ── Before AI questions: show autodiscovery results ──────────────
       if (q.id === "aiProvider") {
-        const discovery = await aiDiscoveryPromise;
+        // Use Promise.race to show a spinner if discovery takes >500ms
+        let discovery: Awaited<typeof aiDiscoveryPromise>;
+        const raceResult = await Promise.race([
+          aiDiscoveryPromise.then(r => ({ type: 'resolved' as const, value: r })),
+          new Promise<{ type: 'timeout' }>(resolve => setTimeout(() => resolve({ type: 'timeout' }), 500))
+        ]);
+
+        if (raceResult.type === 'timeout') {
+          process.stdout.write("  ⏳ Detecting AI providers...");
+          discovery = await aiDiscoveryPromise;
+          // Clear the spinner line
+          process.stdout.write("\r" + " ".repeat(40) + "\r");
+        } else {
+          discovery = raceResult.value;
+        }
+
         const available = discovery?.providers.filter((p) => p.available) ?? [];
 
         if (available.length === 1) {
@@ -452,6 +504,65 @@ async function askQuestion(
   }
 
   return currentValue ?? null;
+}
+
+/**
+ * Wait for user to press 'q' (skip) or Enter (continue).
+ * Returns true if user wants to skip, false if they want to continue.
+ * Handles Ctrl+C for clean exit.
+ */
+function waitForSkipOrContinue(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    try {
+      stdin.setRawMode(true);
+    } catch {
+      // If setRawMode fails (e.g., piped stdin), default to continue
+      resolve(false);
+      return;
+    }
+    stdin.resume();
+    stdin.setEncoding("utf-8");
+
+    const cleanup = () => {
+      stdin.setRawMode(wasRaw ?? false);
+      stdin.removeListener("data", onData);
+      stdin.resume();
+    };
+
+    const onData = (key: string) => {
+      // Ctrl+C
+      if (key === "\x03") {
+        cleanup();
+        console.log();
+        process.exit(0);
+      }
+
+      // 'q' or 'Q' — skip setup
+      if (key === "q" || key === "Q") {
+        cleanup();
+        console.log();
+        resolve(true);
+        return;
+      }
+
+      // Enter — continue with normal flow
+      if (key === "\r" || key === "\n") {
+        cleanup();
+        console.log();
+        resolve(false);
+        return;
+      }
+
+      // Any other key — treat as continue
+      cleanup();
+      console.log();
+      resolve(false);
+    };
+
+    stdin.on("data", onData);
+  });
 }
 
 /**
