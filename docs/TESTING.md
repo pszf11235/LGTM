@@ -24,6 +24,7 @@ A hands-on walkthrough to test every feature of LGTM. Follow this from top to bo
 13. [Binary Build](#13-binary-build)
 14. [Webapp Daily Checker](#14-webapp-daily-checker)
 15. [Tests](#15-tests)
+16. [Smoke Test Command](#16-smoke-test-command)
 
 ---
 
@@ -428,6 +429,9 @@ bun run lgtm auth logout github
 bun run build:binary
 ./dist/lgtm --help
 
+# Verify binary works end-to-end
+./dist/lgtm smoke
+
 # Build all platforms
 bash scripts/build-binaries.sh
 
@@ -443,6 +447,8 @@ cat dist/checksums-sha256.txt
 ```
 
 **Expected**: Produces standalone executables (~50-80MB) that run without Bun/Node.
+
+**How it works**: The `react-devtools-core` stub at `stubs/react-devtools-core/` is bundled directly into the binary (registered as a `file:` devDependency). This satisfies Ink's optional devtools import without needing the real package at runtime.
 
 ### Cut a release
 
@@ -521,6 +527,21 @@ bun test --coverage
 If you just want to verify the tool works end-to-end:
 
 ```bash
+# Fastest: run the built-in smoke command (exercises all subsystems)
+bun run lgtm smoke
+
+# With guided explanations (great for first-time users)
+bun run lgtm smoke --demo
+
+# Machine-readable output (for CI/agents)
+bun run lgtm smoke --json
+```
+
+**All 11 tests pass? You're good. Ship it. 👍**
+
+### Manual Walkthrough (if you prefer hands-on)
+
+```bash
 # 1. Fresh start
 task slaughter:local
 
@@ -555,7 +576,57 @@ bun run lgtm review auto --pr 97 --dry-run
 bun test
 ```
 
-**All passing? You're good. Ship it. 👍**
+---
+
+## 16. Smoke Test Command
+
+The built-in `lgtm smoke` command exercises all major subsystems non-interactively.
+
+```bash
+# Quick verification (CI-friendly, dot output)
+bun run lgtm smoke
+
+# Guided demo walkthrough (explains each feature)
+bun run lgtm smoke --demo
+
+# Machine-readable JSON (for agents/automation)
+bun run lgtm smoke --json
+
+# Verbose output (shows all details)
+bun run lgtm smoke --verbose
+
+# Works from binary too
+./dist/lgtm smoke
+```
+
+**What it tests** (11 checks):
+
+| # | Test | What it verifies |
+|---|------|-----------------|
+| 1 | Config Loading | `.lgtmrc.yaml` resolution with defaults |
+| 2 | OKF Store | Write/read round-trip (YAML frontmatter + markdown) |
+| 3 | Git URL Parsing | HTTPS and SSH URL extraction |
+| 4 | Tech Stack Detection | Auto-detect from config files (tsconfig, package.json, etc.) |
+| 5 | LLM Cache | Content-hash based set/get/clear |
+| 6 | Diff Parser | Unified diff → structured data |
+| 7 | Rules Engine | Create and load regex/LLM rules |
+| 8 | Review Queue | State machine (queued → reviewing → approved/flagged) |
+| 9 | PR Grouping & Overlap | Shared-file detection between PRs |
+| 10 | Auto-Review Engine | Regex rule enforcement against diffs |
+| 11 | Binary Executable | `dist/lgtm --version` works (if binary built) |
+
+**Expected**: All 11 pass, exit code 0. If any fail, the output shows which test and why.
+
+**JSON output format** (for scripting):
+```json
+{
+  "passed": 11,
+  "failed": 0,
+  "total": 11,
+  "duration": 200,
+  "results": [{ "name": "...", "passed": true, "duration": 3, "output": "..." }]
+}
+```
 
 ---
 
@@ -577,6 +648,7 @@ bun test
 | Daily standup | ✓ | — | ✓ | ✓ | — |
 | Auth (OAuth) | ✓ | — | — | — | — |
 | Binary build | ✓ | — | — | — | — |
+| Smoke test | ✓ | — | — | — | — |
 
 ---
 
