@@ -18,10 +18,25 @@ import { findGitRoot } from "../store/paths.js";
  * Discover plugins by scanning the packages/plugins/ directory.
  * Each plugin must export a `plugin` object or a `register` function
  * that returns a LGTMPlugin.
+ *
+ * In compiled binaries, uses static imports (see plugins.ts).
+ * In development, falls back to dynamic filesystem scanning.
  */
 export async function discoverPlugins(
   pluginsDir: string
 ): Promise<LGTMPlugin[]> {
+  // First try static plugin registry (works in compiled binaries)
+  try {
+    const { loadStaticPlugins } = await import("./plugins.js");
+    const staticPlugins = await loadStaticPlugins();
+    if (staticPlugins.length > 0) {
+      return staticPlugins;
+    }
+  } catch {
+    // Static registry not available — fall through to dynamic discovery
+  }
+
+  // Fallback: dynamic filesystem discovery (development mode)
   const plugins: LGTMPlugin[] = [];
 
   if (!fs.existsSync(pluginsDir)) {
