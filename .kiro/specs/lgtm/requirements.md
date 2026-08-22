@@ -2,14 +2,14 @@
 
 ## Overview
 
-Yak is a dev productivity platform (CLI + TUI) with a plugin architecture. The core provides shared infrastructure (CLI, TUI, LLM, storage, config, onboarding) and the first plugin (`review`) implements a structured PR review workflow.
+LGTM is a dev productivity platform (CLI + TUI) with a plugin architecture. The core provides shared infrastructure (CLI, TUI, LLM, storage, config, onboarding) and the first plugin (`review`) implements a structured PR review workflow.
 
 ---
 
 ## Epic 0: Core Platform
 
 ### US-0.1: Plugin Architecture
-**As a** developer extending Yak,
+**As a** developer extending LGTM,
 **I want** a clear plugin interface,
 **So that** I can add new capabilities without modifying core.
 

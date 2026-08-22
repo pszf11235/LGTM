@@ -54,7 +54,7 @@ Persistence layer and configuration system.
   - `writeOKF(path, data, content)` → formatted markdown file
   - Uses gray-matter for parsing/stringifying
 - [ ] `packages/core/src/store/paths.ts`:
-  - `getYakDir()` → resolves `.lgtm/` relative to git root
+  - `getLgtmDir()` → resolves `.lgtm/` relative to git root
   - `ensureDir(subpath)` → creates directory structure
   - `getSessionDir(date)`, `getRulesDir()`, `getPluginDir(name)`
 - [ ] `packages/core/src/config/loader.ts`:

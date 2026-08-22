@@ -64,14 +64,14 @@ export function ConfigPage({ onStatusHint }: ConfigPageProps) {
 
   async function loadData() {
     try {
-      const { loadConfig, loadProfile, loadBootstrap, resolveYakDir } = await import(
+      const { loadConfig, loadProfile, loadBootstrap, resolveLgtmDir } = await import(
         "@lgtm/core/config/loader.js"
       );
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
 
       const root = findGitRoot();
       const bs = loadBootstrap();
-      const dir = resolveYakDir(bs, root);
+      const dir = resolveLgtmDir(bs, root);
       const cfg = loadConfig();
       const prof = loadProfile(dir);
 

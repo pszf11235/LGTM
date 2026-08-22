@@ -4,7 +4,7 @@
 
 > AI coding agents let you generate 5 PRs in an hour. But now **you** need to review them. LGTM is the structured review environment that breaks the bottleneck.
 
-**Yak** is a developer productivity platform with a plugin architecture. It provides a CLI + TUI for structured PR review with rules, auto-grouping, pattern analysis, and persistent review history — all stored as human-readable markdown.
+**LGTM** is a developer productivity platform with a plugin architecture. It provides a CLI + TUI for structured PR review with rules, auto-grouping, pattern analysis, and persistent review history — all stored as human-readable markdown.
 
 ## The Problem
 
@@ -220,7 +220,7 @@ bun install              # Install deps
 bun run lgtm              # Run CLI
 bun test                 # Run tests
 task check               # Lint + test + build
-task slaughter           # 🪓 Full cleanup (fresh start)
+task reset               # 🔄 Full reset (fresh start)
 task info                # Show lgtm state
 ```
 

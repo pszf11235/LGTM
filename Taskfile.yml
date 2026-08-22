@@ -58,40 +58,40 @@ tasks:
 
   # ─── LGTM Management ──────────────────────────────────────────────────
 
-  slaughter:
-    desc: "🪓 Full cleanup — remove ALL lgtm data (fresh start)"
+  reset:
+    desc: "🔄 Full reset — remove ALL lgtm data (fresh start)"
     prompt: "This will delete .lgtm/, ~/.lgtm-farm/, and ~/.lgtmrc. Continue?"
     cmds:
-      - rm -rf {{.YAK_DIR}}
+      - rm -rf {{.LGTM_DIR}}
       - rm -rf {{.FARM_DIR}}
       - rm -f {{.BOOTSTRAP}}
-      - echo "🪓 LGTM slaughtered. Run 'bun run lgtm' for a fresh start."
+      - echo "🔄 LGTM reset. Run 'bun run lgtm' for a fresh start."
 
-  slaughter:local:
-    desc: "🪓 Remove only this repo's .lgtm/ directory"
+  reset:local:
+    desc: "🔄 Remove only this repo's .lgtm/ directory"
     cmds:
-      - rm -rf {{.YAK_DIR}}
-      - echo "🪓 Local lgtm data removed. Profile and rules gone."
+      - rm -rf {{.LGTM_DIR}}
+      - echo "🔄 Local lgtm data removed. Profile and rules gone."
 
-  slaughter:farm:
-    desc: "🪓 Remove the lgtm-farm (central storage)"
+  reset:farm:
+    desc: "🔄 Remove the lgtm-farm (central storage)"
     cmds:
       - rm -rf {{.FARM_DIR}}
-      - echo "🪓 LGTM-farm cleared."
+      - echo "🔄 LGTM-farm cleared."
 
-  slaughter:config:
-    desc: "🪓 Remove only bootstrap config (~/.lgtmrc) — forces re-onboarding"
+  reset:config:
+    desc: "🔄 Remove only bootstrap config (~/.lgtmrc) — forces re-onboarding"
     cmds:
       - rm -f {{.BOOTSTRAP}}
-      - echo "🪓 Bootstrap config removed. Next 'lgtm' run will re-onboard."
+      - echo "🔄 Bootstrap config removed. Next 'lgtm' run will re-onboard."
 
-  reset:
-    desc: "🔄 Full reset — slaughter + reinstall deps"
+  reset:full:
+    desc: "🔄 Full reset — clean data + reinstall deps"
     cmds:
-      - task: slaughter
+      - task: reset
       - rm -rf node_modules
       - bun install
-      - echo "🔄 Fresh as a newborn lgtm."
+      - echo "🔄 Fresh start. All data and deps reinstalled."
 
   # ─── Info ─────────────────────────────────────────────────────────────
 
@@ -105,13 +105,13 @@ tasks:
         if [ -f {{.BOOTSTRAP}} ]; then cat {{.BOOTSTRAP}}; else echo "  Not found (first run)"; fi
         echo ""
         echo "Local .lgtm/:"
-        if [ -d {{.YAK_DIR}} ]; then ls -la {{.YAK_DIR}}/; else echo "  Not found"; fi
+        if [ -d {{.LGTM_DIR}} ]; then ls -la {{.LGTM_DIR}}/; else echo "  Not found"; fi
         echo ""
         echo "LGTM-farm:"
         if [ -d {{.FARM_DIR}} ]; then ls -la {{.FARM_DIR}}/; else echo "  Not found"; fi
         echo ""
         echo "Profile:"
-        if [ -f {{.YAK_DIR}}/profile.md ]; then head -20 {{.YAK_DIR}}/profile.md; else echo "  Not found"; fi
+        if [ -f {{.LGTM_DIR}}/profile.md ]; then head -20 {{.LGTM_DIR}}/profile.md; else echo "  Not found"; fi
 
 
   # ─── Debugging ────────────────────────────────────────────────────────

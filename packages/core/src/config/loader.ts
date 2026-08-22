@@ -99,7 +99,7 @@ export function saveBootstrap(config: BootstrapConfig): void {
  * - Farm mode: ~/.lgtm-farm/<repo-name>/ (or custom farmPath)
  * - Repo mode: <repoRoot>/.lgtm/
  */
-export function resolveYakDir(
+export function resolveLgtmDir(
   config: BootstrapConfig,
   repoRoot: string
 ): string {
@@ -162,7 +162,7 @@ export function loadConfig(): LGTMConfig {
   const repoOverride = loadRepoOverride(repoRoot);
 
   // Load profile (has AI preference from onboarding)
-  const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+  const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
   const profile = loadProfile(lgtmDir);
 
   // Merge: defaults ← profile ← repo override

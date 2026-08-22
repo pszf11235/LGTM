@@ -42,7 +42,7 @@ packages/
 bun test                    # all tests
 bun test path/to/file       # specific file
 task check                  # lint + test + build
-task slaughter              # clean slate for testing
+task reset                 # clean slate for testing
 ```
 
 ## Commit Style

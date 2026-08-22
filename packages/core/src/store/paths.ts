@@ -5,7 +5,7 @@
  * - "farm": central lgtm-farm (default: ~/.lgtm-farm/<repo-name>/)
  * - "repo": .lgtm/ in each repo root (committed to git, team-shareable)
  *
- * The resolveYakDir() function that handles mode logic lives in config/loader.ts
+ * The resolveLgtmDir() function that handles mode logic lives in config/loader.ts
  * (since it depends on BootstrapConfig). This file provides the sub-path helpers.
  */
 
@@ -16,7 +16,7 @@ import fs from "fs";
  * Ensure the lgtm directory structure exists.
  * Creates all subdirectories needed for operation.
  */
-export function ensureYakDirs(lgtmDir: string): void {
+export function ensureLgtmDirs(lgtmDir: string): void {
   const dirs = [
     lgtmDir,
     path.join(lgtmDir, "rules"),

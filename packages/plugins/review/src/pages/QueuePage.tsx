@@ -39,11 +39,11 @@ export function QueuePage({ onStatusHint, onOpenReview }: QueuePageProps) {
       // Dynamic import to avoid circular deps
       const { createOKFStore } = await import("@lgtm/core/store/okf.js");
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
-      const { loadBootstrap, resolveYakDir } = await import("@lgtm/core/config/loader.js");
+      const { loadBootstrap, resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
 
       const repoRoot = findGitRoot();
       const bootstrap = loadBootstrap();
-      const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+      const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
       const store = createOKFStore(lgtmDir);
 
       const date = new Date().toISOString().split("T")[0];
@@ -94,12 +94,12 @@ export function QueuePage({ onStatusHint, onOpenReview }: QueuePageProps) {
       const { createGitAdapter } = await import("@lgtm/core/utils/git.js");
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
       const { createOKFStore } = await import("@lgtm/core/store/okf.js");
-      const { loadBootstrap, resolveYakDir } = await import("@lgtm/core/config/loader.js");
+      const { loadBootstrap, resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
       const { loadCachedDiff } = await import("../commands/add.js");
 
       const repoRoot = findGitRoot();
       const bootstrap = loadBootstrap();
-      const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+      const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
       const store = createOKFStore(lgtmDir);
 
       let rawDiff = "";

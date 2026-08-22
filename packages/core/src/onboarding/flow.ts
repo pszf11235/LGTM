@@ -16,8 +16,8 @@ import {
   type OnboardingQuestion,
 } from "./questions.js";
 import { detectTechStack } from "./detect.js";
-import { saveBootstrap, getDefaultFarmPath, loadBootstrap, resolveYakDir, loadProfile } from "../config/loader.js";
-import { ensureYakDirs } from "../store/paths.js";
+import { saveBootstrap, getDefaultFarmPath, loadBootstrap, resolveLgtmDir, loadProfile } from "../config/loader.js";
+import { ensureLgtmDirs } from "../store/paths.js";
 import { createOKFStore } from "../store/okf.js";
 import { findGitRoot } from "../store/paths.js";
 
@@ -49,8 +49,8 @@ export async function runOnboarding(): Promise<{
 
   // Load existing answers (if resuming)
   const existingBootstrap = loadBootstrap();
-  const existingYakDir = resolveYakDir(existingBootstrap, repoRoot);
-  const existingProfile = loadProfile(existingYakDir);
+  const existingLgtmDir = resolveLgtmDir(existingBootstrap, repoRoot);
+  const existingProfile = loadProfile(existingLgtmDir);
 
   // Map existing profile back to answers (for resume)
   const answers: Record<string, string> = {};
@@ -108,8 +108,8 @@ export async function runOnboarding(): Promise<{
     };
     saveBootstrap(bootstrap);
 
-    const lgtmDir = resolveYakDir(bootstrap, repoRoot);
-    ensureYakDirs(lgtmDir);
+    const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
+    ensureLgtmDirs(lgtmDir);
 
     const detectedStack = detectTechStack(repoRoot);
 

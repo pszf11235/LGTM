@@ -14,7 +14,7 @@ import path from "path";
 import os from "os";
 import { isOnboardingComplete } from "./flow.js";
 import { createOKFStore } from "../store/okf.js";
-import { ensureYakDirs } from "../store/paths.js";
+import { ensureLgtmDirs } from "../store/paths.js";
 
 describe("isOnboardingComplete", () => {
   let tmpDir: string;

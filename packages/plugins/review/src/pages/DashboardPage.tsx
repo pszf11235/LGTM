@@ -32,7 +32,7 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
       const { collectAttentionItems, loadDismissed, filterDismissed } = await import("../domain/attention.js");
       const { createOKFStore } = await import("@lgtm/core/store/okf.js");
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
-      const { loadBootstrap, resolveYakDir } = await import("@lgtm/core/config/loader.js");
+      const { loadBootstrap, resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
 
       const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
       if (!token) {
@@ -43,7 +43,7 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
 
       const repoRoot = findGitRoot();
       const bootstrap = loadBootstrap();
-      const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+      const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
       const store = createOKFStore(lgtmDir);
 
       const allItems = await collectAttentionItems(store, token);
@@ -84,11 +84,11 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
       const { dismissItem } = await import("../domain/attention.js");
       const { createOKFStore } = await import("@lgtm/core/store/okf.js");
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
-      const { loadBootstrap, resolveYakDir } = await import("@lgtm/core/config/loader.js");
+      const { loadBootstrap, resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
 
       const repoRoot = findGitRoot();
       const bootstrap = loadBootstrap();
-      const lgtmDir = resolveYakDir(bootstrap, repoRoot);
+      const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
       const store = createOKFStore(lgtmDir);
 
       await dismissItem(store, item.id);

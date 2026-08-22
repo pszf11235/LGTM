@@ -1,7 +1,7 @@
 /**
  * @lgtm/plugin-review
  *
- * PR Review Harness plugin for Yak.
+ * PR Review Harness plugin for LGTM.
  * Provides structured code review workflow with rules, grouping, and TUI.
  */
 

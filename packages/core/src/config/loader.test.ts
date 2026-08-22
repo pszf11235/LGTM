@@ -11,20 +11,20 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { loadProfile, resolveYakDir, getDefaultConfig } from "./loader.js";
+import { loadProfile, resolveLgtmDir, getDefaultConfig } from "./loader.js";
 import type { BootstrapConfig } from "./loader.js";
 import { createOKFStore } from "../store/okf.js";
 
-describe("resolveYakDir", () => {
+describe("resolveLgtmDir", () => {
   test("repo mode returns .lgtm in repo root", () => {
     const config: BootstrapConfig = { storageMode: "repo" };
-    const result = resolveYakDir(config, "/home/user/myproject");
+    const result = resolveLgtmDir(config, "/home/user/myproject");
     expect(result).toBe("/home/user/myproject/.lgtm");
   });
 
   test("farm mode returns ~/.lgtm-farm/<repo-name>", () => {
     const config: BootstrapConfig = { storageMode: "farm" };
-    const result = resolveYakDir(config, "/home/user/myproject");
+    const result = resolveLgtmDir(config, "/home/user/myproject");
     expect(result).toBe(path.join(os.homedir(), ".lgtm-farm", "myproject"));
   });
 
@@ -33,7 +33,7 @@ describe("resolveYakDir", () => {
       storageMode: "farm",
       farmPath: "/custom/lgtm-farm",
     };
-    const result = resolveYakDir(config, "/home/user/myproject");
+    const result = resolveLgtmDir(config, "/home/user/myproject");
     expect(result).toBe("/custom/lgtm-farm/myproject");
   });
 });

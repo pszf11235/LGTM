@@ -1,18 +1,18 @@
 # 👍 LGTM — Looks Good To Me
 
-> A personal dev productivity platform with plugins. The tool that eliminates lgtm shaving.
+> A personal dev productivity platform with plugins. Structured code review that scales with AI-generated PRs.
 
-## What Is Yak?
+## What Is LGTM?
 
-Yak is a **CLI + TUI platform** for developer productivity — a single tool with an extensible plugin system that grows with your workflow. Instead of cobbling together 10 different tools, you have one coherent system that shares context, rules, and intelligence across everything you do.
+LGTM is a **CLI + TUI platform** for developer productivity — a single tool with an extensible plugin system that grows with your workflow. Instead of cobbling together 10 different tools, you have one coherent system that shares context, rules, and intelligence across everything you do.
 
-## Why "Yak"?
+## Why "LGTM"?
 
-**Yak shaving** = the endless chain of prerequisite tasks before you can do what you actually want. LGTM is the tool that breaks that chain.
+Every developer knows the "Looks Good To Me" comment — often given without real review. LGTM is the tool that makes that review actually meaningful: structured, persistent, and intelligent.
 
 ```
-Without Yak:  "I need to review 5 PRs" → open GitHub → context switch × 5 → forget what PR #2 did → lgtm shave
-With Yak:     "lgtm review add 101-105" → structured review → rules accumulate → less lgtm shaving over time
+Without LGTM: "I need to review 5 PRs" → open GitHub → context switch × 5 → forget what PR #2 did → rubber-stamp
+With LGTM:    "lgtm review add 101-105" → structured review → rules accumulate → consistently high quality
 ```
 
 ## Architecture: Core + Plugins
