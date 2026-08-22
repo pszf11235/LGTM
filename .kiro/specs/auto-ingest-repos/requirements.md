@@ -89,6 +89,7 @@ The ingest can be triggered at any time (not just first-run). It always reflects
 
 ## Non-Functional Requirements
 
+- **Storage format**: All persisted data uses OKF (YAML frontmatter + markdown body) — the registry, watch list, and any scan results are `.md` files that are human-readable and parseable by the existing OKF store.
 - **Always triggerable**: Can be run at any point, not gated behind first-run or onboarding
 - **Performance**: Scan should complete within 10s for typical developer machines (~100 repos)
 - **Privacy**: Never sends repo paths or names to any remote service

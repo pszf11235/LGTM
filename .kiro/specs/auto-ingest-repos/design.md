@@ -135,6 +135,66 @@ await addToWatch(owner, repo);
 
 This means `lgtm review watch status` and `lgtm review report` immediately include them.
 
+## Storage Format (OKF)
+
+All data is stored in OKF format (YAML frontmatter + markdown body) — human-readable and git-friendly.
+
+### Registry (`~/.lgtm-registry.md`)
+
+```markdown
+---
+type: lgtm/registry
+lastUpdated: "2026-08-22T10:30:00Z"
+lastScan: "2026-08-22T10:30:00Z"
+repos:
+  - path: /Users/pascal/projects/frontend-app
+    name: frontend-app
+    remote: https://github.com/org/frontend-app.git
+    owner: org
+    platform: github
+    status: active
+    lastCommitDate: "2026-08-20T14:22:00Z"
+    language: typescript
+    addedAt: "2026-08-15T09:00:00Z"
+  - path: /Users/pascal/projects/old-thing
+    name: old-thing
+    status: denied
+    addedAt: "2026-08-15T09:00:00Z"
+  - path: /Users/pascal/work/deleted-repo
+    name: deleted-repo
+    status: removed
+    removedAt: "2026-08-22T10:30:00Z"
+---
+
+# LGTM Registry
+
+Tracks 15 repos on this machine. Last scan: 2026-08-22.
+
+- **frontend-app** — `~/projects/frontend-app` (👁 watching)
+- **backend-api** — `~/projects/backend-api` (👁 watching)
+- **old-thing** — `~/projects/old-thing` (skipped)
+```
+
+### Watch list (`.lgtm/watch.md` or `~/.lgtm-farm/watch.md`)
+
+Already uses OKF format (existing):
+```markdown
+---
+type: lgtm/watch
+repos:
+  - owner: org
+    repo: frontend-app
+    addedAt: "2026-08-15T09:00:00Z"
+  - owner: org
+    repo: backend-api
+    addedAt: "2026-08-16T11:00:00Z"
+---
+
+# Watched Repos
+
+2 repos being monitored for new PRs.
+```
+
 ## Configuration
 
 ```yaml

@@ -63,6 +63,7 @@ Enable reviewing PRs across multiple repositories in a single LGTM session. Inst
 
 ## Non-Functional Requirements
 
+- **Storage**: All data persisted in OKF format (YAML frontmatter + markdown body) — same as existing LGTM storage. Global rules, queue sessions, and cross-repo config all use `.md` files readable by humans and parseable by tools.
 - **Performance**: Adding a cross-repo PR should not add more than 2s latency (GitHub API call)
 - **Offline**: Cross-repo features that require GitHub should degrade gracefully (show "offline" status)
 - **Backward compatible**: All existing single-repo flows must continue working unchanged

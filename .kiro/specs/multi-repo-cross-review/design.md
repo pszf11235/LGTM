@@ -47,36 +47,77 @@ Extend the existing `overlap.ts` engine:
   - Configurable via `.lgtmrc.yaml` → `review.crossRepoPatterns`
 - When file `shared-types/user.ts` changes in repo A, and repo B imports from `@shared/types`, flag it
 
-### 3. Global Rules Storage
+### 3. Global Rules Storage (OKF format)
+
+All storage uses OKF (Open Knowledge Format): YAML frontmatter + markdown body.
 
 ```
 ~/.lgtm-farm/
   rules/
-    global-rule-1.md    ← applies to all repos
+    global-rule-1.md    ← OKF: frontmatter has id, severity, pattern; body has description
     global-rule-2.md
+```
+
+Example global rule (`~/.lgtm-farm/rules/no-secrets.md`):
+```markdown
+---
+id: r-global-nosecrets
+description: No hardcoded secrets
+category: security
+severity: error
+enforcement: regex
+pattern: '(api_key|secret)\s*=\s*"[^"]{8,}"'
+enabled: true
+---
+
+# No Hardcoded Secrets
+
+Applies across all repositories. API keys, tokens, and secrets must come from environment variables or a secrets manager.
 ```
 
 Rules engine loads both:
 ```ts
-const localRules = await engine.loadRules(lgtmDir);
-const globalRules = await engine.loadRules(globalRulesDir);
+const localRules = await engine.loadRules(lgtmDir);     // .lgtm/rules/*.md (OKF)
+const globalRules = await engine.loadRules(globalRulesDir); // ~/.lgtm-farm/rules/*.md (OKF)
 const merged = mergeRules(localRules, globalRules); // local wins on ID conflict
 ```
 
-### 4. Queue Schema Extension
+### 4. Queue Schema Extension (OKF format)
 
-Current `QueuedPR`:
-```ts
-interface QueuedPR {
-  number: number;
-  title: string;
-  filesChanged: string[];
-  source: "github" | "local";
-  // ... existing fields
-}
+The queue session is stored as OKF (same as today). The `repo` field is added to the frontmatter PR entries:
+
+Session file (`sessions/2026-08-22/index.md`):
+```markdown
+---
+date: "2026-08-22"
+prs:
+  - number: 42
+    title: Add user avatar
+    state: queued
+    repo: org/frontend
+    repoShort: frontend
+    filesChanged: [src/avatar.tsx, src/api/user.ts]
+    source: github
+  - number: 108
+    title: User API endpoint
+    state: queued
+    repo: org/backend
+    repoShort: backend
+    filesChanged: [routes/user.go, models/user.go]
+    source: github
+featureGroups:
+  - id: auth-feature
+    label: Authentication overhaul
+    prs: [42, 108]
+    sharedPaths: [types/user.ts]
+---
+
+# Review Session — 2026-08-22
+
+Cross-repo session spanning frontend, backend, shared-types.
 ```
 
-Extended:
+Current `QueuedPR` TypeScript interface extended:
 ```ts
 interface QueuedPR {
   // ... existing fields
