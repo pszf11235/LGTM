@@ -3,7 +3,9 @@
  *
  * Commands:
  *   lgtm discover             — show all registered repos
- *   lgtm discover --scan <dir> — scan for lgtm-enabled repos
+ *   lgtm discover --ingest    — scan machine for git repos, interactive picker
+ *   lgtm discover --ingest <dir> — scan specific directory
+ *   lgtm discover --scan <dir> — scan for lgtm-enabled repos (legacy)
  *   lgtm discover --prune     — remove stale entries
  */
 
@@ -20,9 +22,34 @@ export function registerDiscoverCommand(program: Command) {
   program
     .command("discover")
     .description("Manage the repo registry (list/scan/prune)")
+    .option("-i, --ingest [dir]", "Scan for git repos and interactively add to watch list")
     .option("-s, --scan <dir>", "Scan a directory for lgtm-enabled repos")
     .option("-p, --prune", "Remove repos that no longer exist on disk")
-    .action(async (opts: { scan?: string; prune?: boolean }) => {
+    .option("--new-only", "Only show repos that need a decision")
+    .option("--all", "Show all repos including previously denied")
+    .option("--recommended", "Auto-accept repos with recent activity")
+    .action(async (opts: {
+      ingest?: boolean | string;
+      scan?: string;
+      prune?: boolean;
+      newOnly?: boolean;
+      all?: boolean;
+      recommended?: boolean;
+    }) => {
+      // ── Ingest mode (new) ─────────────────────────────────────────────
+      if (opts.ingest !== undefined) {
+        const { runIngest } = await import("../../registry/ingest.js");
+        await runIngest({
+          scanDir: typeof opts.ingest === "string" ? opts.ingest : undefined,
+          newOnly: opts.newOnly,
+          all: opts.all,
+          recommended: opts.recommended,
+          pruneOnly: opts.prune,
+        });
+        return;
+      }
+
+      // ── Prune mode ────────────────────────────────────────────────────
       if (opts.prune) {
         const { removed, kept } = pruneRegistry();
         if (removed.length === 0) {
@@ -37,6 +64,7 @@ export function registerDiscoverCommand(program: Command) {
         return;
       }
 
+      // ── Scan mode (legacy — scans for .lgtm/ directories) ─────────────
       if (opts.scan) {
         console.log(chalk.gray(`\n  Scanning ${opts.scan} for .lgtm/ directories...\n`));
         const found = discoverRepos(opts.scan);
@@ -56,11 +84,11 @@ export function registerDiscoverCommand(program: Command) {
         return;
       }
 
-      // Default: list registered repos
+      // ── Default: list registered repos ────────────────────────────────
       const repos = getRegisteredRepos();
       if (repos.length === 0) {
-        console.log(chalk.gray("\n  No repos registered yet. LGTM auto-registers on first use.\n"));
-        console.log(chalk.gray(`  Or scan: ${chalk.cyan("lgtm discover --scan ~/projects")}\n`));
+        console.log(chalk.gray("\n  No repos registered yet.\n"));
+        console.log(chalk.gray(`  Run ${chalk.cyan("lgtm discover --ingest")} to scan your machine for repos.\n`));
         return;
       }
 
