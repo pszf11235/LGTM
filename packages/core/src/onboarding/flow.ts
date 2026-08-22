@@ -124,6 +124,7 @@ export async function runOnboarding(): Promise<{
     const detectedStack = detectTechStack(repoRoot);
 
     const aiEnabled = answers.aiProvider !== "none" && !!answers.aiProvider;
+    const aiFallback = answers._aiFallback ? JSON.parse(answers._aiFallback) : undefined;
     const profile: ProjectProfile = {
       project: projectName,
       goal: answers.goal ?? "",
@@ -137,6 +138,7 @@ export async function runOnboarding(): Promise<{
         enabled: aiEnabled,
         ...(aiEnabled && answers.aiProvider ? { provider: answers.aiProvider as "openai" | "anthropic" | "ollama" } : {}),
         ...(aiEnabled && answers.aiModel ? { model: answers.aiModel } : {}),
+        ...(aiFallback ? { fallback: aiFallback } : {}),
       },
       createdAt: existingProfile?.createdAt ?? new Date().toISOString(),
     };
@@ -156,28 +158,20 @@ export async function runOnboarding(): Promise<{
       // ── Before AI questions: show autodiscovery results ──────────────
       if (q.id === "aiProvider") {
         const discovery = await aiDiscoveryPromise;
+        const available = discovery?.providers.filter((p) => p.available) ?? [];
 
-        if (discovery?.hasAI && discovery.recommended) {
-          const rec = discovery.recommended;
+        if (available.length === 1) {
+          // Single provider found — auto-configure it
+          const rec = available[0];
           console.log(`  ${chalk.green("✓")} AI auto-detected: ${chalk.cyan(rec.name)} ${chalk.gray(`(${rec.detectedVia})`)}`);
           if (rec.detail) {
             console.log(chalk.gray(`    ${rec.detail}`));
           }
-          if (discovery.providers.filter((p) => p.available).length > 1) {
-            const others = discovery.providers
-              .filter((p) => p.id !== rec.id && p.available)
-              .map((p) => p.name);
-            if (others.length > 0) {
-              console.log(chalk.gray(`    Also available: ${others.join(", ")}`));
-            }
-          }
           console.log();
 
-          // Auto-configure: set the discovered provider as the answer and skip the question
           answers.aiProvider = rec.id;
           answers.aiModel = rec.defaultModel;
           if (rec.apiKey) {
-            // Key already discovered — save it
             try {
               const { saveToken } = await import("../auth/github-oauth.js");
               const credId = rec.id === "anthropic" ? "claude" : rec.id;
@@ -186,6 +180,52 @@ export async function runOnboarding(): Promise<{
           }
           await saveProgress();
           continue; // Skip the aiProvider select question
+
+        } else if (available.length > 1) {
+          // Multiple providers found — let user pick priority order
+          console.log(`  ${chalk.green("✓")} Multiple AI providers detected:\n`);
+          for (const p of available) {
+            console.log(`    ${chalk.cyan("•")} ${chalk.bold(p.name)} ${chalk.gray(`— ${p.detectedVia}`)}`);
+            if (p.detail) console.log(chalk.gray(`      ${p.detail}`));
+          }
+          console.log();
+
+          // Let the user rank them
+          const ranked = await pickProviderPriority(available);
+
+          // Primary
+          const primary = ranked[0];
+          answers.aiProvider = primary.id;
+          answers.aiModel = primary.defaultModel;
+          if (primary.apiKey) {
+            try {
+              const { saveToken } = await import("../auth/github-oauth.js");
+              const credId = primary.id === "anthropic" ? "claude" : primary.id;
+              saveToken(credId, primary.apiKey);
+            } catch { /* non-critical */ }
+          }
+
+          // Save all provider keys
+          for (const p of ranked.slice(1)) {
+            if (p.apiKey) {
+              try {
+                const { saveToken } = await import("../auth/github-oauth.js");
+                const credId = p.id === "anthropic" ? "claude" : p.id;
+                saveToken(credId, p.apiKey);
+              } catch { /* non-critical */ }
+            }
+          }
+
+          // Store fallback chain in answers for profile serialization
+          if (ranked.length > 1) {
+            answers._aiFallback = JSON.stringify(
+              ranked.slice(1).map((p) => ({ provider: p.id, model: p.defaultModel, ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}) }))
+            );
+          }
+
+          await saveProgress();
+          continue; // Skip the aiProvider select question
+
         } else if (discovery && discovery.providers.length > 0) {
           // Found providers but none available — show info but still ask
           const names = discovery.providers.map((p) => `${p.name} (${p.detail ?? "not reachable"})`);
@@ -261,6 +301,60 @@ export async function runOnboarding(): Promise<{
   } finally {
     rl.close();
   }
+}
+
+/**
+ * Let user pick priority order for multiple detected AI providers.
+ * Uses interactive numbered selection: pick 1st, 2nd, 3rd, etc.
+ */
+async function pickProviderPriority(
+  providers: Array<{ id: string; name: string; defaultModel: string; detectedVia: string; apiKey?: string; baseUrl?: string; detail?: string }>
+): Promise<typeof providers> {
+  const remaining = [...providers];
+  const ranked: typeof providers = [];
+
+  for (let rank = 1; rank <= providers.length; rank++) {
+    if (remaining.length === 1) {
+      // Last one — auto-assign
+      ranked.push(remaining[0]);
+      break;
+    }
+
+    const ordinal = rank === 1 ? "Primary" : rank === 2 ? "Fallback" : `${rank}${rank === 3 ? "rd" : "th"} choice`;
+    const options = remaining.map((p) => ({
+      value: p.id,
+      label: p.name,
+      description: p.defaultModel,
+    }));
+
+    const result = await selectWithArrows(
+      `${ordinal} provider?`,
+      options,
+      0
+    );
+
+    const picked = remaining.find((p) => p.id === result);
+    if (picked) {
+      ranked.push(picked);
+      remaining.splice(remaining.indexOf(picked), 1);
+      const icon = rank === 1 ? "1️⃣" : rank === 2 ? "2️⃣" : "3️⃣";
+      // Confirmation is shown by selectWithArrows
+    } else {
+      // Skipped — add remaining in default order
+      ranked.push(...remaining);
+      break;
+    }
+  }
+
+  // Show final priority
+  console.log(chalk.gray("  Priority order:"));
+  ranked.forEach((p, i) => {
+    const label = i === 0 ? chalk.green("primary") : chalk.gray(`fallback ${i}`);
+    console.log(`    ${i + 1}. ${chalk.cyan(p.name)} ${chalk.gray(`(${p.defaultModel})`)} — ${label}`);
+  });
+  console.log();
+
+  return ranked;
 }
 
 /**

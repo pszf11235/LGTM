@@ -133,6 +133,8 @@ export interface ProjectProfile {
     provider?: "openai" | "anthropic" | "ollama";
     model?: string;
     baseUrl?: string;
+    /** Fallback providers in priority order (tried if primary fails) */
+    fallback?: Array<{ provider: "openai" | "anthropic" | "ollama"; model?: string; baseUrl?: string }>;
   };
   createdAt: string;
 }
@@ -156,6 +158,8 @@ export interface LGTMConfig {
     model?: string;
     baseUrl?: string;
     apiKey?: string;
+    /** Fallback providers in priority order (tried if primary fails) */
+    fallback?: Array<{ provider: "openai" | "anthropic" | "ollama"; model?: string; baseUrl?: string }>;
   };
 }
 
