@@ -83,39 +83,51 @@ export interface AIDiscoveryResult {
  * Auto-discover all available AI/LLM providers by scanning the system.
  * Checks 15+ tools and credential locations.
  *
+ * @param debug - Optional debug logger (prints verbose info about each check)
  * @returns Discovery result with all found providers
  */
-export async function discoverAIProviders(): Promise<AIDiscoveryResult> {
+export async function discoverAIProviders(debug?: (msg: string) => void): Promise<AIDiscoveryResult> {
+  const log = debug ?? (() => {});
   const providers: DetectedProvider[] = [];
   const toolsDetected: string[] = [];
 
   // ── 1. Environment Variables (fastest, most reliable) ──────────────────
-  checkEnvVars(providers, toolsDetected);
+  log("── Checking environment variables...");
+  checkEnvVars(providers, toolsDetected, log);
 
   // ── 2. Saved LGTM Credentials ─────────────────────────────────────────
-  checkLGTMCredentials(providers, toolsDetected);
+  log("── Checking ~/.lgtm-credentials...");
+  checkLGTMCredentials(providers, toolsDetected, log);
 
   // ── 3. Claude Code CLI (~/.claude/) ────────────────────────────────────
-  await checkClaudeCode(providers, toolsDetected);
+  log("── Checking Claude Code CLI (~/.claude/)...");
+  await checkClaudeCode(providers, toolsDetected, log);
 
   // ── 4. Continue.dev (~/.continue/config.json) ──────────────────────────
-  checkContinueDev(providers, toolsDetected);
+  log("── Checking Continue.dev config...");
+  checkContinueDev(providers, toolsDetected, log);
 
   // ── 5. Aider (~/.aider.conf.yml) ──────────────────────────────────────
-  checkAider(providers, toolsDetected);
+  log("── Checking Aider config...");
+  checkAider(providers, toolsDetected, log);
 
   // ── 6. Cursor IDE config ───────────────────────────────────────────────
-  checkCursor(providers, toolsDetected);
+  log("── Checking Cursor IDE...");
+  checkCursor(providers, toolsDetected, log);
 
   // ── 7. Local LLM servers ───────────────────────────────────────────────
-  await checkOllama(providers, toolsDetected);
-  await checkLMStudio(providers, toolsDetected);
+  log("── Checking Ollama (localhost:11434)...");
+  await checkOllama(providers, toolsDetected, log);
+  log("── Checking LM Studio (localhost:1234)...");
+  await checkLMStudio(providers, toolsDetected, log);
 
   // ── 8. GitHub Copilot token ────────────────────────────────────────────
-  checkGitHubCopilot(providers, toolsDetected);
+  log("── Checking GitHub Copilot...");
+  checkGitHubCopilot(providers, toolsDetected, log);
 
   // ── 9. Common config file locations ────────────────────────────────────
-  checkConfigFiles(providers, toolsDetected);
+  log("── Checking common config files...");
+  checkConfigFiles(providers, toolsDetected, log);
 
   // ── Deduplicate (prefer earlier/more reliable source) ──────────────────
   const deduplicated = deduplicateProviders(providers);
@@ -142,27 +154,49 @@ export async function discoverAIProviders(): Promise<AIDiscoveryResult> {
 
 // ─── Detection Sources ──────────────────────────────────────────────────────
 
-function checkEnvVars(providers: DetectedProvider[], tools: string[]) {
+function checkEnvVars(providers: DetectedProvider[], tools: string[], log: (msg: string) => void) {
   // OpenAI
   const openaiKey = process.env.OPENAI_API_KEY;
   if (openaiKey) {
+    log("  ✓ OPENAI_API_KEY found (${openaiKey.length} chars)");
     providers.push({
       id: "openai", name: "OpenAI", detectedVia: "OPENAI_API_KEY env var",
       source: "env", available: true, keyHint: maskKey(openaiKey), apiKey: openaiKey,
       defaultModel: "gpt-4o-mini",
     });
     tools.push("OpenAI (env)");
+  } else {
+    log("  ✗ OPENAI_API_KEY not set");
   }
 
   // Anthropic
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) {
+    log(`  ✓ ANTHROPIC_API_KEY found (${anthropicKey.length} chars)`);
     providers.push({
       id: "anthropic", name: "Anthropic (Claude)", detectedVia: "ANTHROPIC_API_KEY env var",
       source: "env", available: true, keyHint: maskKey(anthropicKey), apiKey: anthropicKey,
       defaultModel: "claude-sonnet-4-20250514",
     });
     tools.push("Anthropic (env)");
+  } else {
+    log("  ✗ ANTHROPIC_API_KEY not set");
+  }
+
+  // Codex (uses OPENAI_API_KEY — also check CODEX_API_KEY and CODEX_OPENAI_API_KEY)
+  const codexKey = process.env.CODEX_API_KEY ?? process.env.CODEX_OPENAI_API_KEY;
+  if (codexKey) {
+    log(`  ✓ CODEX_API_KEY found (${codexKey.length} chars)`);
+    if (!providers.some((p) => p.id === "openai")) {
+      providers.push({
+        id: "openai", name: "OpenAI (via Codex)", detectedVia: "CODEX_API_KEY env var",
+        source: "env", available: true, keyHint: maskKey(codexKey), apiKey: codexKey,
+        defaultModel: "gpt-4o-mini",
+      });
+    }
+    tools.push("Codex CLI");
+  } else {
+    log("  ✗ CODEX_API_KEY / CODEX_OPENAI_API_KEY not set");
   }
 
   // Gemini
@@ -189,23 +223,9 @@ function checkEnvVars(providers: DetectedProvider[], tools: string[]) {
     tools.push("OpenRouter (env)");
   }
 
-  // Codex (uses OPENAI_API_KEY — note if CODEX_API_KEY also exists)
-  const codexKey = process.env.CODEX_API_KEY;
-  if (codexKey) {
-    tools.push("Codex CLI");
-    // Register Codex as a proper provider if the key is different from OPENAI_API_KEY
-    // (or if OPENAI_API_KEY is not set at all)
-    if (codexKey !== openaiKey) {
-      providers.push({
-        id: "openai", name: "Codex CLI (OpenAI)", detectedVia: "CODEX_API_KEY env var",
-        source: "env", available: true, keyHint: maskKey(codexKey), apiKey: codexKey,
-        defaultModel: "gpt-4o-mini",
-      });
-    }
-  }
 }
 
-function checkLGTMCredentials(providers: DetectedProvider[], tools: string[]) {
+function checkLGTMCredentials(providers: DetectedProvider[], tools: string[], log: (msg: string) => void) {
   try {
     const credFile = path.join(os.homedir(), ".lgtm-credentials");
     const raw = fs.readFileSync(credFile, "utf-8");
@@ -232,22 +252,27 @@ function checkLGTMCredentials(providers: DetectedProvider[], tools: string[]) {
   } catch { /* no credentials file */ }
 }
 
-async function checkClaudeCode(providers: DetectedProvider[], tools: string[]) {
+async function checkClaudeCode(providers: DetectedProvider[], tools: string[], log: (msg: string) => void) {
   // Claude Code stores credentials in ~/.claude/ (after `claude login`)
   // The credential is OAuth-based and stored in a credentials file
   // Use process.env.HOME as primary (respects runtime overrides), fallback to os.homedir()
   const homeDir = process.env.HOME || os.homedir();
   const claudeDir = path.join(homeDir, ".claude");
+  log(`  HOME=${homeDir}`);
+  log(`  claudeDir=${claudeDir}`);
+  log(`  claudeDir exists: ${fs.existsSync(claudeDir)}`);
 
   // Check if claude CLI exists
   try {
     const { execSync } = require("child_process");
-    execSync("which claude", { stdio: "ignore" });
+    const whichResult = execSync("which claude", { encoding: "utf-8" }).trim();
+    log(`  ✓ claude CLI found: ${whichResult}`);
     tools.push("Claude Code CLI");
-  } catch { /* claude not installed */ }
+  } catch {
+    log("  ✗ claude CLI not on PATH");
+  }
 
   // Check for Claude Code credentials regardless of whether CLI binary is on PATH
-  // (credential files may exist from previous installations or different PATH configs)
   const credPaths = [
     path.join(claudeDir, "credentials.json"),
     path.join(claudeDir, ".credentials"),
@@ -257,13 +282,23 @@ async function checkClaudeCode(providers: DetectedProvider[], tools: string[]) {
     path.join(claudeDir, "settings.local.json"),
   ];
 
+  log(`  Checking ${credPaths.length} credential paths:`);
   for (const credPath of credPaths) {
+    const exists = fs.existsSync(credPath);
+    log(`    ${exists ? "✓" : "✗"} ${credPath}`);
+    if (!exists) continue;
+
     try {
       const raw = fs.readFileSync(credPath, "utf-8");
+      log(`    → file size: ${raw.length} bytes`);
       const data = JSON.parse(raw);
+      const keys = Object.keys(data);
+      log(`    → top-level keys: ${keys.join(", ")}`);
+
       // Parse multiple JSON structures for credential extraction
       const key = data.apiKey ?? data.claudeApiKey ?? data.token ?? data.access_token ?? data.credentials?.apiKey;
       if (key) {
+        log(`    → ✓ Found key via: ${data.apiKey ? "apiKey" : data.claudeApiKey ? "claudeApiKey" : data.token ? "token" : data.access_token ? "access_token" : "credentials.apiKey"}`);
         if (!providers.some((p) => p.id === "anthropic")) {
           providers.push({
             id: "anthropic", name: "Anthropic (Claude Code)", detectedVia: "Claude Code CLI credentials",
@@ -273,18 +308,25 @@ async function checkClaudeCode(providers: DetectedProvider[], tools: string[]) {
           });
         }
         break;
+      } else {
+        log(`    → ✗ No recognized key field in JSON`);
       }
-    } catch { /* not this path */ }
+    } catch (err) {
+      log(`    → ✗ Parse error: ${(err as Error).message}`);
+    }
   }
 
-  // Also check if ANTHROPIC_CONFIG_DIR is set (Claude Code respects this)
+  // Also check if ANTHROPIC_CONFIG_DIR is set
   const configDir = process.env.ANTHROPIC_CONFIG_DIR ?? claudeDir;
+  log(`  ANTHROPIC_CONFIG_DIR=${process.env.ANTHROPIC_CONFIG_DIR ?? "(not set)"}`);
   if (configDir !== claudeDir && !providers.some((p) => p.id === "anthropic")) {
+    log(`  Checking configDir: ${configDir}`);
     try {
       const settingsRaw = fs.readFileSync(path.join(configDir, "settings.json"), "utf-8");
       const settings = JSON.parse(settingsRaw);
       const key = settings.apiKey ?? settings.claudeApiKey ?? settings.token ?? settings.access_token ?? settings.credentials?.apiKey;
       if (key) {
+        log(`  ✓ Found key in ${configDir}/settings.json`);
         providers.push({
           id: "anthropic", name: "Anthropic", detectedVia: "Claude Code config dir",
           source: "cli-config", available: true, keyHint: maskKey(key), apiKey: key,
@@ -299,6 +341,7 @@ async function checkClaudeCode(providers: DetectedProvider[], tools: string[]) {
         const cred = JSON.parse(credRaw);
         const key = cred.apiKey ?? cred.claudeApiKey ?? cred.token ?? cred.access_token ?? cred.credentials?.apiKey;
         if (key) {
+          log(`  ✓ Found key in ${configDir}/credentials.json`);
           providers.push({
             id: "anthropic", name: "Anthropic", detectedVia: "Claude Code config dir",
             source: "cli-config", available: true, keyHint: maskKey(key), apiKey: key,
@@ -308,9 +351,13 @@ async function checkClaudeCode(providers: DetectedProvider[], tools: string[]) {
       } catch { /* no credentials */ }
     }
   }
+
+  if (!providers.some((p) => p.id === "anthropic")) {
+    log("  ✗ No Anthropic/Claude credentials found via any path");
+  }
 }
 
-function checkContinueDev(providers: DetectedProvider[], tools: string[]) {
+function checkContinueDev(providers: DetectedProvider[], tools: string[], log: (msg: string) => void) {
   // Continue.dev stores config at ~/.continue/config.json
   const configPaths = [
     path.join(os.homedir(), ".continue", "config.json"),
@@ -358,7 +405,7 @@ function checkContinueDev(providers: DetectedProvider[], tools: string[]) {
   }
 }
 
-function checkAider(providers: DetectedProvider[], tools: string[]) {
+function checkAider(providers: DetectedProvider[], tools: string[], log: (msg: string) => void) {
   // Aider stores config in ~/.aider.conf.yml
   const aiderPaths = [
     path.join(os.homedir(), ".aider.conf.yml"),
@@ -402,7 +449,7 @@ function checkAider(providers: DetectedProvider[], tools: string[]) {
   }
 }
 
-function checkCursor(providers: DetectedProvider[], tools: string[]) {
+function checkCursor(providers: DetectedProvider[], tools: string[], log: (msg: string) => void) {
   // Cursor stores API keys in its config directory
   // macOS: ~/Library/Application Support/Cursor/
   // Linux: ~/.config/Cursor/ or ~/.cursor/
@@ -431,7 +478,7 @@ function checkCursor(providers: DetectedProvider[], tools: string[]) {
   }
 }
 
-async function checkOllama(providers: DetectedProvider[], tools: string[]) {
+async function checkOllama(providers: DetectedProvider[], tools: string[], log: (msg: string) => void) {
   try {
     const res = await fetch("http://localhost:11434/api/tags", {
       signal: AbortSignal.timeout(2000),
@@ -469,7 +516,7 @@ async function checkOllama(providers: DetectedProvider[], tools: string[]) {
   } catch { /* not installed */ }
 }
 
-async function checkLMStudio(providers: DetectedProvider[], tools: string[]) {
+async function checkLMStudio(providers: DetectedProvider[], tools: string[], log: (msg: string) => void) {
   // LM Studio serves OpenAI-compatible API on localhost:1234
   try {
     const res = await fetch("http://localhost:1234/v1/models", {
@@ -492,7 +539,7 @@ async function checkLMStudio(providers: DetectedProvider[], tools: string[]) {
   } catch { /* not running */ }
 }
 
-function checkGitHubCopilot(providers: DetectedProvider[], tools: string[]) {
+function checkGitHubCopilot(providers: DetectedProvider[], tools: string[], log: (msg: string) => void) {
   // GitHub Copilot token is stored by gh extension
   // Can't easily extract it, but we can detect if copilot is configured
   try {
@@ -512,7 +559,7 @@ function checkGitHubCopilot(providers: DetectedProvider[], tools: string[]) {
   } catch { /* no gh config */ }
 }
 
-function checkConfigFiles(providers: DetectedProvider[], tools: string[]) {
+function checkConfigFiles(providers: DetectedProvider[], tools: string[], log: (msg: string) => void) {
   // Check common API key file locations
   const locations: Array<{ path: string; provider: DetectedProvider["id"]; prefix?: string; name: string }> = [
     { path: path.join(os.homedir(), ".config", "openai", "api_key"), provider: "openai", prefix: "sk-", name: "OpenAI config file" },

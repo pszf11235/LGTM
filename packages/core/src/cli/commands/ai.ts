@@ -196,6 +196,46 @@ export function registerAICommands(program: Command, ctx: LGTMContext) {
         console.log(chalk.red(`\n  Failed: ${(err as Error).message}\n`));
       }
     });
+
+  // ─── lgtm ai discover ──────────────────────────────────────────────────
+  ai
+    .command("discover")
+    .description("Run AI provider autodiscovery with debug output")
+    .action(async () => {
+      const { discoverAIProviders } = await import("../../onboarding/detect-ai.js");
+
+      console.log(chalk.bold("\n👍 AI Provider Discovery (debug mode)\n"));
+
+      const result = await discoverAIProviders((msg) => {
+        console.log(chalk.gray(`  ${msg}`));
+      });
+
+      console.log();
+      console.log(chalk.bold("  ── Results ──"));
+      console.log(`  ${result.summary}`);
+      console.log();
+
+      if (result.providers.length > 0) {
+        console.log(chalk.bold("  Providers found:"));
+        for (const p of result.providers) {
+          const avail = p.available ? chalk.green("✓ available") : chalk.yellow("✗ not reachable");
+          console.log(`    ${chalk.cyan(p.name)} — ${p.detectedVia} [${avail}]`);
+          if (p.keyHint) console.log(chalk.gray(`      Key: ${p.keyHint}`));
+          console.log(chalk.gray(`      Model: ${p.defaultModel}`));
+          if (p.detail) console.log(chalk.gray(`      Detail: ${p.detail}`));
+        }
+      } else {
+        console.log(chalk.yellow("  No providers found."));
+      }
+
+      if (result.toolsDetected.length > 0) {
+        console.log(chalk.gray(`\n  Tools detected: ${result.toolsDetected.join(", ")}`));
+      }
+
+      console.log(chalk.gray(`\n  To share this output for debugging, run:`));
+      console.log(chalk.cyan(`    lgtm ai discover 2>&1 | pbcopy`));
+      console.log(chalk.gray(`  (or pipe to a file: lgtm ai discover > ai-debug.txt)\n`));
+    });
 }
 
 function getEnvKeyName(provider?: string): string | null {
