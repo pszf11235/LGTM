@@ -17,15 +17,19 @@ jobs:
         include:
           - os: ubuntu-latest
             target: bun-linux-x64
+            short-target: linux-x64
             artifact: lgtm-linux-x64
           - os: ubuntu-latest
             target: bun-linux-arm64
+            short-target: linux-arm64
             artifact: lgtm-linux-arm64
           - os: macos-latest
             target: bun-darwin-arm64
+            short-target: darwin-arm64
             artifact: lgtm-darwin-arm64
           - os: macos-13
             target: bun-darwin-x64
+            short-target: darwin-x64
             artifact: lgtm-darwin-x64
 
     steps:
@@ -41,7 +45,7 @@ jobs:
       - name: Build binary
         run: |
           mkdir -p dist
-          bun build packages/core/src/index.ts --compile --target=${{ matrix.target }} --outfile dist/${{ matrix.artifact }}
+          bun scripts/build.ts --target ${{ matrix.short-target }} --outfile dist/${{ matrix.artifact }}
 
       - name: Generate checksum
         run: |
