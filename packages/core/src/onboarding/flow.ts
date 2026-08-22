@@ -101,6 +101,16 @@ export async function runOnboarding(): Promise<{
     output: process.stdout,
   });
 
+  // ── Start AI autodiscovery in background (runs while user answers early questions) ──
+  const aiDiscoveryPromise = (async () => {
+    try {
+      const { discoverAIProviders } = await import("./detect-ai.js");
+      return await discoverAIProviders();
+    } catch {
+      return null;
+    }
+  })();
+
   // Helper: build and save current state
   const saveProgress = async () => {
     const bootstrap: BootstrapConfig = {
@@ -143,6 +153,66 @@ export async function runOnboarding(): Promise<{
 
   try {
     for (const q of questionsToAsk) {
+      // ── Before AI questions: show autodiscovery results ──────────────
+      if (q.id === "aiProvider") {
+        const discovery = await aiDiscoveryPromise;
+
+        if (discovery?.hasAI && discovery.recommended) {
+          const rec = discovery.recommended;
+          console.log(`  ${chalk.green("✓")} AI auto-detected: ${chalk.cyan(rec.name)} ${chalk.gray(`(${rec.detectedVia})`)}`);
+          if (rec.detail) {
+            console.log(chalk.gray(`    ${rec.detail}`));
+          }
+          if (discovery.providers.filter((p) => p.available).length > 1) {
+            const others = discovery.providers
+              .filter((p) => p.id !== rec.id && p.available)
+              .map((p) => p.name);
+            if (others.length > 0) {
+              console.log(chalk.gray(`    Also available: ${others.join(", ")}`));
+            }
+          }
+          console.log();
+
+          // Auto-configure: set the discovered provider as the answer and skip the question
+          answers.aiProvider = rec.id;
+          answers.aiModel = rec.defaultModel;
+          if (rec.apiKey) {
+            // Key already discovered — save it
+            try {
+              const { saveToken } = await import("../auth/github-oauth.js");
+              const credId = rec.id === "anthropic" ? "claude" : rec.id;
+              saveToken(credId, rec.apiKey);
+            } catch { /* non-critical */ }
+          }
+          await saveProgress();
+          continue; // Skip the aiProvider select question
+        } else if (discovery && discovery.providers.length > 0) {
+          // Found providers but none available — show info but still ask
+          const names = discovery.providers.map((p) => `${p.name} (${p.detail ?? "not reachable"})`);
+          console.log(chalk.yellow(`  ⚠ Found AI tools but none reachable:`));
+          for (const name of names) {
+            console.log(chalk.gray(`    • ${name}`));
+          }
+          console.log();
+        }
+        // If no discovery results, fall through to ask the question normally
+      }
+
+      // ── Skip aiModel/aiApiKey if autodiscovery already configured them ──
+      if (q.id === "aiModel" && answers.aiProvider && answers.aiModel && answers.aiProvider !== "none") {
+        console.log(`  ${chalk.green("✓")} Model: ${chalk.cyan(answers.aiModel)}`);
+        continue;
+      }
+      if (q.id === "aiApiKey" && answers.aiProvider && answers.aiProvider !== "none") {
+        // Check if we already have a key from discovery
+        const discovery = await aiDiscoveryPromise;
+        const found = discovery?.providers.find((p) => p.id === answers.aiProvider && p.apiKey);
+        if (found) {
+          console.log(`  ${chalk.green("✓")} API key: ${chalk.cyan(found.keyHint ?? "configured")} ${chalk.gray(`(${found.detectedVia})`)}`);
+          continue;
+        }
+      }
+
       // Show current value if re-running (editing mode)
       const currentValue = answers[q.id];
       const answer = await askQuestion(rl, q, currentValue, answers);
@@ -162,48 +232,13 @@ export async function runOnboarding(): Promise<{
       );
     }
 
-    // ── AI Auto-Discovery ──────────────────────────────────────────────
-    // Vibe Island-style: detect available providers without asking
-    try {
-      const { discoverAIProviders } = await import("./detect-ai.js");
-      const discovery = await discoverAIProviders();
-
-      if (discovery.hasAI && discovery.recommended) {
-        const rec = discovery.recommended;
-        console.log(
-          `  ${chalk.green("✓")} AI auto-detected: ${chalk.cyan(rec.name)} ${chalk.gray(`(${rec.detail ?? rec.source})`)}`
-        );
-
-        // Auto-configure the profile with discovered provider
-        if (!answers.aiProvider || answers.aiProvider === "none") {
-          answers.aiProvider = rec.id;
-          answers.aiModel = rec.defaultModel;
-          await saveProgress(); // Re-save with AI config
-
-          // If there are multiple providers, mention them
-          if (discovery.providers.length > 1) {
-            const others = discovery.providers
-              .filter((p) => p.id !== rec.id && p.available)
-              .map((p) => p.name);
-            if (others.length > 0) {
-              console.log(chalk.gray(`    Also available: ${others.join(", ")}`));
-            }
-          }
-        }
-      } else if (discovery.providers.length > 0) {
-        // Found providers but none available (missing keys, not running)
-        const names = discovery.providers.map((p) => `${p.name} (${p.detail ?? "not reachable"})`);
-        console.log(chalk.yellow(`  ⚠ Found AI providers but none reachable:`));
-        for (const name of names) {
-          console.log(chalk.gray(`    • ${name}`));
-        }
-        console.log(chalk.gray(`    Run ${chalk.cyan("lgtm auth login openai")} to configure.`));
-      } else {
-        console.log(chalk.gray(`  ○ No AI providers detected. AI features disabled.`));
-        console.log(chalk.gray(`    Enable later: ${chalk.cyan("lgtm auth login openai")} or start Ollama locally.`));
-      }
-    } catch {
-      // AI discovery failed — non-critical, don't block onboarding
+    // Show AI status in summary (no separate discovery block needed — it ran before questions)
+    if (profile.ai.enabled) {
+      console.log(
+        `  ${chalk.green("✓")} AI: ${chalk.cyan(profile.ai.provider ?? "enabled")}${profile.ai.model ? ` (${profile.ai.model})` : ""}`
+      );
+    } else {
+      console.log(chalk.gray(`  ○ AI disabled. Enable later: ${chalk.cyan("lgtm config --edit")}`));
     }
 
     if (bootstrap.storageMode === "farm") {
