@@ -137,6 +137,10 @@ async function main() {
 
   // ─── Core Commands ─────────────────────────────────────────────────────
 
+  // `lgtm smoke` — built-in smoke test / demo walkthrough
+  const { registerSmokeCommand } = await import("./cli/commands/smoke.js");
+  registerSmokeCommand(program, ctx);
+
   // `lgtm ai` — AI connection management
   const { registerAICommands } = await import("./cli/commands/ai.js");
   registerAICommands(program, ctx);
