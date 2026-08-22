@@ -13,12 +13,12 @@
   },
   "scripts": {
     "dev": "bun run packages/core/src/index.ts",
-    "build": "bun build packages/core/src/index.ts --outdir dist --target node --external react-devtools-core --external yoga-wasm-web",
-    "build:binary": "bun build packages/core/src/index.ts --compile --outfile dist/lgtm --external react-devtools-core --external yoga-wasm-web",
-    "build:binary:linux-x64": "bun build packages/core/src/index.ts --compile --target=bun-linux-x64 --outfile dist/lgtm-linux-x64 --external react-devtools-core --external yoga-wasm-web",
-    "build:binary:linux-arm64": "bun build packages/core/src/index.ts --compile --target=bun-linux-arm64 --outfile dist/lgtm-linux-arm64 --external react-devtools-core --external yoga-wasm-web",
-    "build:binary:darwin-x64": "bun build packages/core/src/index.ts --compile --target=bun-darwin-x64 --outfile dist/lgtm-darwin-x64 --external react-devtools-core --external yoga-wasm-web",
-    "build:binary:darwin-arm64": "bun build packages/core/src/index.ts --compile --target=bun-darwin-arm64 --outfile dist/lgtm-darwin-arm64 --external react-devtools-core --external yoga-wasm-web",
+    "build": "bun build packages/core/src/index.ts --outdir dist --target node",
+    "build:binary": "bun build packages/core/src/index.ts --compile --outfile dist/lgtm",
+    "build:binary:linux-x64": "bun build packages/core/src/index.ts --compile --target=bun-linux-x64 --outfile dist/lgtm-linux-x64",
+    "build:binary:linux-arm64": "bun build packages/core/src/index.ts --compile --target=bun-linux-arm64 --outfile dist/lgtm-linux-arm64",
+    "build:binary:darwin-x64": "bun build packages/core/src/index.ts --compile --target=bun-darwin-x64 --outfile dist/lgtm-darwin-x64",
+    "build:binary:darwin-arm64": "bun build packages/core/src/index.ts --compile --target=bun-darwin-arm64 --outfile dist/lgtm-darwin-arm64",
     "build:binary:all": "bash scripts/build-binaries.sh",
     "test": "bun test",
     "lint": "tsc --noEmit",
@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "bun-types": "^1.2.0",
+    "react-devtools-core": "file:stubs/react-devtools-core",
     "typescript": "^5.6.0"
   },
   "keywords": ["cli", "tui", "developer-tools", "code-review", "productivity"],

@@ -1,0 +1,8 @@
+{
+  "name": "react-devtools-core",
+  "version": "0.0.0",
+  "description": "Stub for binary compilation — react-devtools-core is not needed at runtime",
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts"
+}
