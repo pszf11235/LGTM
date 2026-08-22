@@ -48,21 +48,18 @@ case "${1:-all}" in
     ;;
 esac
 
-# Externals: ink's devtools import is optional and not needed at runtime
-EXTERNALS="--external react-devtools-core --external yoga-wasm-web"
-
 # Build each target
 for target in "${TARGETS[@]}"; do
   if [ "$target" = "current" ]; then
     outfile="$OUTDIR/lgtm"
     echo "  → Building for current platform → $outfile"
-    bun build "$ENTRY" --compile --outfile "$outfile" $EXTERNALS
+    bun build "$ENTRY" --compile --outfile "$outfile"
   else
     # Extract os-arch from bun-<os>-<arch>
     platform="${target#bun-}"
     outfile="$OUTDIR/lgtm-${platform}"
     echo "  → Building for $platform → $outfile"
-    bun build "$ENTRY" --compile --target="$target" --outfile "$outfile" $EXTERNALS
+    bun build "$ENTRY" --compile --target="$target" --outfile "$outfile"
   fi
 done
 
