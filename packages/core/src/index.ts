@@ -65,58 +65,8 @@ async function main() {
     }
 
     // Profile complete — launch TUI
-    const { launchTUI } = await import("./tui/render.js");
-    const path = await import("path");
-
-    const repoName = path.default.basename(ctx.repoRoot);
-    const repoPath = ctx.repoRoot;
-
-    // Build tabs dynamically from discovered plugins (all pages, flattened)
-    const tabs = plugins
-      .filter((p) => ctx.config.plugins[p.name]?.enabled !== false)
-      .flatMap((p) => {
-        if (p.pages && p.pages.length > 0) {
-          return p.pages.map((page) => ({
-            name: `${p.name}-${page.label.toLowerCase()}`,
-            label: page.label,
-            enabled: true,
-            component: page.component,
-          }));
-        }
-        // Plugin with no pages: show as placeholder tab
-        return [{
-          name: p.name,
-          label: p.name.charAt(0).toUpperCase() + p.name.slice(1),
-          enabled: true,
-          component: (() => null) as any,
-        }];
-      });
-
-    // Check AI availability and watch count for TUI indicators
-    let aiStatus: { available: boolean; provider?: string } | undefined;
-    let watchCount = 0;
-
-    if (ctx.config.ai.enabled) {
-      try {
-        const { createLLMProvider } = await import("./llm/provider.js");
-        const llm = createLLMProvider(ctx.config.ai as any);
-        const available = await llm.isAvailable();
-        aiStatus = { available, provider: ctx.config.ai.provider };
-      } catch {
-        aiStatus = { available: false, provider: ctx.config.ai.provider };
-      }
-    }
-
-    try {
-      const watchDoc = await ctx.store.read("watch.md");
-      if (watchDoc?.data?.repos && Array.isArray(watchDoc.data.repos)) {
-        watchCount = (watchDoc.data.repos as any[]).length > 0 ? -1 : 0; // -1 = needs check
-        // Quick check: just show count of watched repos as indicator
-        // Full PR count would need GitHub API call (deferred to watch status)
-      }
-    } catch { /* no watch config */ }
-
-    await launchTUI({ tabs, repoName, repoPath, watchCount: watchCount === -1 ? undefined : watchCount, aiStatus });
+    const { buildAndLaunchTUI } = await import("./tui/render.js");
+    await buildAndLaunchTUI({ ctx, plugins });
     return;
   }
 
@@ -159,6 +109,7 @@ async function main() {
     .description("Open the interactive TUI (same as bare `lgtm`)")
     .action(async (plugin?: string) => {
       const { launchTUI } = await import("./tui/render.js");
+      const { AITab } = await import("./tui/AITab.js");
       const path = await import("path");
 
       const tabs = plugins
@@ -179,6 +130,14 @@ async function main() {
             component: (() => null) as any,
           }];
         });
+
+      // Add the AI management tab
+      tabs.push({
+        name: "ai",
+        label: "AI",
+        enabled: true,
+        component: AITab,
+      });
 
       await launchTUI({
         tabs,
@@ -250,6 +209,10 @@ async function main() {
 
       const { runOnboarding } = await import("./onboarding/flow.js");
       await runOnboarding();
+
+      // After onboarding completes, launch TUI (Bug 1 fix)
+      const { buildAndLaunchTUI } = await import("./tui/render.js");
+      await buildAndLaunchTUI({ ctx, plugins });
     });
 
   // `lgtm config` → show current config, offer to re-run onboarding to change
