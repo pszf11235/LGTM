@@ -200,41 +200,41 @@ export function registerAICommands(program: Command, ctx: LGTMContext) {
   // ─── lgtm ai discover ──────────────────────────────────────────────────
   ai
     .command("discover")
-    .description("Run AI provider autodiscovery with debug output")
+    .alias("providers")
+    .description("Show which review providers are available")
     .action(async () => {
-      const { discoverAIProviders } = await import("../../onboarding/detect-ai.js");
+      const { detectProviders, resolveProvider } = await import("../../ai/providers.js");
 
-      console.log(chalk.bold("\n👍 AI Provider Discovery (debug mode)\n"));
+      console.log(chalk.bold("\n👍 Review Providers\n"));
 
-      const result = await discoverAIProviders((msg) => {
-        console.log(chalk.gray(`  ${msg}`));
-      });
+      const statuses = await detectProviders();
 
-      console.log();
-      console.log(chalk.bold("  ── Results ──"));
-      console.log(`  ${result.summary}`);
-      console.log();
-
-      if (result.providers.length > 0) {
-        console.log(chalk.bold("  Providers found:"));
-        for (const p of result.providers) {
-          const avail = p.available ? chalk.green("✓ available") : chalk.yellow("✗ not reachable");
-          console.log(`    ${chalk.cyan(p.name)} — ${p.detectedVia} [${avail}]`);
-          if (p.keyHint) console.log(chalk.gray(`      Key: ${p.keyHint}`));
-          console.log(chalk.gray(`      Model: ${p.defaultModel}`));
-          if (p.detail) console.log(chalk.gray(`      Detail: ${p.detail}`));
+      for (const p of statuses) {
+        const icon = p.available ? chalk.green("✓") : chalk.gray("✗");
+        const builtIn = p.hasBuiltInReview ? chalk.gray(" (has its own review command)") : "";
+        console.log(`  ${icon} ${chalk.cyan(p.id.padEnd(12))} ${p.detail}${builtIn}`);
+        if (!p.available && p.fix) {
+          console.log(chalk.gray(`      → ${p.fix}`));
         }
+      }
+
+      // Priority order is what `provider: auto` in an agent file resolves
+      // through, so show the actual winner rather than making the user infer it.
+      const resolved = resolveProvider("auto", statuses);
+
+      console.log();
+      if ("error" in resolved) {
+        console.log(chalk.yellow(`  No provider available, so reviews cannot run.`));
+        console.log(chalk.gray(`  Fix any one of the above. claude-cli or codex-cli give the best results.`));
       } else {
-        console.log(chalk.yellow("  No providers found."));
+        console.log(`  ${chalk.bold("provider: auto")} resolves to ${chalk.green(resolved.id)}`);
+        if (resolved.skipped.length > 0) {
+          console.log(chalk.gray(`  Skipped, in priority order: ${resolved.skipped.join(", ")}`));
+        }
+        console.log(chalk.gray(`  Pin a different one in the agent's ${chalk.cyan("provider")} field.`));
       }
 
-      if (result.toolsDetected.length > 0) {
-        console.log(chalk.gray(`\n  Tools detected: ${result.toolsDetected.join(", ")}`));
-      }
-
-      console.log(chalk.gray(`\n  To share this output for debugging, run:`));
-      console.log(chalk.cyan(`    lgtm ai discover 2>&1 | pbcopy`));
-      console.log(chalk.gray(`  (or pipe to a file: lgtm ai discover > ai-debug.txt)\n`));
+      console.log();
     });
 }
 

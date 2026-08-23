@@ -14,6 +14,7 @@
     "./auth/github-oauth.js": "./src/auth/github-oauth.ts",
     "./utils/git.js": "./src/utils/git.ts",
     "./llm/provider.js": "./src/llm/provider.ts",
+    "./ai/providers.js": "./src/ai/providers.ts",
     "./llm/cache.js": "./src/llm/cache.ts",
     "./tui/hooks/index.js": "./src/tui/hooks/index.ts",
     "./registry/scanner.js": "./src/registry/scanner.ts",

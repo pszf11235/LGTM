@@ -18,22 +18,11 @@ import fs from "fs";
 import path from "path";
 import matter from "gray-matter";
 import { getAgentsDir } from "./paths.js";
+import { PROVIDER_IDS, type ProviderChoice, type ProviderId } from "../ai/providers.js";
+
+export { PROVIDER_IDS, type ProviderChoice, type ProviderId };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
-
-/** Providers that can run a review, in priority order for `auto`. */
-export const PROVIDER_IDS = [
-  "kiro-cli",
-  "claude-cli",
-  "codex-cli",
-  "openrouter",
-  "ollama",
-] as const;
-
-export type ProviderId = (typeof PROVIDER_IDS)[number];
-
-/** `auto` resolves to the first available provider at review time. */
-export type ProviderChoice = ProviderId | "auto";
 
 export type Severity = "low" | "medium" | "high" | "critical";
 
