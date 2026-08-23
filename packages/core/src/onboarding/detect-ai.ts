@@ -199,6 +199,33 @@ function checkEnvVars(providers: DetectedProvider[], tools: string[], log: (msg:
     log("  ✗ CODEX_API_KEY / CODEX_OPENAI_API_KEY not set");
   }
 
+  // Codex CLI config file (~/.codex/auth.json)
+  const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
+  const codexAuthPath = path.join(codexHome, "auth.json");
+  log(`  Checking Codex CLI: ${codexAuthPath}`);
+  if (fs.existsSync(codexAuthPath)) {
+    try {
+      const raw = fs.readFileSync(codexAuthPath, "utf-8");
+      const data = JSON.parse(raw);
+      const codexAuthKey = data.token ?? data.api_key ?? data.apiKey ?? data.access_token;
+      if (codexAuthKey && !providers.some((p) => p.id === "openai")) {
+        log(`  ✓ Found key in Codex auth.json`);
+        providers.push({
+          id: "openai", name: "OpenAI (Codex CLI)", detectedVia: "~/.codex/auth.json",
+          source: "cli-config", available: true, keyHint: maskKey(codexAuthKey), apiKey: codexAuthKey,
+          defaultModel: "gpt-4o-mini",
+        });
+        tools.push("Codex CLI");
+      } else {
+        log(`  ✗ Codex auth.json exists but no key found (keys: ${Object.keys(data).join(", ")})`);
+      }
+    } catch (err) {
+      log(`  ✗ Codex auth.json parse error: ${(err as Error).message}`);
+    }
+  } else {
+    log(`  ✗ ${codexAuthPath} not found`);
+  }
+
   // Gemini
   const geminiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_AI_API_KEY;
   if (geminiKey) {
@@ -274,11 +301,13 @@ async function checkClaudeCode(providers: DetectedProvider[], tools: string[], l
 
   // Check for Claude Code credentials regardless of whether CLI binary is on PATH
   const credPaths = [
+    path.join(claudeDir, ".credentials.json"),  // Primary location (note: dot prefix!)
     path.join(claudeDir, "credentials.json"),
     path.join(claudeDir, ".credentials"),
     path.join(claudeDir, "auth.json"),
     path.join(claudeDir, "config.json"),
     path.join(homeDir, ".config", "claude", "credentials.json"),
+    path.join(homeDir, ".config", "claude-code", "credentials.json"),
     path.join(claudeDir, "settings.local.json"),
   ];
 
@@ -295,13 +324,16 @@ async function checkClaudeCode(providers: DetectedProvider[], tools: string[], l
       const keys = Object.keys(data);
       log(`    → top-level keys: ${keys.join(", ")}`);
 
-      // Parse multiple JSON structures for credential extraction
-      const key = data.apiKey ?? data.claudeApiKey ?? data.token ?? data.access_token ?? data.credentials?.apiKey;
+      // Claude Code stores OAuth tokens nested under claudeAiOauth
+      const oauthToken = data.claudeAiOauth?.accessToken;
+      // Also check flat key formats
+      const key = oauthToken ?? data.apiKey ?? data.claudeApiKey ?? data.token ?? data.access_token ?? data.accessToken ?? data.credentials?.apiKey;
       if (key) {
-        log(`    → ✓ Found key via: ${data.apiKey ? "apiKey" : data.claudeApiKey ? "claudeApiKey" : data.token ? "token" : data.access_token ? "access_token" : "credentials.apiKey"}`);
+        const source = oauthToken ? "claudeAiOauth.accessToken" : data.apiKey ? "apiKey" : data.claudeApiKey ? "claudeApiKey" : data.token ? "token" : data.access_token ? "access_token" : data.accessToken ? "accessToken" : "credentials.apiKey";
+        log(`    → ✓ Found key via: ${source}`);
         if (!providers.some((p) => p.id === "anthropic")) {
           providers.push({
-            id: "anthropic", name: "Anthropic (Claude Code)", detectedVia: "Claude Code CLI credentials",
+            id: "anthropic", name: "Anthropic (Claude Code)", detectedVia: `Claude Code credentials (${path.basename(credPath)})`,
             source: "cli-config", available: true, keyHint: maskKey(key), apiKey: key,
             defaultModel: "claude-sonnet-4-20250514",
             detail: "Borrowed from Claude Code",
@@ -309,10 +341,59 @@ async function checkClaudeCode(providers: DetectedProvider[], tools: string[], l
         }
         break;
       } else {
-        log(`    → ✗ No recognized key field in JSON`);
+        log(`    → ✗ No recognized key field in JSON (tried: claudeAiOauth.accessToken, apiKey, token, access_token, accessToken)`);
       }
     } catch (err) {
       log(`    → ✗ Parse error: ${(err as Error).message}`);
+    }
+  }
+
+  // On macOS: Claude Code stores credentials in the system Keychain
+  // Try to read from Keychain if no file-based credential was found
+  if (!providers.some((p) => p.id === "anthropic") && process.platform === "darwin") {
+    log("  Checking macOS Keychain for Claude Code credentials...");
+    try {
+      const { execSync } = require("child_process");
+      // Claude Code uses service name "Claude Code-credentials" in Keychain
+      const keychainResult = execSync(
+        'security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null',
+        { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+      ).trim();
+
+      if (keychainResult) {
+        log(`    → ✓ Found credential in Keychain (${keychainResult.length} chars)`);
+        // The keychain value is JSON with the same structure as .credentials.json
+        try {
+          const keychainData = JSON.parse(keychainResult);
+          const token = keychainData.claudeAiOauth?.accessToken ?? keychainData.accessToken ?? keychainData.token;
+          if (token) {
+            log(`    → ✓ Extracted OAuth token from Keychain`);
+            providers.push({
+              id: "anthropic", name: "Anthropic (Claude Code)", detectedVia: "macOS Keychain (Claude Code-credentials)",
+              source: "cli-config", available: true, keyHint: maskKey(token), apiKey: token,
+              defaultModel: "claude-sonnet-4-20250514",
+              detail: "From macOS Keychain",
+            });
+          } else {
+            log(`    → ✗ Keychain JSON has no accessToken (keys: ${Object.keys(keychainData).join(", ")})`);
+          }
+        } catch {
+          // Keychain value might be a raw token string, not JSON
+          if (keychainResult.startsWith("sk-ant-")) {
+            log(`    → ✓ Raw token in Keychain (starts with sk-ant-)`);
+            providers.push({
+              id: "anthropic", name: "Anthropic (Claude Code)", detectedVia: "macOS Keychain",
+              source: "cli-config", available: true, keyHint: maskKey(keychainResult), apiKey: keychainResult,
+              defaultModel: "claude-sonnet-4-20250514",
+              detail: "From macOS Keychain",
+            });
+          } else {
+            log(`    → ✗ Keychain value is not JSON and doesn't start with sk-ant-`);
+          }
+        }
+      }
+    } catch (err) {
+      log(`    → ✗ Keychain lookup failed: ${(err as Error).message?.split("\n")[0] ?? "not found"}`);
     }
   }
 
