@@ -3,21 +3,28 @@
 ## Task 1: Agent config loader (OKF)
 - [ ] Create `.lgtm/agents/` directory convention
 - [ ] Create `packages/plugins/review/src/domain/agent-config.ts`
-- [ ] Define `AgentConfig` interface: name, prompt, severity, model, enabled, priority
+- [ ] Define `AgentConfig` interface: name, provider, prompt, severity, model, enabled, priority
+- [ ] `provider` field: `"claude-cli" | "codex-cli" | "openrouter" | "ollama"`
 - [ ] Implement `loadAgentConfigs(lgtmDir)` — reads all `.md` files from `agents/` dir
-- [ ] Ship 2 default agent configs: `security.md` + `architecture.md`
+- [ ] Ship 2 default agent configs: `security.md` (claude-cli) + `architecture.md` (codex-cli)
 - [ ] Support global agents at `~/.lgtm-farm/agents/` (fallback if no local)
+- [ ] Implement `detectAvailableProviders()` — checks which CLIs/APIs are available
 - [ ] Tests: load configs, parse OKF, handle missing dir gracefully
 
-## Task 2: Agent worker process
+## Task 2: Agent worker process with provider dispatch
 - [ ] Create `packages/plugins/review/src/workers/review-agent.ts` (standalone entry point)
 - [ ] Worker reads JSON from stdin: { diff, agent, rules, pr, profile }
-- [ ] Worker creates LLM provider from agent config (model, key resolution)
-- [ ] Worker calls `generateAutoReview()` with the agent's prompt injected
+- [ ] Provider dispatch based on `agent.provider`:
+  - `claude-cli`: spawn `claude -p "<prompt>" --output-format json`, pipe diff via stdin
+  - `codex-cli`: spawn `codex exec "<prompt>" --json-output-schema <schema>`
+  - `openrouter`: HTTP POST to `https://openrouter.ai/api/v1/chat/completions`
+  - `ollama`: HTTP POST to `http://localhost:11434/api/generate`
+- [ ] Check provider availability before calling (which claude / which codex / env var / ping)
+- [ ] Fallback: if configured provider unavailable, try next in priority order
 - [ ] Worker outputs JSON to stdout: { agent, findings, stats, error }
 - [ ] Handle timeout: exit gracefully on SIGTERM
 - [ ] Handle errors: output `{ error: "message" }` and exit 1
-- [ ] Tests: worker produces valid JSON for sample input
+- [ ] Tests: worker produces valid JSON for sample input (mock providers)
 
 ## Task 3: Orchestrator — spawn and collect
 - [ ] Create `packages/plugins/review/src/domain/orchestrator.ts`

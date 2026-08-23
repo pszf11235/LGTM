@@ -4,12 +4,26 @@
 
 When the watcher detects a new PR/MR on any watched repo, it automatically dispatches 2+ AI review agents as **separate processes**. Each agent has its own system prompt (configurable via OKF file), reviews the diff independently, and produces local findings stored as comments in the diff. Reviews are **local-first** — findings stay on disk until the human reviews them in the TUI, then explicitly approves posting to GitHub/GitLab.
 
+## Provider Strategy
+
+Agents use the user's existing AI tool subscriptions via CLI subprocess calls:
+
+| Priority | Provider | Auth | Mechanism |
+|----------|----------|------|-----------|
+| 1 | **Claude Code CLI** | Max/Pro subscription (Keychain) | `claude -p --output-format json` |
+| 2 | **Codex CLI** | ChatGPT subscription | `codex exec --json-output-schema` |
+| 3 | **OpenRouter** | `OPENROUTER_API_KEY` | HTTP API (400+ models, free tier available) |
+| 4 | **Ollama** (local) | None | HTTP to localhost:11434 (see #123 for auto-setup) |
+
+**Key insight**: Claude CLI and Codex CLI use your existing subscriptions legally — we spawn their official CLIs as subprocesses, never touching OAuth tokens directly.
+
 ## Core Flow
 
 ```
 Watcher detects new PR
   → Spawns N agent processes (configurable, default 2)
   → Each agent gets: diff + its own prompt + rules
+  → Agent calls its provider (claude -p / codex exec / OpenRouter API / Ollama)
   → Each agent produces findings (saved locally as OKF)
   → Human reviews in TUI (sees all agents' findings overlaid on diff)
   → Human approves/edits/discards findings
@@ -37,25 +51,26 @@ Watcher detects new PR
 
 **Acceptance Criteria:**
 - Agent configs stored at `.lgtm/agents/` (one file per agent, OKF format)
-- Each agent file defines: name, prompt, severity threshold, model override
-- Default ships with 2 agents: `security.md` + `architecture.md`
+- Each agent file defines: name, prompt, provider, severity threshold, model override
+- Default ships with 2 agents: `security.md` (uses claude-cli) + `architecture.md` (uses codex-cli)
 - Can add more agents by creating new `.md` files in the directory
 - Per-repo agents override global agents (same as rules precedence)
+- `provider` field determines how the agent executes: `claude-cli`, `codex-cli`, `openrouter`, `ollama`
 
 Example `.lgtm/agents/security.md`:
 ```markdown
 ---
 name: security
+provider: claude-cli
 prompt: |
   You are a security-focused code reviewer. Look for:
   - Hardcoded secrets, API keys, tokens
   - SQL injection, XSS, CSRF vulnerabilities
   - Auth/authz bypasses
   - Insecure data handling
-  - Dependency vulnerabilities
   Only flag HIGH or CRITICAL issues. Be concise.
+  Output findings as JSON array: [{file, line, comment, severity}]
 severity: high
-model: claude-sonnet-4-20250514
 enabled: true
 priority: 1
 ---
@@ -63,22 +78,51 @@ priority: 1
 # Security Review Agent
 
 Focuses on vulnerabilities, auth issues, and data exposure.
-Reviews every PR from a security-first perspective.
+Uses Claude Code CLI (Max/Pro subscription).
+```
+
+Example `.lgtm/agents/architecture.md`:
+```markdown
+---
+name: architecture
+provider: codex-cli
+prompt: |
+  You are an architecture reviewer. Look for:
+  - Functions over 50 lines (suggest splitting)
+  - Circular dependencies
+  - Leaky abstractions
+  - Missing error handling
+  Focus on maintainability and separation of concerns.
+  Output findings as JSON array: [{file, line, comment, severity}]
+severity: medium
+enabled: true
+priority: 2
+---
+
+# Architecture Review Agent
+
+Focuses on code structure and maintainability.
+Uses Codex CLI (ChatGPT subscription).
 ```
 
 ### US-3: Separate processes per agent
 **As a** user wanting isolation and parallelism,
 **I want** each agent to run as a truly separate process,
-**So that** they don't interfere with each other and can use different models.
+**So that** they don't interfere with each other and can use different providers/models.
 
 **Acceptance Criteria:**
 - Each agent is a separate `Bun.spawn` child process
 - Parent process orchestrates: spawn, wait, collect results
-- Agents can use different LLM models (one might use Claude, another GPT-4o)
-- If one agent crashes, the other still completes
-- Agent process receives: diff content, agent config, rules — via stdin or temp file
-- Agent process outputs: structured findings JSON — via stdout or temp file
+- Agents can use different providers (one uses Claude CLI, another uses Codex CLI)
+- If one agent crashes/times out, the other still completes
+- Agent worker process handles provider dispatch internally
 - Timeout per agent (configurable, default 120s)
+
+Provider dispatch in worker:
+- `claude-cli`: spawns `claude -p "<prompt + diff>" --output-format json`
+- `codex-cli`: spawns `codex exec "<prompt + diff>" --json-output-schema <schema>`
+- `openrouter`: HTTP POST to `https://openrouter.ai/api/v1/chat/completions`
+- `ollama`: HTTP POST to `http://localhost:11434/api/generate`
 
 ### US-4: Local-first findings (not posted immediately)
 **As a** reviewer who wants to curate AI feedback before it goes public,
@@ -115,9 +159,24 @@ Reviews every PR from a security-first perspective.
 
 **Acceptance Criteria:**
 - `lgtm review auto --pr 42 --agents 4` overrides the default count
-- Extra agents use the same prompt pool but with different temperature/sampling
-- Or: user can specify which agent configs to use: `--agents security,architecture,testing,performance`
+- Extra agents reuse the prompt pool with different temperature/sampling
+- Or: user can specify which agent configs to use: `--agents security,architecture,testing`
 - Configurable default in `.lgtmrc.yaml`: `watch.auto_review.agent_count: 2`
+
+### US-7: Provider auto-detection and fallback
+**As a** user who may have some providers but not others,
+**I want** LGTM to automatically detect which providers are available,
+**So that** agents fall back gracefully if their preferred provider isn't set up.
+
+**Acceptance Criteria:**
+- On agent start: check if configured provider is available
+  - `claude-cli`: check `which claude` and auth status
+  - `codex-cli`: check `which codex` and auth status
+  - `openrouter`: check `OPENROUTER_API_KEY` env var
+  - `ollama`: check `http://localhost:11434` reachable
+- If configured provider unavailable: fall back to next available in priority order
+- Show warning: "Agent 'security' configured for claude-cli but not available — falling back to openrouter"
+- `lgtm ai discover` shows which providers are available for agent use
 
 ## Non-Functional Requirements
 
@@ -127,4 +186,5 @@ Reviews every PR from a security-first perspective.
 - **Fault tolerance**: One agent failing doesn't block others
 - **Local-first**: No network posting without explicit human approval
 - **Idempotent**: Re-running on the same PR doesn't duplicate findings (dedup by file+line+agent)
-- **Performance**: Agents run in parallel, total wall time = slowest agent (not sum)
+- **Performance**: Agents run in parallel, total wall time ≈ slowest agent (not sum)
+- **Cross-platform**: CLI providers (claude, codex) must be on PATH; HTTP providers (openrouter, ollama) work anywhere

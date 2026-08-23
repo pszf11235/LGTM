@@ -48,7 +48,7 @@
 
 ## Agent Worker Protocol
 
-The orchestrator spawns each agent as a child process:
+The orchestrator spawns each agent as a child process. The worker handles provider dispatch internally.
 
 ```ts
 const worker = Bun.spawn(["bun", "run", "packages/plugins/review/src/workers/review-agent.ts"], {
@@ -65,9 +65,10 @@ const worker = Bun.spawn(["bun", "run", "packages/plugins/review/src/workers/rev
   "diff": "<raw unified diff>",
   "agent": {
     "name": "security",
+    "provider": "claude-cli",
     "prompt": "You are a security reviewer...",
     "severity": "high",
-    "model": "claude-sonnet-4-20250514"
+    "model": null
   },
   "rules": [
     { "id": "r1", "description": "...", "pattern": "...", "enforcement": "regex" }
@@ -82,6 +83,50 @@ const worker = Bun.spawn(["bun", "run", "packages/plugins/review/src/workers/rev
     "goal": "production"
   }
 }
+```
+
+### Worker Provider Dispatch
+
+Inside the worker, based on `agent.provider`:
+
+**claude-cli:**
+```ts
+const proc = Bun.spawn(["claude", "-p", combinedPrompt, "--output-format", "json"], {
+  stdin: "pipe",  // pipe the diff content if too large for arg
+});
+// Parse JSON output from Claude
+```
+
+**codex-cli:**
+```ts
+const proc = Bun.spawn(["codex", "exec", combinedPrompt, "--json-output-schema", schema], {
+  cwd: repoPath,
+});
+// Parse structured JSON output
+```
+
+**openrouter:**
+```ts
+const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}` },
+  body: JSON.stringify({
+    model: agent.model ?? "anthropic/claude-sonnet-4-20250514",
+    messages: [{ role: "system", content: agent.prompt }, { role: "user", content: diff }],
+    response_format: { type: "json_object" },
+  }),
+});
+```
+
+**ollama:**
+```ts
+const res = await fetch("http://localhost:11434/api/generate", {
+  body: JSON.stringify({
+    model: agent.model ?? "qwen2.5-coder:7b",
+    prompt: combinedPrompt,
+    format: "json",
+    stream: false,
+  }),
+});
 ```
 
 ### Output (via stdout — JSON)
@@ -117,14 +162,15 @@ const worker = Bun.spawn(["bun", "run", "packages/plugins/review/src/workers/rev
 ```markdown
 ---
 name: security
+provider: claude-cli
 prompt: |
   You are a security-focused code reviewer. Look for:
   - Hardcoded secrets, API keys, tokens
   - SQL injection, XSS, CSRF vulnerabilities
   - Auth/authz bypasses
   Only flag HIGH or CRITICAL issues.
+  Output findings as JSON: [{file, line, comment, severity}]
 severity: high
-model: claude-sonnet-4-20250514
 enabled: true
 priority: 1
 ---
@@ -132,12 +178,14 @@ priority: 1
 # Security Review Agent
 
 Focuses on vulnerabilities, auth issues, and data exposure.
+Uses Claude Code CLI (your Max/Pro subscription).
 ```
 
 ### Agent Config: `.lgtm/agents/architecture.md`
 ```markdown
 ---
 name: architecture
+provider: codex-cli
 prompt: |
   You are an architecture reviewer. Look for:
   - Functions over 50 lines (suggest splitting)
@@ -146,8 +194,8 @@ prompt: |
   - Missing error handling
   - God objects / God functions
   Focus on maintainability and separation of concerns.
+  Output findings as JSON: [{file, line, comment, severity}]
 severity: medium
-model: gpt-4o-mini
 enabled: true
 priority: 2
 ---
@@ -155,6 +203,7 @@ priority: 2
 # Architecture Review Agent
 
 Focuses on code structure and long-term maintainability.
+Uses Codex CLI (your ChatGPT subscription).
 ```
 
 ### Agent Findings: `.lgtm/reviews/42/agent-security.md`
