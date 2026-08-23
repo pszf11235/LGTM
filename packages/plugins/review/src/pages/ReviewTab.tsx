@@ -1,162 +1,195 @@
 /**
- * ReviewTab — top-level component for the Review plugin tab.
+ * Review Tab — the PRs that have findings on disk.
  *
- * Manages navigation between pages and persists reviews on exit.
+ * Reads the review store (~/.lgtm-farm/reviews/<owner>-<repo>-<pr>/), which is
+ * the same place `lgtm review list` reads. It previously read the older
+ * sessions/<date>/index.md queue, so it reported "No PRs in queue" while
+ * completed reviews sat in the store, and pointed at `lgtm review add`, which
+ * is not part of the watch → review → post loop.
+ *
+ * Read-only. Posting is a deliberate act with a confirmation surface, so it
+ * stays in `lgtm review post`.
  */
 
-import React, { useState } from "react";
-import { Box, Text } from "ink";
-import { QueuePage } from "./QueuePage.js";
-import { ReviewPage } from "./ReviewPage.js";
-import type { ParsedDiff } from "../domain/diff-parser.js";
-import type { ReviewComment } from "../domain/types.js";
+import React, { useState, useEffect } from "react";
+import { Box, Text, useInput } from "ink";
+import type { PRRef, ReviewMeta, StoredFinding } from "../domain/review-store.js";
 
 interface ReviewTabProps {
   onStatusHint: (hint: string) => void;
 }
 
-type Page =
-  | { type: "queue" }
-  | { type: "review"; prNumber: number; prTitle: string; diff: ParsedDiff; featureGroup?: string };
+interface PRSummary {
+  ref: PRRef;
+  meta: ReviewMeta | null;
+  pending: Array<StoredFinding & { round: number; agent: string }>;
+  postedCount: number;
+}
+
+interface ReviewTabState {
+  prs: PRSummary[];
+  selected: number;
+  loading: boolean;
+  error: string;
+}
 
 export function ReviewTab({ onStatusHint }: ReviewTabProps) {
-  const [page, setPage] = useState<Page>({ type: "queue" });
+  const [state, setState] = useState<ReviewTabState>({
+    prs: [],
+    selected: 0,
+    loading: true,
+    error: "",
+  });
 
-  function handleOpenReview(prNumber: number, prTitle: string, diff: ParsedDiff, featureGroup?: string) {
-    setPage({ type: "review", prNumber, prTitle, diff, featureGroup });
-  }
+  useEffect(() => {
+    onStatusHint("↑↓ select  [r] refresh");
+  }, []);
 
-  async function handleExitReview(action: "approve" | "flag" | "back", comments?: ReviewComment[]) {
-    if (page.type !== "review") return;
+  useEffect(() => {
+    void load();
+  }, []);
 
-    // Save review to OKF store
+  async function load() {
+    setState((prev) => ({ ...prev, loading: true }));
     try {
-      const { createOKFStore } = await import("@lgtm/core/store/okf.js");
-      const { findGitRoot } = await import("@lgtm/core/store/paths.js");
-      const { loadBootstrap, resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
-      const { createQueueManager } = await import("../domain/queue.js");
+      const { resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
+      const { listReviewedPRs, loadMeta, pendingFindings, postedFindings } = await import(
+        "../domain/review-store.js"
+      );
 
-      const repoRoot = findGitRoot();
-      const bootstrap = loadBootstrap();
-      const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
-      const store = createOKFStore(lgtmDir);
-      const queue = createQueueManager(store);
+      const lgtmDir = resolveLgtmDir();
+      const prs: PRSummary[] = listReviewedPRs(lgtmDir).map((ref) => ({
+        ref,
+        meta: loadMeta(lgtmDir, ref),
+        pending: pendingFindings(lgtmDir, ref),
+        postedCount: postedFindings(lgtmDir, ref).length,
+      }));
 
-      const date = new Date().toISOString().split("T")[0];
-
-      // Save review markdown
-      if (comments && comments.length > 0 || action !== "back") {
-        const reviewData = {
-          type: "lgtm/review",
-          pr: page.prNumber,
-          title: page.prTitle,
-          state: action === "back" ? "in-progress" : action,
-          reviewed_at: new Date().toISOString(),
-          comments_count: comments?.length ?? 0,
-          feature_group: page.featureGroup,
-        };
-
-        const reviewBody = generateReviewMarkdown(
-          page.prNumber,
-          page.prTitle,
-          action,
-          comments ?? [],
-          page.featureGroup
-        );
-
-        await store.write(
-          `sessions/${date}/pr-${page.prNumber}.md`,
-          reviewData,
-          reviewBody
-        );
-      }
-
-      // Update queue state
-      if (action === "approve" || action === "flag") {
-        // Transition through reviewing first if needed
-        await queue.updateState(page.prNumber, "reviewing");
-        await queue.updateState(
-          page.prNumber,
-          action === "approve" ? "approved" : "flagged",
-          action === "flag" ? "Flagged during review" : undefined
-        );
-      }
+      setState((prev) => ({
+        prs,
+        selected: Math.min(prev.selected, Math.max(0, prs.length - 1)),
+        loading: false,
+        error: "",
+      }));
     } catch (err) {
-      // Silent failure — don't crash the TUI if save fails
-      // TODO: show error in status bar
+      setState((prev) => ({ ...prev, loading: false, error: (err as Error).message }));
     }
-
-    setPage({ type: "queue" });
   }
 
-  switch (page.type) {
-    case "queue":
-      return (
-        <QueuePage
-          onStatusHint={onStatusHint}
-          onOpenReview={handleOpenReview}
-        />
-      );
+  useInput((input, key) => {
+    if (input === "r") void load();
+    if (key.upArrow) {
+      setState((prev) => ({ ...prev, selected: Math.max(0, prev.selected - 1) }));
+    }
+    if (key.downArrow) {
+      setState((prev) => ({
+        ...prev,
+        selected: Math.min(prev.prs.length - 1, prev.selected + 1),
+      }));
+    }
+  });
 
-    case "review":
-      return (
-        <ReviewPage
-          diff={page.diff}
-          prNumber={page.prNumber}
-          prTitle={page.prTitle}
-          featureGroup={page.featureGroup}
-          onStatusHint={onStatusHint}
-          onExit={handleExitReview}
-        />
-      );
+  if (state.loading && state.prs.length === 0) {
+    return (
+      <Box paddingX={2}>
+        <Text dimColor>Loading reviews...</Text>
+      </Box>
+    );
+  }
 
-    default:
-      return <Text color="gray">Unknown page</Text>;
+  if (state.error !== "") {
+    return (
+      <Box paddingX={2}>
+        <Text color="red">{state.error}</Text>
+      </Box>
+    );
+  }
+
+  if (state.prs.length === 0) {
+    return (
+      <Box flexDirection="column" paddingX={2}>
+        <Text dimColor>No reviews on disk yet.</Text>
+        <Text dimColor>
+          Run <Text color="cyan">lgtm watch --once</Text>, or review one PR with{" "}
+          <Text color="cyan">lgtm review pr owner/repo#42</Text>.
+        </Text>
+      </Box>
+    );
+  }
+
+  const current = state.prs[state.selected];
+
+  return (
+    <Box flexDirection="column" paddingX={2}>
+      <Text bold>
+        Reviews — {state.prs.length} PR{state.prs.length === 1 ? "" : "s"} with findings
+      </Text>
+      <Box height={1} />
+
+      {state.prs.map((p, i) => {
+        const isSelected = i === state.selected;
+        const label = `${p.ref.owner}/${p.ref.repo}#${p.ref.pr}`;
+        return (
+          <Box key={label}>
+            <Text color={isSelected ? "cyan" : undefined}>{isSelected ? "▸ " : "  "}</Text>
+            <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
+              {label.padEnd(28)}
+            </Text>
+            <Text dimColor>
+              {p.pending.length} pending
+              {p.postedCount > 0 ? `, ${p.postedCount} posted` : ""}
+              {p.meta ? `  round ${p.meta.currentRound}` : ""}
+            </Text>
+          </Box>
+        );
+      })}
+
+      <Box height={1} />
+      {current.meta && (
+        <>
+          <Text dimColor>{current.meta.title}</Text>
+          <Text dimColor>{current.meta.url}</Text>
+          <Box height={1} />
+        </>
+      )}
+
+      {current.pending.slice(0, 8).map((f) => (
+        <Box key={`${f.round}-${f.agent}-${f.id}`} flexDirection="column">
+          <Box>
+            <Text dimColor>{`  ${f.id} `}</Text>
+            <Text color={severityColour(f.severity)}>{f.severity.padEnd(9)}</Text>
+            <Text dimColor>{`${f.file}:${f.line}`}</Text>
+          </Box>
+          <Text dimColor>{`     ${truncate(f.comment, 110)}`}</Text>
+        </Box>
+      ))}
+
+      {current.pending.length > 8 && (
+        <Text dimColor>{`  ...and ${current.pending.length - 8} more`}</Text>
+      )}
+
+      {current.pending.length === 0 && (
+        <Text dimColor>  Nothing pending. Everything here is posted or discarded.</Text>
+      )}
+
+      <Box height={1} />
+      <Text dimColor>
+        Post with <Text color="cyan">{`lgtm review post ${current.ref.owner}/${current.ref.repo}#${current.ref.pr}`}</Text>
+      </Text>
+    </Box>
+  );
+}
+
+function severityColour(severity: string): string {
+  switch (severity) {
+    case "critical": return "red";
+    case "high": return "yellow";
+    case "medium": return "blue";
+    default: return "gray";
   }
 }
 
-/**
- * Generate review markdown for persistence.
- */
-function generateReviewMarkdown(
-  prNumber: number,
-  prTitle: string,
-  action: "approve" | "flag" | "back",
-  comments: ReviewComment[],
-  featureGroup?: string
-): string {
-  const lines = [
-    `# Review: PR #${prNumber} — ${prTitle}`,
-    "",
-  ];
-
-  if (featureGroup) {
-    lines.push(`**Feature group:** ${featureGroup}`, "");
-  }
-
-  const stateLabel = action === "approve" ? "✅ Approved" : action === "flag" ? "🚩 Flagged" : "💾 Saved (in progress)";
-  lines.push(`**Decision:** ${stateLabel}`, "");
-
-  if (comments.length > 0) {
-    lines.push(`## Comments (${comments.length})`, "");
-
-    // Group by file
-    const byFile = new Map<string, ReviewComment[]>();
-    for (const c of comments) {
-      if (!byFile.has(c.file)) byFile.set(c.file, []);
-      byFile.get(c.file)!.push(c);
-    }
-
-    for (const [file, fileComments] of byFile) {
-      lines.push(`### ${file}`, "");
-      for (const c of fileComments.sort((a, b) => a.line - b.line)) {
-        lines.push(`- **L${c.line}:** ${c.text}`);
-      }
-      lines.push("");
-    }
-  } else {
-    lines.push("*No comments.*", "");
-  }
-
-  return lines.join("\n");
+function truncate(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
 }
