@@ -1,5 +1,9 @@
 # Auto-Ingest Repos — Implementation Tasks
 
+> **Status: shipped** in [#116](https://github.com/pszf11235/LGTM/pull/116).
+> 
+> `lgtm discover --ingest` and the Repos page.
+
 ## Task 1: Build the repo scanner
 - [ ] Create `packages/core/src/registry/scanner.ts`
 - [ ] Implement `scanForRepos(opts)` as async generator

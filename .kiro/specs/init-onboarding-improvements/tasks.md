@@ -1,5 +1,11 @@
 # Implementation Plan
 
+> **Status: superseded** by `mvp-review-pipeline`.
+> 
+> The boxes below are ticked because this work did land, but the onboarding
+> questionnaire it describes was then removed: `lgtm init` now asks nothing. Kept
+> as the record of why that reversal happened.
+
 ## Overview
 
 This implementation plan addresses five defects in the LGTM CLI's `init` onboarding flow using the exploratory bugfix methodology. The fixes cover:

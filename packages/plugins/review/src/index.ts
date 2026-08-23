@@ -25,7 +25,6 @@ import {
 import { ReviewTab } from "./pages/ReviewTab.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { RulesPage } from "./pages/RulesPage.js";
-import { HistoryPage } from "./pages/HistoryPage.js";
 import { ConfigPage } from "./pages/ConfigPage.js";
 import { ScanResultsPage } from "./pages/ScanResultsPage.js";
 import { DiscoverPage } from "./pages/DiscoverPage.js";
@@ -58,11 +57,6 @@ export const plugin: LGTMPlugin = {
       label: "Repos",
       shortcut: "p",
       component: DiscoverPage,
-    },
-    {
-      label: "History",
-      shortcut: "h",
-      component: HistoryPage,
     },
     {
       label: "Config",
@@ -122,17 +116,6 @@ export const plugin: LGTMPlugin = {
         process.exit(await runWorker());
       });
 
-    // Placeholder commands (future tasks)
-    program
-      .command("history")
-      .description("Search past review sessions")
-      .option("-s, --search <query>", "Search by keyword")
-      .option("-p, --pr <number>", "Filter by PR number")
-      .action((opts: { search?: string; pr?: string }) => {
-        ctx.logger.info(
-          `History search coming in Task 18! (query: ${opts.search ?? opts.pr ?? "all"})`
-        );
-      });
   },
 };
 

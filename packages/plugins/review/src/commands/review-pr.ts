@@ -98,7 +98,6 @@ async function run(ctx: LGTMContext, refArg: string, opts: Options): Promise<voi
   if (opts.force) {
     const existing = loadMeta(ctx.lgtmDir, ref);
     if (existing && existing.lastReviewedSha === pr.headSha) {
-      pr = { ...pr, headSha: `${pr.headSha}` };
       console.log(chalk.gray(`\n  Re-reviewing the same commit because --force was given.`));
     }
   }
@@ -126,7 +125,8 @@ async function run(ctx: LGTMContext, refArg: string, opts: Options): Promise<voi
       info: (m) => console.log(chalk.gray(`  ${m}`)),
       warn: (m) => console.log(chalk.yellow(`  ${m}`)),
       error: (m) => console.log(chalk.red(`  ${m}`)),
-    }
+    },
+    opts.force ?? false
   );
 
   console.log("");

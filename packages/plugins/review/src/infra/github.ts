@@ -3,8 +3,10 @@
  *
  * Provides:
  * - Fetch PR metadata (title, body, files, diff)
- * - Post reviews (APPROVE / REQUEST_CHANGES)
- * - Post inline comments at specific file/line positions
+ * - Post a standalone comment on a PR
+ *
+ * It deliberately cannot create a published review. Draft reviews are built in
+ * domain/pending-review.ts, which is the only file that ever sends an `event`.
  *
  * Auth goes through resolveGitHubToken(): GITHUB_TOKEN, then `gh auth token`,
  * then ~/.lgtm-credentials. Uses raw fetch() to the GitHub REST API.
@@ -130,32 +132,13 @@ export function createGitHubAdapter(owner: string, repo: string) {
   }
 
   /**
-   * Post a review on a PR.
+   * There is deliberately no function here that posts a review with an `event`.
    *
-   * @param prNumber - PR number
-   * @param event - APPROVE, REQUEST_CHANGES, or COMMENT
-   * @param body - Review body text
-   * @param comments - Optional inline comments
+   * A review created without one is PENDING: a draft only its author can see,
+   * which is the whole point of this tool. The single place an event is ever
+   * sent is submitPendingReview() in domain/pending-review.ts, and that runs
+   * only when someone types `lgtm review submit`.
    */
-  async function postReview(
-    prNumber: number,
-    event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
-    body: string,
-    comments?: Array<{ path: string; line: number; body: string }>
-  ): Promise<void> {
-    await request(`/repos/${owner}/${repo}/pulls/${prNumber}/reviews`, {
-      method: "POST",
-      body: {
-        event,
-        body,
-        comments: comments?.map((c) => ({
-          path: c.path,
-          line: c.line,
-          body: c.body,
-        })),
-      },
-    });
-  }
 
   /**
    * Post a single comment on a PR (not as part of a review).
@@ -186,7 +169,6 @@ export function createGitHubAdapter(owner: string, repo: string) {
     fetchPR,
     fetchDiff,
     fetchChangedFiles,
-    postReview,
     postComment,
     checkAuth,
     getToken,

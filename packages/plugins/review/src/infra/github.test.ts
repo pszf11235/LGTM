@@ -126,27 +126,15 @@ describe("GitHub Adapter", () => {
     });
   });
 
-  describe("postReview", () => {
-    test("posts review with inline comments", async () => {
-      let capturedBody: any;
+  describe("publishing", () => {
+    test("the adapter exposes no way to create a published review", () => {
+      // A review created with an `event` is visible to everyone the moment it
+      // is sent. Draft reviews are built in domain/pending-review.ts, which
+      // omits the field, so this adapter must not offer a shortcut past it.
+      const adapter = createGitHubAdapter("owner", "repo") as Record<string, unknown>;
 
-      globalThis.fetch = mock(async (url: string, opts: any) => {
-        expect(url).toContain("/pulls/42/reviews");
-        expect(opts.method).toBe("POST");
-        capturedBody = JSON.parse(opts.body);
-        return new Response("{}", { status: 200 });
-      }) as any;
-
-      const adapter = createGitHubAdapter("owner", "repo");
-      await adapter.postReview(42, "COMMENT", "Review body", [
-        { path: "src/app.ts", line: 10, body: "Fix this" },
-      ]);
-
-      expect(capturedBody.event).toBe("COMMENT");
-      expect(capturedBody.body).toBe("Review body");
-      expect(capturedBody.comments).toHaveLength(1);
-      expect(capturedBody.comments[0].path).toBe("src/app.ts");
-      expect(capturedBody.comments[0].line).toBe(10);
+      expect(adapter.postReview).toBeUndefined();
+      expect(Object.keys(adapter)).not.toContain("postReview");
     });
   });
 

@@ -267,10 +267,15 @@ function statusIcon(status: RepoStatus): string {
 // ─── Interactive Picker ─────────────────────────────────────────────────────
 
 async function runPicker(repos: ScannedRepo[]): Promise<void> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+  // Only needed when stdin cannot go into raw mode, which means piped input.
+  // Built lazily because an open readline interface on stdin keeps Bun's event
+  // loop alive, so creating one on a TTY run left the command hanging after the
+  // summary had already printed.
+  let rl: readline.Interface | null = null;
+  function fallbackReadline(): readline.Interface {
+    rl ??= readline.createInterface({ input: process.stdin, output: process.stdout });
+    return rl;
+  }
 
   let accepted = 0;
   let skipped = 0;
@@ -292,7 +297,7 @@ async function runPicker(repos: ScannedRepo[]): Promise<void> {
           stdin.setRawMode(true);
         } catch {
           // Piped stdin — can't do raw mode, use readline fallback
-          rl.question("[a/s/A/q] ", resolve);
+          fallbackReadline().question("[a/s/A/q] ", resolve);
           return;
         }
         stdin.resume();
@@ -352,7 +357,18 @@ async function runPicker(repos: ScannedRepo[]): Promise<void> {
       }
     }
   } finally {
-    rl.close();
+    // Aliased because the only assignment is inside fallbackReadline(), which
+    // control flow analysis cannot see, so `rl` narrows to null here.
+    const opened = rl as readline.Interface | null;
+    opened?.close();
+    // The keypress path calls stdin.resume() on every prompt. Leaving stdin
+    // flowing and in raw mode holds the process open once the picker is done.
+    try {
+      process.stdin.setRawMode(false);
+    } catch {
+      // Not a TTY, nothing to restore.
+    }
+    process.stdin.pause();
   }
 
   // Summary

@@ -1,5 +1,11 @@
 # Multi-Repo Cross-Review — Implementation Tasks
 
+> **Status: not implemented.**
+> 
+> Specified alongside `auto-ingest-repos` in [#115](https://github.com/pszf11235/LGTM/pull/115), but only the auto-ingest half was built. Nothing in
+> `packages/` implements cross-repo review. Kept as a design record for what the
+> multi-repo story would look like, not as work in progress.
+
 ## Task 1: Extend queue to store repo context
 - [ ] Add `repo?: string` and `repoShort?: string` to `QueuedPR` interface in `domain/types.ts`
 - [ ] Update `queue.ts` → `addToQueue()` to accept repo info from PR ref

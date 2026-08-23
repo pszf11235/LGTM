@@ -123,6 +123,20 @@ describe("decidePR", () => {
     });
   });
 
+  test("force re-reviews the same head SHA, which is what `review pr --force` is for", () => {
+    seed("a".repeat(40), 1);
+
+    expect(decidePR(store, ref, "a".repeat(40), true)).toMatchObject({
+      kind: "re-review", round: 2,
+    });
+  });
+
+  test("force is off by default, so the watcher still skips", () => {
+    seed("a".repeat(40), 1);
+
+    expect(decidePR(store, ref, "a".repeat(40))).toMatchObject({ kind: "skip" });
+  });
+
   test("a missing head SHA is skipped rather than reviewed every cycle", () => {
     // The API not returning a SHA must not mean "review again forever".
     seed("a".repeat(40));
@@ -239,7 +253,7 @@ describe("re-review after new commits", () => {
     await checkPR(store, watched, openPR(), [agent()], deps(), "", silent);
 
     // The author sees it, so it becomes eligible for verification.
-    markFindingsPosted(store, ref, ["f1"], 555);
+    markFindingsPosted(store, ref, [`1:${defaultAgentConfig().name}:f1`], 555);
 
     // New commits. The fake now answers verification and then the new review.
     // First call returns verdicts, second returns findings.

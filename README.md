@@ -6,7 +6,7 @@
 
 LGTM watches your repositories, reviews new pull requests with the AI CLI you already have installed, and leaves the findings on your disk. Nothing reaches GitHub until you say so, and when it does it arrives as a **draft review** you can edit comment by comment before submitting.
 
-Built with [Kiro](https://kiro.dev).
+Built with [Kiro](https://kiro.dev), spec first — [how](#built-with-kiro).
 
 ## The loop
 
@@ -40,24 +40,66 @@ This is also the single most dangerous line in the codebase, because sending `ev
 expect("event" in request.body).toBe(false);
 ```
 
+The GitHub adapter has no function that can publish a review at all. The one
+place an `event` is ever sent is `submitPendingReview()`, which runs only when
+you type `lgtm review submit`.
+
+## Built with Kiro
+
+Every feature here started as a Kiro spec, not as code. The specs are in
+[`.kiro/specs/`](.kiro/specs/) — one directory per feature, each with
+`requirements.md`, `design.md` and `tasks.md` — and
+[`.kiro/steering/workflow.md`](.kiro/steering/workflow.md) holds the standing
+rules Kiro follows in this repo: atomic commits, conventional messages, one task
+per branch, and a PR is not done until CI is green.
+
+The git history shows the cadence. The spec lands, then the implementation:
+
+| Spec | Spec commit | What it produced |
+|---|---|---|
+| [`multi-agent-watch-review`](.kiro/specs/multi-agent-watch-review/) | `4730eb8` | one OS process per agent, so a hung provider cannot take the watcher down |
+| [`codebase-quality-improvements`](.kiro/specs/codebase-quality-improvements/) | `f6aeb28` | the removals pass, deleting the code that posted straight to a PR |
+| [`mvp-review-pipeline`](.kiro/specs/mvp-review-pipeline/) | `5e57278` | provider dispatch, the on-disk review store, `lgtm review pr` |
+| [`mvp-review-pipeline`](.kiro/specs/mvp-review-pipeline/) | `4050c28` | PENDING-only posting, the central store, zero-question `init` |
+
+That last pair is the clearest example. `4050c28` wrote down the decision to post
+a draft and nothing else at 13:42 UTC; `cc1c051` implemented it at 14:19, and it
+collapsed onboarding from 751 lines to about 80 because the spec had already
+decided `init` would ask nothing.
+
+The design decision this whole project is built around — that LGTM produces a
+draft review and never a published one — was argued out in
+[`mvp-review-pipeline/design.md`](.kiro/specs/mvp-review-pipeline/design.md)
+before any of the posting code existed.
+[`removals.md`](.kiro/specs/mvp-review-pipeline/removals.md) in the same spec is
+the list of things Kiro was told to delete rather than build, which is most of
+why this reads as a small tool instead of a large one.
+
 ## Install
 
 ### Binary, no runtime needed
 
+`curl -f` so a missing asset fails loudly instead of writing the 404 body to disk.
+
 ```bash
 # macOS (Apple Silicon)
-curl -L https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-darwin-arm64 -o lgtm
-chmod +x lgtm && sudo mv lgtm /usr/local/bin/
+curl -fL https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-darwin-arm64 -o lgtm
 
 # macOS (Intel)
-curl -L https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-darwin-x64 -o lgtm
+curl -fL https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-darwin-x64 -o lgtm
 
 # Linux (x64 / arm64)
-curl -L https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-linux-x64 -o lgtm
-curl -L https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-linux-arm64 -o lgtm
+curl -fL https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-linux-x64 -o lgtm
+curl -fL https://github.com/pszf11235/LGTM/releases/latest/download/lgtm-linux-arm64 -o lgtm
+
+chmod +x lgtm && sudo mv lgtm /usr/local/bin/
 ```
 
+Checksums are published with each release as `checksums-sha256.txt`.
+
 ### From source
+
+Needs [Bun](https://bun.sh). Takes about a minute.
 
 ```bash
 git clone https://github.com/pszf11235/LGTM.git && cd LGTM
@@ -108,7 +150,6 @@ provider: auto          # auto | kiro-cli | claude-cli | codex-cli | openrouter 
 model: null             # only used by openrouter and ollama
 severity: high          # minimum severity to record
 timeout: 300
-commentDelay: [20, 90]
 enabled: true
 prompt: |
   Focus on high and critical issues only.
@@ -195,12 +236,34 @@ lgtm review scan                           # regex rules against the whole repo
 
 Every `<ref>` accepts `owner/repo#42`, a pasted GitHub URL, or a bare `42` when it is unambiguous. When it isn't, LGTM prints the exact commands that would be.
 
+Finding ids restart at `f1` in every round, so once a PR has been reviewed twice
+a bare `f1` names two different findings. `discard` refuses an ambiguous id and
+prints the qualified `round:agent:id` forms to use instead.
+
+## The TUI
+
+`lgtm` with no arguments opens a terminal UI over the same store the CLI uses.
+Tab or the arrow keys move between pages.
+
+| Page | Shows |
+|---|---|
+| Dashboard | open PRs in watched repos that need attention |
+| Review | PRs with findings on disk, and the findings themselves |
+| Rules | the regex and prompt rules in `~/.lgtm-farm/rules/` |
+| Repos | git repos found on disk, and which are watched |
+| Config | store location, agents, resolved settings |
+| Scan | results of the last `lgtm review scan` |
+| AI | which review providers are available, and what `auto` resolves to |
+
+It is a reader. Reviewing, posting and submitting are deliberate acts, so they
+stay in the CLI where they are explicit and scriptable.
+
 ## Verify it works
 
 ```bash
 bun install
 bun run lint            # tsc --noEmit
-bun test                # 426 tests
+bun test                # 420 tests
 bun run build:binary
 ./dist/lgtm smoke       # 12 checks, exits non-zero on failure
 ```

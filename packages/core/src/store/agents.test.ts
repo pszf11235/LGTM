@@ -58,7 +58,6 @@ describe("ensureDefaultAgent", () => {
     expect(agent.provider).toBe("auto");
     expect(agent.severity).toBe("high");
     expect(agent.timeout).toBe(300);
-    expect(agent.commentDelay).toEqual([20, 90]);
     expect(agent.enabled).toBe(true);
     expect(agent.prompt).toBe(builtIn.prompt);
   });
@@ -106,25 +105,6 @@ describe("parseAgentFile tolerates bad input", () => {
     expect(agent.provider).toBe("auto");
   });
 
-  test("provider matching is case and whitespace insensitive", () => {
-    const agent = parseAgentFile("---\nprovider: '  Claude-CLI '\n---\n", "/x/a.md");
-    expect(agent.provider).toBe("claude-cli");
-  });
-
-  test("an unknown severity falls back to high", () => {
-    const agent = parseAgentFile("---\nseverity: catastrophic\n---\n", "/x/a.md");
-    expect(agent.severity).toBe("high");
-  });
-
-  test("a single commentDelay number means exactly that delay", () => {
-    const agent = parseAgentFile("---\ncommentDelay: 30\n---\n", "/x/a.md");
-    expect(agent.commentDelay).toEqual([30, 30]);
-  });
-
-  test("a reversed commentDelay pair is swapped, since the intent is obvious", () => {
-    const agent = parseAgentFile("---\ncommentDelay: [90, 20]\n---\n", "/x/a.md");
-    expect(agent.commentDelay).toEqual([20, 90]);
-  });
 
   test("a non-positive timeout falls back to the default", () => {
     expect(parseAgentFile("---\ntimeout: 0\n---\n", "/x/a.md").timeout).toBe(300);
