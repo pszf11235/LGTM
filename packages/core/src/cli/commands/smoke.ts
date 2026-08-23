@@ -266,7 +266,6 @@ index abc1234..def5678 100644
         model: null,
         severity: "high",
         timeout: 10,
-        commentDelay: [0, 0],
         enabled: true,
         prompt: "smoke test",
         sourcePath: "<smoke>",

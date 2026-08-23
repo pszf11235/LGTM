@@ -49,9 +49,6 @@ export interface AgentConfig {
   /** Seconds before the orchestrator kills the worker. */
   timeout: number;
 
-  /** [min, max] seconds to wait between individual comment posts. */
-  commentDelay: [number, number];
-
   enabled: boolean;
 
   /** The review instructions. This is the part users edit. */
@@ -83,7 +80,6 @@ provider: auto
 model: null
 severity: high
 timeout: 300
-commentDelay: [20, 90]
 enabled: true
 prompt: |
 ${DEFAULT_PROMPT.split("\n")
@@ -102,7 +98,6 @@ straight to the review CLI, on top of whatever built-in review skill that CLI ha
 | \`model\` | Only used by openrouter and ollama. The CLIs choose their own. |
 | \`severity\` | Minimum severity to record. Anything lower is dropped. |
 | \`timeout\` | Seconds before the review is abandoned. |
-| \`commentDelay\` | \`[min, max]\` seconds between individual comment posts. |
 | \`enabled\` | Set false to skip this agent without deleting the file. |
 
 To run two reviewers on every PR, copy this file to \`agents/second.md\` and give
@@ -117,7 +112,6 @@ export function defaultAgentConfig(sourcePath = "<built-in>"): AgentConfig {
     model: null,
     severity: "high",
     timeout: 300,
-    commentDelay: [20, 90],
     enabled: true,
     prompt: DEFAULT_PROMPT,
     sourcePath,
@@ -141,23 +135,6 @@ function asSeverity(value: unknown, fallback: Severity = "high"): Severity {
   return normalised in SEVERITY_ORDER ? (normalised as Severity) : fallback;
 }
 
-/**
- * commentDelay accepts `[20, 90]` or a single number meaning "exactly this".
- * A reversed pair is swapped rather than rejected, since the intent is obvious.
- */
-function asCommentDelay(value: unknown): [number, number] {
-  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-    return [value, value];
-  }
-  if (Array.isArray(value) && value.length >= 2) {
-    const min = Number(value[0]);
-    const max = Number(value[1]);
-    if (Number.isFinite(min) && Number.isFinite(max) && min >= 0 && max >= 0) {
-      return min <= max ? [min, max] : [max, min];
-    }
-  }
-  return [20, 90];
-}
 
 function asTimeout(value: unknown): number {
   const n = Number(value);
@@ -180,7 +157,6 @@ export function parseAgentFile(raw: string, sourcePath: string): AgentConfig {
     model: typeof data.model === "string" && data.model.trim() ? data.model.trim() : null,
     severity: asSeverity(data.severity),
     timeout: asTimeout(data.timeout),
-    commentDelay: asCommentDelay(data.commentDelay),
     enabled: data.enabled !== false,
     prompt: typeof data.prompt === "string" && data.prompt.trim() ? data.prompt.trim() : DEFAULT_PROMPT,
     sourcePath,
