@@ -6,7 +6,8 @@
 
 LGTM watches your repositories, reviews new pull requests with the AI CLI you already have installed, and leaves the findings on your disk. Nothing reaches GitHub until you say so, and when it does it arrives as a **draft review** you can edit comment by comment before submitting.
 
-Built with [Kiro](https://kiro.dev), spec first — [how](#built-with-kiro).
+Built with [Kiro](https://kiro.dev). [How that actually went](#built-with-kiro),
+drift included.
 
 ## The loop
 
@@ -46,34 +47,63 @@ you type `lgtm review submit`.
 
 ## Built with Kiro
 
-Every feature here started as a Kiro spec, not as code. The specs are in
-[`.kiro/specs/`](.kiro/specs/) — one directory per feature, each with
-`requirements.md`, `design.md` and `tasks.md` — and
+Specs are in [`.kiro/specs/`](.kiro/specs/), one directory per feature, each with
+`requirements.md`, `design.md` and `tasks.md`.
 [`.kiro/steering/workflow.md`](.kiro/steering/workflow.md) holds the standing
-rules Kiro follows in this repo: atomic commits, conventional messages, one task
-per branch, and a PR is not done until CI is green.
+rules: atomic commits, conventional messages, one task per branch, and a PR is
+not done until CI is green.
 
-The git history shows the cadence. The spec lands, then the implementation:
+The honest version of how that went, because the git history shows it either way.
+
+**It started spec first.** The second commit in the repo, before any real code,
+was a full spec: `requirements.md`, `design.md` and `tasks.md`, 1453 lines, for
+what was then called `pr-review-harness` and is now
+[`.kiro/specs/lgtm/`](.kiro/specs/lgtm/).
+
+**Then it drifted.** Between 17 and 21 August there are 81 commits and not one
+`spec:` commit among them. I kept building and leaned on Kiro, half expecting it
+to hold the spec-driven line for me. It did not, and it was never going to. It
+followed where I pointed it, and I was pointing it at code. That is the part I
+would do differently: the discipline has to come from the person, and the steering
+file is where you put it.
+
+**Then a real bug pulled it back.** `lgtm init` had five separate defects tangled
+together, and poking at them individually was not working. Kiro's bugfix workflow
+was the right tool:
+[`init-onboarding-improvements`](.kiro/specs/init-onboarding-improvements/) is
+`workflowType: requirements-first`, `specType: bugfix`, with each defect written
+down as current behaviour versus expected before anything was touched, and
+`tasks.meta.json` carrying 27 execution records. Naming five bugs properly turned
+out to be most of fixing them.
+
+**Then the bigger features went back through specs**, and that is where the
+cadence actually holds. Every `spec:` commit in this repo is from 22 or 23 August:
 
 | Spec | Spec commit | What it produced |
 |---|---|---|
+| [`tui-ux-redesign`](.kiro/specs/tui-ux-redesign/) | `7170f70` | keyboard model, scrolling, the Repos page |
 | [`multi-agent-watch-review`](.kiro/specs/multi-agent-watch-review/) | `4730eb8` | one OS process per agent, so a hung provider cannot take the watcher down |
 | [`codebase-quality-improvements`](.kiro/specs/codebase-quality-improvements/) | `f6aeb28` | the removals pass, deleting the code that posted straight to a PR |
 | [`mvp-review-pipeline`](.kiro/specs/mvp-review-pipeline/) | `5e57278` | provider dispatch, the on-disk review store, `lgtm review pr` |
 | [`mvp-review-pipeline`](.kiro/specs/mvp-review-pipeline/) | `4050c28` | PENDING-only posting, the central store, zero-question `init` |
 
-That last pair is the clearest example. `4050c28` wrote down the decision to post
-a draft and nothing else at 13:42 UTC; `cc1c051` implemented it at 14:19, and it
-collapsed onboarding from 751 lines to about 80 because the spec had already
+The last row is the clearest one. `4050c28` wrote down the decision to post a
+draft and nothing else at 13:42 UTC. `cc1c051` implemented it at 14:19 and
+collapsed onboarding from 751 lines to about 80, because the spec had already
 decided `init` would ask nothing.
 
-The design decision this whole project is built around — that LGTM produces a
-draft review and never a published one — was argued out in
+The decision this whole tool is built around, that LGTM produces a draft review
+and never a published one, was argued out in
 [`mvp-review-pipeline/design.md`](.kiro/specs/mvp-review-pipeline/design.md)
 before any of the posting code existed.
 [`removals.md`](.kiro/specs/mvp-review-pipeline/removals.md) in the same spec is
-the list of things Kiro was told to delete rather than build, which is most of
-why this reads as a small tool instead of a large one.
+the list of things Kiro was told to delete rather than build, and it is most of
+why this is a small tool instead of a large one.
+
+So: spec, drift, debug, realign. The specs that were written before the code are
+the features that came out clean, and the stretch with no specs is where the
+review later found the most bugs. That is not a coincidence and it is the useful
+thing I learned.
 
 ## Install
 
