@@ -10,40 +10,12 @@
  */
 
 import fs from "fs";
-import path from "path";
 import chalk from "chalk";
 import type { ProjectProfile } from "../plugin.js";
 import { resolveLgtmDir, loadBootstrap, loadProfile } from "../config/loader.js";
-import { ensureLgtmDirs, getAgentsDir } from "../store/paths.js";
+import { ensureLgtmDirs } from "../store/paths.js";
+import { ensureDefaultAgent } from "../store/agents.js";
 import { createOKFStore } from "../store/okf.js";
-
-/** The default review prompt, written to agents/reviewer.md on first init. */
-const DEFAULT_AGENT = `---
-name: reviewer
-provider: auto
-model: null
-severity: high
-timeout: 300
-commentDelay: [20, 90]
-enabled: true
-prompt: |
-  Focus on high and critical issues only.
-  Use my tone and voice: concise, actionable, no fluff, dev to dev.
-  Never use em dashes or semicolons.
-  Do not spell out the severity in the comment body.
-  Instead of "High / borderline critical - these events won't make it to GA4."
-  write "These events probably won't make it to GA4 (this is an important one)..."
-  Cite the exact file and line for every finding.
----
-
-# Review Agent
-
-Edit the \`prompt\` field above to change how reviews are written.
-
-\`provider: auto\` picks the first available CLI in priority order:
-kiro-cli, claude-cli, codex-cli, openrouter, ollama.
-Set it explicitly to pin one.
-`;
 
 export interface InitResult {
   lgtmDir: string;
@@ -61,12 +33,9 @@ export async function initStore(): Promise<InitResult> {
 
   ensureLgtmDirs(lgtmDir);
 
-  // Default agent config
-  const agentPath = path.join(getAgentsDir(lgtmDir), "reviewer.md");
-  const agentCreated = !fs.existsSync(agentPath);
-  if (agentCreated) {
-    fs.writeFileSync(agentPath, DEFAULT_AGENT, "utf-8");
-  }
+  // The review prompt is store data, not code, so it ships as a file the user
+  // can edit rather than a string baked into the reviewer.
+  const agentCreated = ensureDefaultAgent(lgtmDir);
 
   // Minimal profile
   if (!loadProfile(lgtmDir)) {

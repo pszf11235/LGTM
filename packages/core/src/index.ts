@@ -203,19 +203,25 @@ async function main() {
         console.log(`    ${icon} ${name}`);
       }
 
-      // Agents are the user-facing config that actually matters
-      try {
-        const agentFiles = await ctx.store.list("agents");
-        if (agentFiles.length > 0) {
-          console.log(`\n  ${chalk.bold("Review agents:")}`);
-          for (const f of agentFiles) {
-            console.log(`    ${chalk.cyan(f.replace(/^agents\//, ""))}`);
-          }
+      // Agents are the user-facing config that actually matters, so show the
+      // resolved settings rather than just the filenames.
+      const { loadAgentConfigs } = await import("./store/agents.js");
+      const agents = loadAgentConfigs(ctx.lgtmDir);
+
+      if (agents.length > 0) {
+        console.log(`\n  ${chalk.bold("Review agents:")}`);
+        for (const agent of agents) {
+          const icon = agent.enabled ? chalk.green("●") : chalk.gray("○");
+          const model = agent.model ? ` ${chalk.gray(agent.model)}` : "";
           console.log(
-            chalk.gray(`\n  Edit an agent file to change how reviews are written.`)
+            `    ${icon} ${chalk.cyan(agent.name)}` +
+            `  ${agent.provider}${model}` +
+            chalk.gray(`  min severity ${agent.severity}, timeout ${agent.timeout}s`)
           );
         }
-      } catch { /* no agents dir yet */ }
+        console.log(chalk.gray(`\n  Edit ${chalk.cyan("agents/<name>.md")} to change how reviews are written.`));
+        console.log(chalk.gray(`  Copy it to a second file to run two reviewers per PR.`));
+      }
 
       console.log(
         chalk.gray(`\n  Providers: ${chalk.cyan("lgtm ai discover")}\n`)

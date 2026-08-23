@@ -307,18 +307,13 @@ async function runPicker(repos: ScannedRepo[]): Promise<void> {
         stdin.on("data", onData);
       });
 
-      const key = answer.trim().toLowerCase();
+      const raw = answer.trim();
+      const key = raw.toLowerCase();
 
-      if (key === "a" || key === "\r" || key === "\n") {
-        const { watched, label } = acceptAndDescribe(repo);
-        accepted++;
-        if (!watched) unwatchable++;
-        console.log(label);
-      } else if (key === "s" || key === " ") {
-        denyRepo(repo);
-        skipped++;
-        console.log(chalk.gray("○ skipped"));
-      } else if (answer === "A") {
+      // Uppercase A must be tested before the lowercase comparison. It used to
+      // be a later branch, so `key === "a"` swallowed it and "accept all" was
+      // unreachable despite being advertised in the help line.
+      if (raw === "A") {
         // Accept ALL remaining
         const first = acceptAndDescribe(repo);
         accepted++;
@@ -332,6 +327,15 @@ async function runPicker(repos: ScannedRepo[]): Promise<void> {
           console.log(`  ${chalk.gray(`[${j + 1}/${repos.length}]`)} ${chalk.cyan(repos[j].name)} ${label}`);
         }
         break;
+      } else if (key === "a" || key === "\r" || key === "\n") {
+        const { watched, label } = acceptAndDescribe(repo);
+        accepted++;
+        if (!watched) unwatchable++;
+        console.log(label);
+      } else if (key === "s" || key === " ") {
+        denyRepo(repo);
+        skipped++;
+        console.log(chalk.gray("○ skipped"));
       } else if (key === "q" || key === "\x03") {
         // Quit — skip remaining
         console.log(chalk.gray("done"));

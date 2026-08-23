@@ -9,6 +9,7 @@
     "./plugin.js": "./src/plugin.ts",
     "./store/okf.js": "./src/store/okf.ts",
     "./store/paths.js": "./src/store/paths.ts",
+    "./store/agents.js": "./src/store/agents.ts",
     "./config/loader.js": "./src/config/loader.ts",
     "./auth/github-oauth.js": "./src/auth/github-oauth.ts",
     "./utils/git.js": "./src/utils/git.ts",

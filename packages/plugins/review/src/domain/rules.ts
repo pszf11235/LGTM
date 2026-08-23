@@ -7,7 +7,7 @@
  *
  * Enforcement modes:
  * - "regex": pattern matched against diff lines (zero tokens)
- * - "llm": sent to LLM with examples (Task 12)
+ * - "llm": appended to the review agent prompt as extra instructions
  */
 
 import type { OKFStore } from "@lgtm/core/plugin.js";
@@ -194,80 +194,62 @@ export function createRulesEngine(store: OKFStore) {
     }
   }
 
-  /**
-   * Match LLM rules against a parsed diff.
-   * Sends rule description + examples + changed file content to the LLM.
-   * Scoped to changed files ONLY (direct enforcement).
-   *
-   * @param rules - All rules (only LLM rules will be checked)
-   * @param diff - Parsed diff to check
-   * @param llm - LLM provider instance
-   * @returns Violations found by the LLM
-   */
-  async function matchLLM(
-    rules: Rule[],
-    diff: ParsedDiff,
-    llm: { complete: (prompt: string, options?: { maxTokens?: number; temperature?: number; systemPrompt?: string }) => Promise<string> }
-  ): Promise<RuleViolation[]> {
-    const llmRules = rules.filter((r) => r.enabled && r.enforcement === "llm");
-    if (llmRules.length === 0) return [];
-
-    const violations: RuleViolation[] = [];
-
-    for (const rule of llmRules) {
-      // Build diff content scoped to matching files only
-      const relevantFiles = diff.files.filter((f) => {
-        if (rule.filePattern) return minimatch(f.path, rule.filePattern);
-        return true;
-      });
-
-      if (relevantFiles.length === 0) continue;
-
-      // Build a compact representation of changes (only added lines)
-      const changesText = relevantFiles
-        .map((f) => {
-          const addedLines = f.hunks
-            .flatMap((h) => h.lines)
-            .filter((l) => l.type === "added")
-            .map((l) => `${f.path}:${l.newLine}: ${l.content}`);
-          return addedLines.join("\n");
-        })
-        .filter((s) => s.length > 0)
-        .join("\n");
-
-      if (!changesText) continue;
-
-      // Truncate to stay within token budget (~4000 chars ≈ 1000 tokens)
-      const truncated = changesText.slice(0, 4000);
-
-      const prompt = buildEnforcementPrompt(rule, truncated);
-
-      try {
-        const response = await llm.complete(prompt, {
-          maxTokens: 500,
-          temperature: 0.1,
-          systemPrompt: "You are a code reviewer checking for rule violations. Respond ONLY with valid JSON.",
-        });
-
-        const parsed = parseViolationResponse(response, rule.id);
-        violations.push(...parsed);
-      } catch {
-        // LLM failure — skip silently (don't block review)
-        continue;
-      }
-    }
-
-    return violations;
-  }
-
   return {
     loadRules,
     createRule,
     matchRegex,
-    matchLLM,
     incrementTriggered,
     setEnabled,
   };
+}
+
+/**
+ * Render LLM-enforced rules as extra instructions for the review agent.
+ *
+ * These rules used to get their own `llm.complete()` call per rule. Once the
+ * review itself is delegated to a CLI there is no raw LLM provider to call, and
+ * paying for a separate round trip per rule made no sense anyway: the agent is
+ * already looking at the diff, so the rules ride along in its prompt for free.
+ *
+ * Regex rules are not included. They run locally in `matchRegex` and produce
+ * findings directly, so restating them here would double up.
+ *
+ * Returns an empty string when there is nothing to add, so callers can
+ * concatenate unconditionally.
+ */
+export function rulesAsPromptContext(rules: Rule[]): string {
+  const promptRules = rules.filter((r) => r.enabled && r.enforcement === "llm");
+  if (promptRules.length === 0) return "";
+
+  const lines = [
+    "Also enforce these project rules. Report a finding for each violation.",
+    "",
+  ];
+
+  for (const rule of promptRules) {
+    lines.push(`- ${rule.description} (${rule.category}, ${rule.severity})`);
+
+    if (rule.filePattern) {
+      lines.push(`  Applies to: ${rule.filePattern}`);
+    }
+    for (const bad of rule.examples.bad.slice(0, 2)) {
+      lines.push(`  Violates: ${collapse(bad)}`);
+    }
+    for (const good of rule.examples.good.slice(0, 2)) {
+      lines.push(`  Correct: ${collapse(good)}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Flatten a code example onto one line and cap it, so a long snippet cannot
+ * crowd out the review instructions in the prompt.
+ */
+function collapse(example: string): string {
+  const oneLine = example.replace(/\s+/g, " ").trim();
+  return oneLine.length > 160 ? `${oneLine.slice(0, 157)}...` : oneLine;
 }
 
 /**
@@ -313,64 +295,10 @@ function generateRuleBody(rule: Rule): string {
 }
 
 /**
- * Build the LLM prompt for rule enforcement.
- */
-function buildEnforcementPrompt(rule: Rule, changesText: string): string {
-  let prompt = `Check the following code changes for violations of this rule:
-
-Rule: ${rule.description}
-Category: ${rule.category}
-Severity: ${rule.severity}
-`;
-
-  if (rule.examples.bad.length > 0) {
-    prompt += `\nExamples of violations:\n${rule.examples.bad.map((e) => `- ${e}`).join("\n")}\n`;
-  }
-  if (rule.examples.good.length > 0) {
-    prompt += `\nExamples of correct code:\n${rule.examples.good.map((e) => `- ${e}`).join("\n")}\n`;
-  }
-
-  prompt += `\nCode changes to check (format: file:line: content):
-${changesText}
-
-If there are violations, respond with a JSON array:
-[{"file": "path/to/file.ts", "line": 42, "explanation": "why this violates the rule", "suggestion": "how to fix"}]
-
-If no violations, respond with: []`;
-
-  return prompt;
-}
-
-/**
- * Parse the LLM's violation response.
- */
-function parseViolationResponse(response: string, ruleId: string): RuleViolation[] {
-  try {
-    // Extract JSON from response (might have markdown wrapping)
-    const jsonMatch = response.match(/\[[\s\S]*?\]/);
-    if (!jsonMatch) return [];
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed
-      .filter((v: any) => v.file && v.line)
-      .map((v: any) => ({
-        ruleId,
-        file: String(v.file),
-        line: typeof v.line === "number" ? v.line : parseInt(v.line, 10),
-        explanation: v.explanation ?? "Rule violation detected",
-        suggestion: v.suggestion,
-      }))
-      .filter((v) => !isNaN(v.line) && v.line > 0); // Remove invalid line numbers
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Check which LLM rules would be skipped (for user warning).
- * Returns rules that need LLM but LLM is unavailable.
+ * LLM-enforced rules that a purely local scan cannot check.
+ *
+ * `lgtm review scan` matches regex rules against a diff with no agent involved,
+ * so these are reported as not evaluated rather than silently ignored.
  */
 export function getSkippedLLMRules(rules: Rule[], llmAvailable: boolean): Rule[] {
   if (llmAvailable) return [];
