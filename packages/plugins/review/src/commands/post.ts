@@ -279,11 +279,15 @@ export function registerPostCommand(program: Command, ctx: LGTMContext) {
           console.log(chalk.gray(`    ${s.finding.id} ${s.finding.file}:${s.finding.line} — ${s.reason}`));
         }
         // Held, not dropped. A later round may bring the line back.
-        markFindingsSkipped(
-          ctx.lgtmDir,
-          ref,
-          skipped.map((s) => ({ id: s.finding.id, reason: s.reason }))
-        );
+        // Not under --dry-run: that prints "Nothing was sent", so it must not
+        // leave findings marked skipped in the store either.
+        if (!opts.dryRun) {
+          markFindingsSkipped(
+            ctx.lgtmDir,
+            ref,
+            skipped.map((s) => ({ id: s.finding.id, reason: s.reason }))
+          );
+        }
       }
 
       if (postable.length === 0) {
