@@ -44,7 +44,16 @@ export function createOKFStore(rootDir: string): OKFStore {
     try {
       const raw = await fs.readFile(fullPath, "utf-8");
       const { data, content } = matter(raw);
-      return { data: data as Record<string, unknown>, content: content.trim() };
+
+      // gray-matter memoises by raw string and hands back a shallow copy, so
+      // two files with byte-identical content share one `data` object. Callers
+      // mutate what they read (queue.ts sets `pr.state` in place), and that
+      // mutation would surface in every other file with the same content.
+      // Clone so a read is always private to its caller.
+      return {
+        data: structuredClone(data) as Record<string, unknown>,
+        content: content.trim(),
+      };
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         return null;
