@@ -123,6 +123,20 @@ describe("decidePR", () => {
     });
   });
 
+  test("force re-reviews the same head SHA, which is what `review pr --force` is for", () => {
+    seed("a".repeat(40), 1);
+
+    expect(decidePR(store, ref, "a".repeat(40), true)).toMatchObject({
+      kind: "re-review", round: 2,
+    });
+  });
+
+  test("force is off by default, so the watcher still skips", () => {
+    seed("a".repeat(40), 1);
+
+    expect(decidePR(store, ref, "a".repeat(40))).toMatchObject({ kind: "skip" });
+  });
+
   test("a missing head SHA is skipped rather than reviewed every cycle", () => {
     // The API not returning a SHA must not mean "review again forever".
     seed("a".repeat(40));

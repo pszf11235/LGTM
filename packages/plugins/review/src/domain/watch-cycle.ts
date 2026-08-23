@@ -64,7 +64,8 @@ export interface CycleDeps {
 export function decidePR(
   lgtmDir: string,
   ref: PRRef,
-  headSha: string
+  headSha: string,
+  force = false
 ): PRDecision {
   const meta = loadMeta(lgtmDir, ref);
 
@@ -79,7 +80,16 @@ export function decidePR(
   }
 
   if (meta.lastReviewedSha === headSha) {
-    return { kind: "skip", reason: "no new commits", round: meta.currentRound };
+    // `review pr --force` is someone asking for this commit again on purpose.
+    // The watcher never passes force, so it still skips.
+    if (!force) {
+      return { kind: "skip", reason: "no new commits", round: meta.currentRound };
+    }
+    return {
+      kind: "re-review",
+      reason: "forced re-review of the same commit",
+      round: meta.currentRound + 1,
+    };
   }
 
   return {
@@ -101,10 +111,11 @@ export async function checkPR(
   agents: AgentConfig[],
   deps: CycleDeps,
   ruleContext: string,
-  log: Logger
+  log: Logger,
+  force = false
 ): Promise<PRAction> {
   const ref: PRRef = { owner: watched.owner, repo: watched.repo, pr: pr.number };
-  const decision = decidePR(lgtmDir, ref, pr.headSha);
+  const decision = decidePR(lgtmDir, ref, pr.headSha, force);
 
   if (decision.kind === "skip") {
     return { action: "skipped", reason: decision.reason };
