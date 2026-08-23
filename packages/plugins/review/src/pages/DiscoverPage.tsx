@@ -63,7 +63,15 @@ export function DiscoverPage({ onStatusHint }: DiscoverPageProps) {
 
     try {
       const { acceptRepo } = await import("@lgtm/core/registry/reconcile.js");
-      acceptRepo(repo);
+      const result = acceptRepo(repo);
+
+      // No remote means no pull requests to poll, so the repo is recorded but
+      // never watched. Reflect that instead of showing a green tick.
+      if (!result.changed && result.reason && result.reason !== "already watching") {
+        showFlash(`⚠ ${repo.name}: ${result.reason}`, "yellow");
+        return;
+      }
+
       updateRepoStatus(idx, "watching");
       setCounts((c) => ({
         ...c,
@@ -115,18 +123,32 @@ export function DiscoverPage({ onStatusHint }: DiscoverPageProps) {
 
   async function handleAcceptAllNew() {
     const { acceptRepo } = await import("@lgtm/core/registry/reconcile.js");
-    let accepted = 0;
+    let watched = 0;
+    let unwatchable = 0;
+
     const updated = repos.map((r) => {
-      if (r.status === "new") {
-        acceptRepo(r);
-        accepted++;
+      if (r.status !== "new") return r;
+
+      const result = acceptRepo(r);
+      const reachedWatcher = result.changed || result.reason === "already watching";
+
+      if (reachedWatcher) {
+        watched++;
         return { ...r, status: "watching" as const };
       }
+
+      unwatchable++;
       return r;
     });
+
     setRepos(updated);
-    setCounts((c) => ({ ...c, watching: c.watching + accepted, new: 0 }));
-    showFlash(`✓ Accepted ${accepted} repos`, "green");
+    setCounts((c) => ({ ...c, watching: c.watching + watched, new: unwatchable }));
+    showFlash(
+      unwatchable > 0
+        ? `✓ ${watched} watching, ${unwatchable} without a remote`
+        : `✓ Accepted ${watched} repos`,
+      unwatchable > 0 ? "yellow" : "green"
+    );
   }
 
   function updateRepoStatus(idx: number, newStatus: RepoStatus) {

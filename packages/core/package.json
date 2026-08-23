@@ -17,7 +17,8 @@
     "./tui/hooks/index.js": "./src/tui/hooks/index.ts",
     "./registry/scanner.js": "./src/registry/scanner.ts",
     "./registry/reconcile.js": "./src/registry/reconcile.ts",
-    "./registry/ingest.js": "./src/registry/ingest.ts"
+    "./registry/ingest.js": "./src/registry/ingest.ts",
+    "./registry/watch-list.js": "./src/registry/watch-list.ts"
   },
   "scripts": {
     "dev": "bun run src/index.ts",

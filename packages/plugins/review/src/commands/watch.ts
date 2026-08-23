@@ -14,13 +14,13 @@ import type { Command } from "commander";
 import type { LGTMContext } from "@lgtm/core/plugin.js";
 import chalk from "chalk";
 import type { OKFStore } from "@lgtm/core/plugin.js";
-
-interface WatchedRepo {
-  owner: string;
-  repo: string;
-  filter: "all" | "assigned" | "review_requested";
-  lastChecked?: string;
-}
+import {
+  loadWatchList,
+  saveWatchList,
+  addToWatchList,
+  removeFromWatchList,
+  type WatchedRepo,
+} from "@lgtm/core/registry/watch-list.js";
 
 interface PendingPR {
   repo: string;
@@ -47,20 +47,17 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
         return;
       }
 
-      const config = await loadWatchConfig(ctx.store);
-      const existing = config.find((r) => r.owner === owner && r.repo === repoName);
-      if (existing) {
-        ctx.logger.info(`Already watching ${repo}`);
-        return;
-      }
-
-      config.push({
+      const result = addToWatchList(ctx.lgtmDir, {
         owner,
         repo: repoName,
         filter: opts.filter as WatchedRepo["filter"],
       });
 
-      await saveWatchConfig(ctx.store, config);
+      if (!result.changed) {
+        ctx.logger.info(`${repo}: ${result.reason}`);
+        return;
+      }
+
       console.log(chalk.green(`\n  ✓ Now watching ${chalk.bold(repo)} (filter: ${opts.filter})\n`));
     });
 
@@ -69,16 +66,13 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
     .description("Stop watching a repo")
     .action(async (repo: string) => {
       const [owner, repoName] = repo.split("/");
-      let config = await loadWatchConfig(ctx.store);
-      const before = config.length;
-      config = config.filter((r) => !(r.owner === owner && r.repo === repoName));
+      const result = removeFromWatchList(ctx.lgtmDir, owner, repoName);
 
-      if (config.length === before) {
-        ctx.logger.info(`Not watching ${repo}`);
+      if (!result.changed) {
+        ctx.logger.info(`${repo}: ${result.reason}`);
         return;
       }
 
-      await saveWatchConfig(ctx.store, config);
       console.log(chalk.gray(`\n  ○ Stopped watching ${repo}\n`));
     });
 
@@ -86,7 +80,7 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
     .command("list")
     .description("Show watched repos")
     .action(async () => {
-      const config = await loadWatchConfig(ctx.store);
+      const config = loadWatchList(ctx.lgtmDir);
       if (config.length === 0) {
         console.log(chalk.gray(`\n  No repos being watched. Add one: ${chalk.cyan("lgtm review watch add owner/repo")}\n`));
         return;
@@ -106,7 +100,7 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
     .description("Check for PRs needing attention (new since last check)")
     .option("--all", "Show all open PRs, not just new ones since last check")
     .action(async (opts: { all?: boolean }) => {
-      const config = await loadWatchConfig(ctx.store);
+      const config = loadWatchList(ctx.lgtmDir);
       if (config.length === 0) {
         console.log(chalk.gray(`\n  No repos being watched.\n`));
         return;
@@ -145,7 +139,7 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
         }
       }
 
-      await saveWatchConfig(ctx.store, config);
+      saveWatchList(ctx.lgtmDir, config);
 
       if (allPending.length === 0) {
         console.log(chalk.green("  ✓ No PRs needing review right now.\n"));
@@ -192,7 +186,7 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
         return;
       }
 
-      const config = await loadWatchConfig(ctx.store);
+      const config = loadWatchList(ctx.lgtmDir);
       if (config.length === 0) {
         console.log(chalk.gray(`\n  No repos being watched. Add one: ${chalk.cyan("lgtm review watch add owner/repo")}\n`));
         return;
@@ -219,7 +213,7 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
         console.log(chalk.gray(`\n  Next check in ${interval} minute(s)... (Ctrl+C to stop)\n`));
         const timer = setInterval(async () => {
           console.log(chalk.gray(`\n─── ${new Date().toLocaleTimeString()} ───\n`));
-          const freshConfig = await loadWatchConfig(ctx.store);
+          const freshConfig = loadWatchList(ctx.lgtmDir);
           await runAutoReviewCycle(ctx, freshConfig, token, opts);
           console.log(chalk.gray(`\n  Next check in ${interval} minute(s)...\n`));
         }, interval * 60 * 1000);
@@ -401,30 +395,7 @@ async function markReviewed(store: OKFStore, repo: string, prNumber: number): Pr
   await store.write("auto-reviewed.md", cleanData, "# Auto-Reviewed PRs\n\nPRs that have been auto-reviewed (won't be reviewed again).");
 }
 
-async function loadWatchConfig(store: OKFStore): Promise<WatchedRepo[]> {
-  const doc = await store.read("watch.md");
-  if (!doc) return [];
-  return (doc.data.repos as WatchedRepo[]) ?? [];
-}
 
-async function saveWatchConfig(store: OKFStore, repos: WatchedRepo[]): Promise<void> {
-  const cleanData = JSON.parse(JSON.stringify({
-    type: "lgtm/watch",
-    repos,
-    lastUpdated: new Date().toISOString(),
-  }));
-
-  const body = [
-    "# Watch Configuration",
-    "",
-    `Monitoring ${repos.length} repo(s) for new PRs.`,
-    "",
-    ...repos.map((r) => `- ${r.owner}/${r.repo} (filter: ${r.filter})`),
-    "",
-  ].join("\n");
-
-  await store.write("watch.md", cleanData, body);
-}
 
 async function fetchOpenPRs(watched: WatchedRepo): Promise<Array<{ number: number; title: string; user?: { login: string }; created_at: string; html_url: string }>> {
   const { resolveGitHubToken } = await import("@lgtm/core/auth/github-oauth.js");
