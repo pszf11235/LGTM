@@ -6,7 +6,8 @@
 - [ ] Define `AgentConfig` interface: name, provider, prompt, severity, model, enabled, priority
 - [ ] `provider` field: `"claude-cli" | "codex-cli" | "openrouter" | "ollama"`
 - [ ] Implement `loadAgentConfigs(lgtmDir)` — reads all `.md` files from `agents/` dir
-- [ ] Ship 2 default agent configs: `reviewer.md` (claude-cli, per-PR code review) + `ops.md` (codex-cli, PR dashboard/standup)
+- [ ] Ship 1 default agent config: `reviewer.md` (claude-cli, full review prompt as OKF)
+- [ ] The prompt is the OKF file itself — not hardcoded anywhere in source code
 - [ ] Support global agents at `~/.lgtm-farm/agents/` (fallback if no local)
 - [ ] Implement `detectAvailableProviders()` — checks which CLIs/APIs are available
 - [ ] Tests: load configs, parse OKF, handle missing dir gracefully

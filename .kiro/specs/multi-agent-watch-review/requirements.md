@@ -51,9 +51,10 @@ Watcher detects new PR
 
 **Acceptance Criteria:**
 - Agent configs stored at `.lgtm/agents/` (one file per agent, OKF format)
-- Each agent file defines: name, prompt, provider, severity threshold, model override
-- Default ships with 2 agents: `reviewer.md` (claude-cli, per-PR review) + `ops.md` (codex-cli, overview/standup)
-- Can add more agents by creating new `.md` files in the directory
+- Each agent file defines: name, prompt, provider, severity threshold, comment delay
+- **The prompt IS the OKF file** — users edit `.lgtm/agents/reviewer.md` directly, not code
+- Default ships with 1 agent: `reviewer.md` (uses claude-cli, your review prompt)
+- Can add more agents by creating new `.md` files in the directory (e.g., add a second agent using codex-cli)
 - Per-repo agents override global agents (same as rules precedence)
 - `provider` field determines how the agent executes: `claude-cli`, `codex-cli`, `openrouter`, `ollama`
 
@@ -63,46 +64,21 @@ Example `.lgtm/agents/reviewer.md`:
 name: reviewer
 provider: claude-cli
 prompt: |
-  Review this pull request diff. Focus on HIGH and CRITICAL issues only.
-  Provide feedback concisely, actionably, no fluff, dev to dev.
-  Never use em dashes or semicolons.
-  Don't spell out severity labels in the body.
-  Instead of: "**High — these events won't make it to GA4.**"
-  Use: "These events probably won't make it to GA4 (this is an important one)..."
-  Output findings as JSON array: [{file, line, comment, severity}]
-severity: high
-enabled: true
-priority: 1
----
-
-# Code Review Agent
-
-Reviews each PR for high/critical issues. Tone: concise, dev-to-dev.
-```
-
-Example `.lgtm/agents/ops.md`:
-```markdown
----
-name: ops
-provider: codex-cli
-prompt: |
-  Review all open pull requests. For each PR, report:
-  1. Title and author
-  2. How long it's been open
-  3. Review status: approved, changes requested, or awaiting review
-  4. CI status: passing, failing, or pending
-  5. Merge conflicts: whether the branch is up to date
-  Highlight PRs open >3 days or with failing checks. Sort oldest first.
-  Provide standup summary if user has authored PRs.
+  Review all open pull requests. For each PR, report title, author,
+  age, review status, CI status, merge conflicts.
+  For PRs ready for review: focus on high and critical issues only.
+  Tone: concise, actionable, dev to dev. No em dashes or semicolons.
+  Don't spell severity in body. Sort oldest first.
+  If I authored PRs, provide standup: "Yesterday I ..., today I will..."
   Output as JSON: {prs: [...], standup: string|null}
-severity: medium
+severity: high
+commentDelay: [20, 90]
 enabled: true
-priority: 2
 ---
 
-# Ops Agent
+# LGTM Review Agent
 
-PR health dashboard + standup generator.
+Edit this file to change your review prompt.
 ```
 
 ### US-3: Separate processes per agent

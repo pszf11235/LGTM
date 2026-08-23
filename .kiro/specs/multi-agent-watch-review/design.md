@@ -158,71 +158,50 @@ const res = await fetch("http://localhost:11434/api/generate", {
 
 ## Storage (OKF Format)
 
-### Agent Config: `.lgtm/agents/reviewer.md`
+### Review Prompt: `.lgtm/agents/reviewer.md`
 
-The primary code review agent — reviews individual PRs with your tone and style.
+The review prompt is an OKF file — not hardcoded in the service. Users edit this to customize their review style.
 
 ```markdown
 ---
 name: reviewer
 provider: claude-cli
 prompt: |
-  Review this pull request diff. Focus on HIGH and CRITICAL issues only.
-  Provide feedback concisely, actionably, no fluff, dev to dev.
-  Never use em dashes or semicolons.
-  When flagging an issue, don't spell out "HIGH" or "Critical" in the body.
-  Instead of: "**High / borderline critical — these events probably won't make it to GA4.**"
-  Use: "These events probably won't make it to GA4 (this is an important one)..."
-  Keep it direct: what's wrong, why it matters, what to do.
-  Output findings as JSON array: [{file, line, comment, severity}]
-severity: high
-enabled: true
-priority: 1
----
-
-# Code Review Agent
-
-Reviews each PR for high and critical issues.
-Tone: concise, actionable, dev-to-dev. No fluff.
-```
-
-### Agent Config: `.lgtm/agents/ops.md`
-
-The ops/overview agent — provides PR status dashboard and standup generation.
-
-```markdown
----
-name: ops
-provider: codex-cli
-prompt: |
-  Review all open pull requests. For each PR, report:
+  Review all open pull requests across the connected repositories. For each PR, report:
   1. Title and author
   2. How long it's been open
   3. Review status: approved, changes requested, or awaiting review
   4. CI status: passing, failing, or pending
   5. Merge conflicts: whether the branch is up to date
 
-  Highlight any PRs open for more than 3 days or with failing checks.
-  Sort by oldest first.
-  If there are no open PRs, confirm briefly.
+  For any PRs ready for review, focus on high and critical issues only.
+  Provide feedback directly on the PR. Use my tone and voice: concise,
+  actionable, no fluff, dev to dev. Never use em dashes or semicolons.
+  When posting comments wait 20sec-1.5min between each post.
+  Don't spell severity in the body.
+  Instead of: "**High — these events won't make it to GA4.**"
+  Use: "These events probably won't make it to GA4 (this is an important one)..."
 
-  Provide a clear view on which ones should be approved (comments resolved,
+  Highlight any PRs open for more than 3 days or with failing checks.
+  Sort by oldest first. If there are no open PRs, confirm briefly.
+  Provide a clear view on which ones I should approve (comments resolved,
   clean after review).
 
-  Lastly, if there are any PRs where the user is the author, provide a
-  standup summary: "Yesterday I ..., today I will..."
+  Lastly, if there are PRs where I'm the author, provide a standup summary:
+  "Yesterday I ..., today I will..."
 
-  Output as JSON: {prs: [{number, title, author, age_days, review_status,
-  ci_status, has_conflicts, recommendation}], standup: string|null}
-severity: medium
+  Output as JSON: {prs: [{number, title, author, url, age_days, review_status,
+  ci_status, has_conflicts, recommendation, findings: [{file, line, comment, severity}]}],
+  standup: string|null}
+severity: high
+commentDelay: [20, 90]
 enabled: true
-priority: 2
 ---
 
-# Ops / Dashboard Agent
+# LGTM Review Agent
 
-Provides PR health overview across repos: status, age, CI, conflicts.
-Generates daily standup if user has authored PRs.
+Edit this file to change how the agent reviews PRs.
+The prompt above is sent to the AI along with the PR diff.
 ```
 
 ### Agent Findings: `.lgtm/reviews/42/agent-reviewer.md`
@@ -231,6 +210,7 @@ Generates daily standup if user has authored PRs.
 type: lgtm/agent-review
 pr: 42
 repo: org/backend
+url: https://github.com/org/backend/pull/42
 agent: reviewer
 provider: claude-cli
 reviewedAt: "2026-08-22T14:30:00Z"
@@ -243,54 +223,17 @@ findings:
     posted: false
   - file: src/db.ts
     line: 18
-    comment: "SQL query built with string concatenation. Use parameterized queries — this is exploitable."
+    comment: "SQL query built with string concatenation. Use parameterized queries, this is exploitable."
     severity: high
     posted: false
 ---
 
-# Reviewer Agent — PR #42
+# Review — PR #42
 
 Reviewed 5 files, found 2 issues (1 critical, 1 high).
 ```
 
-### Agent Findings: `.lgtm/reviews/42/agent-ops.md`
-```markdown
----
-type: lgtm/agent-review
-pr: 42
-repo: org/backend
-agent: ops
-provider: codex-cli
-reviewedAt: "2026-08-22T14:30:05Z"
-durationMs: 4200
-overview:
-  prs:
-    - number: 42
-      title: "Add user auth"
-      author: "pascalhampel"
-      age_days: 1
-      review_status: "awaiting review"
-      ci_status: "passing"
-      has_conflicts: false
-      recommendation: "review"
-    - number: 38
-      title: "Fix login redirect"
-      author: "teammate"
-      age_days: 5
-      review_status: "changes requested"
-      ci_status: "failing"
-      has_conflicts: true
-      recommendation: "needs attention"
-  standup: "Yesterday I opened PR #42 (user auth). Today I will address review feedback and merge."
-findings: []
----
-
-# Ops Agent — PR Overview
-
-2 open PRs. 1 needs attention (>3 days, failing CI).
-```
-
-### Watcher Config Extension: `watch.md`
+### Watcher Config: `watch.md`
 ```markdown
 ---
 type: lgtm/watch
@@ -303,24 +246,20 @@ repos:
     filter: review_requested
 autoReview:
   enabled: true
-  agentCount: 2
   timeout: 120
-  agents:
-    - security
-    - architecture
 lastUpdated: "2026-08-22T10:00:00Z"
 ---
 
 # Watch Configuration
 
-Monitoring 2 repos. Auto-review enabled with 2 agents.
+Monitoring 2 repos. Auto-review enabled.
 ```
 
-## TUI Integration
+## UI Integration
 
-### Review Tab — Agent Annotations
+### Diff View — Agent Annotations
 
-When viewing a PR diff that has agent reviews:
+When viewing a PR diff that has agent findings:
 
 ```
   src/auth.ts
@@ -328,49 +267,44 @@ When viewing a PR diff that has agent reviews:
   @@ -40,6 +40,8 @@
    import { hash } from './crypto';
   +
-  +const API_KEY = "sk-live-12345678";       ← [🔒 security] Hardcoded API key
+  +const API_KEY = "sk-live-12345678";       ← [reviewer] Hardcoded API key
   +
    export function login(user, pass) {
-  +  if (!user) return null;                 ← [🏗 architecture] Missing error type
+  +  if (!user) return null;                 ← [reviewer] Missing error type
      return db.auth(user, hash(pass));
    }
 
   ─────────────────────────────────────────────────────────────
-  2 agent findings for this file (p=post  x=discard  e=edit)
+  2 findings for this file (p=post  x=discard  e=edit)
 ```
 
 ### Status Indicators
 
 ```
   Review Queue:
-    #42  Add user auth — 2 agent reviews ready [🔒 2 findings, 🏗 1 finding]
-    #43  Fix login — reviewing... (security: done, architecture: running)
+    #42  Add user auth — review ready [2 findings]
+    #43  Fix login — reviewing...
 ```
 
 ## Process Lifecycle
 
 ```
-[Orchestrator]                [Worker: security]        [Worker: architecture]
-     │                              │                          │
-     ├── spawn ──────────────────── │                          │
-     ├── spawn ──────────────────── ├──────────────────────── │
-     │                              │                          │
-     ├── write stdin (JSON) ──────► │                          │
-     ├── write stdin (JSON) ──────► ├─────────────────────── ►│
-     │                              │                          │
-     │                              ├── call LLM API           │
-     │                              │   (security prompt)      ├── call LLM API
-     │                              │                          │   (architecture prompt)
-     │                              │                          │
-     │  ◄── stdout (findings) ───── │                          │
-     │                              │                          │
-     │  ◄── stdout (findings) ───── ├──────────────────────── │
-     │                              │                          │
-     ├── save agent-security.md     │                          │
-     ├── save agent-architecture.md │                          │
-     │                              │                          │
-     ├── [done — notify human]      │                          │
+[Orchestrator]                [Worker: reviewer]
+     │                              │
+     ├── spawn ──────────────────── │
+     │                              │
+     ├── write stdin (JSON) ──────► │
+     │                              │
+     │                              ├── call claude -p / codex exec / openrouter
+     │                              │
+     │  ◄── stdout (findings) ───── │
+     │                              │
+     ├── save .lgtm/reviews/42/agent-reviewer.md
+     │
+     ├── [done — notify human]
 ```
+
+When configured with multiple agents (user adds more .md files to .lgtm/agents/), multiple workers spawn in parallel.
 
 ## Dependencies
 
