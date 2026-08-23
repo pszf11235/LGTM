@@ -239,3 +239,53 @@ export function loadToken(provider: string): string | null {
     return null;
   }
 }
+
+// ─── Token Resolution ───────────────────────────────────────────────────────
+
+/**
+ * Resolve a GitHub token without requiring any OAuth app registration.
+ *
+ * Order:
+ *   1. GITHUB_TOKEN / GH_TOKEN — an explicitly set variable wins, which is also
+ *      what `gh` itself does, and is how CI supplies a scoped token
+ *   2. `gh auth token` — zero setup for anyone with the GitHub CLI logged in
+ *   3. ~/.lgtm-credentials
+ *
+ * Returns null when nothing resolves. Callers should surface
+ * `describeMissingGitHubToken()` in that case.
+ */
+export function resolveGitHubToken(): string | null {
+  // 1. Environment. Deliberate beats ambient.
+  const envToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  if (envToken) return envToken;
+
+  // 2. gh CLI. stderr must be discarded: without it, a missing or broken `gh`
+  //    prints its own error into the middle of our output.
+  try {
+    const proc = Bun.spawnSync(["gh", "auth", "token"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (proc.exitCode === 0) {
+      const token = proc.stdout.toString().trim();
+      if (token) return token;
+    }
+  } catch {
+    // gh not installed
+  }
+
+  // 3. Saved credentials
+  return loadToken("github");
+}
+
+/**
+ * Human-readable guidance for when no token could be resolved.
+ */
+export function describeMissingGitHubToken(): string[] {
+  return [
+    "No GitHub token found. Any one of these works:",
+    "",
+    "  export GITHUB_TOKEN=ghp_...        takes precedence over everything else",
+    "  gh auth login                      easiest, nothing else to configure",
+    "  lgtm auth login github             saves to ~/.lgtm-credentials",
+  ];
+}

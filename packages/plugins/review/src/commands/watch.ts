@@ -1,26 +1,26 @@
 /**
- * `lgtm review watch` — Monitor repos for new PRs needing review.
+ * `lgtm review watch` — poll watched repos and review their open PRs.
  *
- * Commands:
- *   lgtm review watch add <owner/repo>   — add a repo to watch list
- *   lgtm review watch list               — show watched repos + pending PRs
- *   lgtm review watch remove <owner/repo> — stop watching
- *   lgtm review watch status             — show PRs needing attention
- *   lgtm review watch auto               — auto-review new PRs with AI
- *   lgtm review watch --once             — single check (good for cron)
+ *   lgtm review watch add <owner/repo>     start watching
+ *   lgtm review watch remove <owner/repo>  stop watching
+ *   lgtm review watch list                 show watched repos
+ *   lgtm review watch status               show open PRs, without reviewing
+ *   lgtm review watch auto                 poll and review (also `lgtm watch`)
+ *
+ * The review cycle posts nothing. It leaves findings in the store for a human
+ * to look at, and `lgtm review post` is what reaches GitHub.
  */
 
 import type { Command } from "commander";
 import type { LGTMContext } from "@lgtm/core/plugin.js";
 import chalk from "chalk";
-import type { OKFStore } from "@lgtm/core/plugin.js";
-
-interface WatchedRepo {
-  owner: string;
-  repo: string;
-  filter: "all" | "assigned" | "review_requested";
-  lastChecked?: string;
-}
+import {
+  loadWatchList,
+  saveWatchList,
+  addToWatchList,
+  removeFromWatchList,
+  type WatchedRepo,
+} from "@lgtm/core/registry/watch-list.js";
 
 interface PendingPR {
   repo: string;
@@ -47,20 +47,17 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
         return;
       }
 
-      const config = await loadWatchConfig(ctx.store);
-      const existing = config.find((r) => r.owner === owner && r.repo === repoName);
-      if (existing) {
-        ctx.logger.info(`Already watching ${repo}`);
-        return;
-      }
-
-      config.push({
+      const result = addToWatchList(ctx.lgtmDir, {
         owner,
         repo: repoName,
         filter: opts.filter as WatchedRepo["filter"],
       });
 
-      await saveWatchConfig(ctx.store, config);
+      if (!result.changed) {
+        ctx.logger.info(`${repo}: ${result.reason}`);
+        return;
+      }
+
       console.log(chalk.green(`\n  ✓ Now watching ${chalk.bold(repo)} (filter: ${opts.filter})\n`));
     });
 
@@ -69,16 +66,13 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
     .description("Stop watching a repo")
     .action(async (repo: string) => {
       const [owner, repoName] = repo.split("/");
-      let config = await loadWatchConfig(ctx.store);
-      const before = config.length;
-      config = config.filter((r) => !(r.owner === owner && r.repo === repoName));
+      const result = removeFromWatchList(ctx.lgtmDir, owner, repoName);
 
-      if (config.length === before) {
-        ctx.logger.info(`Not watching ${repo}`);
+      if (!result.changed) {
+        ctx.logger.info(`${repo}: ${result.reason}`);
         return;
       }
 
-      await saveWatchConfig(ctx.store, config);
       console.log(chalk.gray(`\n  ○ Stopped watching ${repo}\n`));
     });
 
@@ -86,7 +80,7 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
     .command("list")
     .description("Show watched repos")
     .action(async () => {
-      const config = await loadWatchConfig(ctx.store);
+      const config = loadWatchList(ctx.lgtmDir);
       if (config.length === 0) {
         console.log(chalk.gray(`\n  No repos being watched. Add one: ${chalk.cyan("lgtm review watch add owner/repo")}\n`));
         return;
@@ -106,7 +100,7 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
     .description("Check for PRs needing attention (new since last check)")
     .option("--all", "Show all open PRs, not just new ones since last check")
     .action(async (opts: { all?: boolean }) => {
-      const config = await loadWatchConfig(ctx.store);
+      const config = loadWatchList(ctx.lgtmDir);
       if (config.length === 0) {
         console.log(chalk.gray(`\n  No repos being watched.\n`));
         return;
@@ -145,7 +139,7 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
         }
       }
 
-      await saveWatchConfig(ctx.store, config);
+      saveWatchList(ctx.lgtmDir, config);
 
       if (allPending.length === 0) {
         console.log(chalk.green("  ✓ No PRs needing review right now.\n"));
@@ -163,281 +157,289 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
       console.log(chalk.gray(`\n  Add to queue: ${chalk.cyan("lgtm review add <numbers...>")}\n`));
     });
 
-  // ── watch auto — poll and auto-review new PRs ──────────────────────────
-  watch
-    .command("auto")
-    .description("Auto-review new PRs from watched repos using AI")
-    .option("--severity <level>", "Minimum severity: low, medium, high, critical", "high")
-    .option("--dry-run", "Show findings without posting to GitHub")
-    .option("--interval <minutes>", "Poll interval in minutes (default: 15, 0 = single run)", "0")
-    .option("--no-batch", "Post comments individually with delays")
-    .action(async (opts: { severity?: string; dryRun?: boolean; interval?: string; batch?: boolean }) => {
-      const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-      if (!token) {
-        ctx.logger.error("Set GITHUB_TOKEN to use watch auto.");
-        return;
-      }
+  // ── watch auto — poll and review, posting nothing ──────────────────────
+  registerAutoWatch(watch, ctx);
+}
 
-      if (!ctx.llm) {
-        ctx.logger.error("AI is not configured. Run `lgtm ai test` to set up.");
-        return;
-      }
-
-      const aiAvailable = await ctx.llm.isAvailable();
-      if (!aiAvailable) {
-        ctx.logger.error("AI provider is not reachable. Check your API key.");
-        return;
-      }
-
-      const config = await loadWatchConfig(ctx.store);
-      if (config.length === 0) {
-        console.log(chalk.gray(`\n  No repos being watched. Add one: ${chalk.cyan("lgtm review watch add owner/repo")}\n`));
-        return;
-      }
-
-      const interval = parseInt(opts.interval ?? "0", 10);
-
-      console.log(chalk.bold(`\n🤖 LGTM Watch Auto-Review\n`));
-      console.log(chalk.gray(`  Watching ${config.length} repo(s)`));
-      console.log(chalk.gray(`  Severity: ${opts.severity ?? "high"}`));
-      console.log(chalk.gray(`  Mode: ${opts.dryRun ? "dry-run" : opts.batch === false ? "individual" : "batched"}`));
-      if (interval > 0) {
-        console.log(chalk.gray(`  Polling every ${interval} minute(s)`));
-      } else {
-        console.log(chalk.gray(`  Single run (use --interval to poll)`));
-      }
-      console.log("");
-
-      // Run the auto-review cycle
-      await runAutoReviewCycle(ctx, config, token, opts);
-
-      // If interval > 0, poll
-      if (interval > 0) {
-        console.log(chalk.gray(`\n  Next check in ${interval} minute(s)... (Ctrl+C to stop)\n`));
-        const timer = setInterval(async () => {
-          console.log(chalk.gray(`\n─── ${new Date().toLocaleTimeString()} ───\n`));
-          const freshConfig = await loadWatchConfig(ctx.store);
-          await runAutoReviewCycle(ctx, freshConfig, token, opts);
-          console.log(chalk.gray(`\n  Next check in ${interval} minute(s)...\n`));
-        }, interval * 60 * 1000);
-
-        // Clean exit on Ctrl+C
-        process.on("SIGINT", () => {
-          clearInterval(timer);
-          console.log(chalk.gray("\n  Stopped watching.\n"));
-          process.exit(0);
-        });
-
-        // Keep process alive
-        await new Promise(() => {});
-      }
+/**
+ * `lgtm review watch auto`, also reachable as the top-level `lgtm watch`.
+ *
+ * Runs a cycle immediately and then every `--interval` minutes. It used to
+ * default to a single run despite the help text promising 15 minutes, so
+ * `lgtm watch` did one pass and exited.
+ *
+ * Nothing is posted. The cycle leaves findings on disk for a human to look at,
+ * which is the point of the tool.
+ */
+export function registerAutoWatch(parent: Command, ctx: LGTMContext) {
+  parent
+    .command("auto", { isDefault: false })
+    .description("Poll watched repos and review new PRs locally (posts nothing)")
+    .option("--interval <minutes>", "Poll interval in minutes, 0 for a single run", "15")
+    .option("--once", "Run a single cycle and exit")
+    .action(async (opts: { interval?: string; once?: boolean }) => {
+      await runWatch(ctx, opts);
     });
 }
 
 /**
- * Run one auto-review cycle across all watched repos.
- * Finds PRs not yet reviewed, runs AI review, and posts findings.
+ * The watch loop, shared by `lgtm review watch auto` and `lgtm watch`.
  */
-async function runAutoReviewCycle(
+export async function runWatch(
   ctx: LGTMContext,
-  watchedRepos: WatchedRepo[],
-  token: string,
-  opts: { severity?: string; dryRun?: boolean; batch?: boolean }
-) {
+  opts: { interval?: string; once?: boolean }
+): Promise<void> {
+  const { loadEnabledAgents } = await import("@lgtm/core/store/agents.js");
+  const { detectProviders } = await import("@lgtm/core/ai/providers.js");
+  const { runCycle } = await import("../domain/watch-cycle.js");
+  const { createRulesEngine, rulesAsPromptContext } = await import("../domain/rules.js");
+
+  const repos = loadWatchList(ctx.lgtmDir);
+  if (repos.length === 0) {
+    console.log(chalk.gray(`\n  No repos watched yet.`));
+    console.log(chalk.gray(`  Find local ones: ${chalk.cyan("lgtm discover --ingest")}`));
+    console.log(chalk.gray(`  Or add one: ${chalk.cyan("lgtm review watch add owner/repo")}\n`));
+    return;
+  }
+
+  const agents = loadEnabledAgents(ctx.lgtmDir);
+  if (agents.length === 0) {
+    console.log(chalk.yellow(`\n  Every agent in ${chalk.cyan("agents/")} is disabled, so there is nothing to run.\n`));
+    return;
+  }
+
+  // Fail before polling rather than per PR. Without a provider every PR would
+  // produce an identical error, which reads like many problems instead of one.
+  const statuses = await detectProviders();
+  if (!statuses.some((s) => s.available)) {
+    console.log(chalk.yellow(`\n  No review provider is available, so reviews cannot run.\n`));
+    for (const s of statuses) {
+      console.log(chalk.gray(`    ${s.id.padEnd(12)} ${s.detail}`));
+    }
+    console.log(chalk.gray(`\n  Details: ${chalk.cyan("lgtm ai discover")}\n`));
+    return;
+  }
+
+  // Interval 0 and --once both mean a single pass.
+  const requested = parseInt(opts.interval ?? "15", 10);
+  const interval = opts.once ? 0 : Number.isFinite(requested) && requested > 0 ? requested : 0;
+
+  const rules = await createRulesEngine(ctx.store).loadRules();
+  const ruleContext = rulesAsPromptContext(rules);
+
+  console.log(chalk.bold(`\n👍 LGTM Watch\n`));
+  console.log(chalk.gray(`  Repos:     ${repos.map((r) => `${r.owner}/${r.repo}`).join(", ")}`));
+  console.log(chalk.gray(`  Agents:    ${agents.map((a) => `${a.name} (${a.provider})`).join(", ")}`));
+  console.log(chalk.gray(`  Providers: ${statuses.filter((s) => s.available).map((s) => s.id).join(", ")}`));
+  console.log(
+    chalk.gray(interval > 0 ? `  Interval:  every ${interval} min` : `  Interval:  single run`)
+  );
+  console.log(chalk.gray(`  Posting:   nothing, findings stay local\n`));
+
+  const deps = await buildCycleDeps();
+
+  const cycle = async () => {
+    const result = await runCycle(ctx.lgtmDir, loadWatchList(ctx.lgtmDir), agents, deps, ruleContext, {
+      info: (m) => console.log(chalk.gray(`    ${m}`)),
+      warn: (m) => console.log(chalk.yellow(`    ${m}`)),
+      error: (m) => console.log(chalk.red(`    ${m}`)),
+    });
+
+    printCycle(result);
+  };
+
+  await cycle();
+
+  if (interval === 0) return;
+
+  console.log(chalk.gray(`  Next check in ${interval} min. Ctrl+C to stop.\n`));
+
+  const timer = setInterval(async () => {
+    console.log(chalk.gray(`─── ${new Date().toLocaleTimeString()} ───\n`));
+    await cycle();
+    console.log(chalk.gray(`  Next check in ${interval} min.\n`));
+  }, interval * 60 * 1000);
+
+  process.on("SIGINT", () => {
+    clearInterval(timer);
+    console.log(chalk.gray("\n  Stopped watching.\n"));
+    process.exit(0);
+  });
+
+  await new Promise(() => {});
+}
+
+/** Wire the cycle to the real GitHub API. */
+async function buildCycleDeps() {
   const { createGitHubAdapter } = await import("../infra/github.js");
-  const { parseDiff } = await import("../domain/diff-parser.js");
-  const { generateAutoReview } = await import("../domain/auto-review.js");
-  const { postReviewFindings } = await import("../domain/post-review.js");
-  const { fetchExistingComments } = await import("../domain/post-review.js");
-  const { createRulesEngine } = await import("../domain/rules.js");
-  const { getProviderForTask } = await import("@lgtm/core/llm/provider.js");
 
-  // Load rules once for the whole cycle
-  const engine = createRulesEngine(ctx.store);
-  const rules = await engine.loadRules();
-  const enabledRules = rules.filter((r) => r.enabled);
+  return {
+    fetchDiff: async (owner: string, repo: string, pr: number) =>
+      createGitHubAdapter(owner, repo).fetchDiff(pr),
+    fetchOpenPRs: async (watched: WatchedRepo) => {
+      const prs = await fetchOpenPRs(watched);
+      return prs.map((pr) => ({
+        number: pr.number,
+        title: pr.title,
+        author: pr.user?.login ?? "unknown",
+        createdAt: pr.created_at,
+        url: pr.html_url,
+        headSha: pr.head?.sha ?? "",
+      }));
+    },
+  };
+}
 
-  // Resolve LLM provider for review_delegation task
-  let llm = ctx.llm!;
-  try {
-    llm = getProviderForTask(ctx.config.ai as any, "review_delegation");
-  } catch { /* fallback to default */ }
+/** Report a cycle, naming the repo on every line. */
+function printCycle(result: Awaited<ReturnType<typeof import("../domain/watch-cycle.js").runCycle>>) {
+  for (const repo of result.repos) {
+    if (repo.error) {
+      console.log(chalk.yellow(`  ⚠ ${repo.repo}: ${repo.error}`));
+      continue;
+    }
 
-  // Track which PRs we've already reviewed (from store)
-  const reviewedPRs = await loadReviewedPRs(ctx.store);
+    if (repo.prs.length === 0) {
+      console.log(chalk.gray(`  ${repo.repo}: no open PRs`));
+      continue;
+    }
 
-  let totalReviewed = 0;
-  let totalFindings = 0;
+    console.log(chalk.bold(`  ${repo.repo}`));
 
-  for (const watched of watchedRepos) {
-    const repoStr = `${watched.owner}/${watched.repo}`;
+    for (const { pr, result: outcome } of repo.prs) {
+      const label = `#${pr.number} ${pr.title}`;
 
-    try {
-      const openPRs = await fetchOpenPRs(watched);
-      const newPRs = openPRs.filter((pr) => !reviewedPRs.has(`${repoStr}#${pr.number}`));
-
-      if (newPRs.length === 0) {
-        console.log(chalk.gray(`  ${repoStr}: no new PRs`));
-        continue;
-      }
-
-      console.log(chalk.bold(`  ${repoStr}: ${newPRs.length} new PR(s) to review`));
-
-      const github = createGitHubAdapter(watched.owner, watched.repo);
-
-      for (const pr of newPRs) {
-        console.log(chalk.gray(`\n    → PR #${pr.number}: ${pr.title}`));
-
-        try {
-          // Fetch diff
-          const rawDiff = await github.fetchDiff(pr.number);
-          if (!rawDiff || rawDiff.trim().length === 0) {
-            console.log(chalk.gray(`      (empty diff — skipping)`));
-            await markReviewed(ctx.store, repoStr, pr.number);
-            continue;
-          }
-
-          const diff = parseDiff(rawDiff);
-          if (diff.files.length === 0) {
-            console.log(chalk.gray(`      (no parseable files — skipping)`));
-            await markReviewed(ctx.store, repoStr, pr.number);
-            continue;
-          }
-
-          // Fetch existing comments for dedup
-          const existingComments = await fetchExistingComments(pr.number, watched.owner, watched.repo);
-
-          // Run AI review
-          const severity = (opts.severity ?? "high") as any;
-          const result = await generateAutoReview(
-            diff,
-            enabledRules,
-            ctx.profile,
-            llm,
-            existingComments.map((c) => ({ file: c.file, line: c.line, body: c.body })),
-            { severityThreshold: severity }
+      switch (outcome.action) {
+        case "reviewed":
+          console.log(`    ${chalk.green("✓")} ${label} — round ${outcome.round}, ${outcome.findings} finding(s)`);
+          break;
+        case "re-reviewed":
+          console.log(
+            `    ${chalk.green("✓")} ${label} — round ${outcome.round}, ${outcome.findings} finding(s), ` +
+            `${outcome.resolved} earlier resolved, ${outcome.unresolved} still open`
           );
-
-          if (result.findings.length === 0) {
-            console.log(chalk.green(`      ✓ No issues found`));
-          } else {
-            console.log(chalk.yellow(`      ${result.findings.length} finding(s)`));
-            totalFindings += result.findings.length;
-
-            // Post findings
-            const postResult = await postReviewFindings(
-              pr.number,
-              result,
-              github,
-              {
-                dryRun: opts.dryRun ?? false,
-                batchMode: opts.batch !== false,
-                commentDelay: [20, 90],
-                rateLimitThreshold: 10,
-              },
-              {
-                info: (msg) => console.log(chalk.gray(`      ${msg}`)),
-                warn: (msg) => console.log(chalk.yellow(`      ${msg}`)),
-                error: (msg) => console.log(chalk.red(`      ${msg}`)),
-              }
-            );
-
-            if (opts.dryRun) {
-              console.log(chalk.cyan(`      (dry-run — not posted)`));
-            } else if (postResult.posted > 0) {
-              console.log(chalk.green(`      ✓ Posted ${postResult.posted} comment(s)`));
-            }
-          }
-
-          // Mark as reviewed
-          await markReviewed(ctx.store, repoStr, pr.number);
-          totalReviewed++;
-        } catch (err) {
-          console.log(chalk.red(`      ✗ Error: ${(err as Error).message}`));
-        }
+          break;
+        case "skipped":
+          console.log(chalk.gray(`    · ${label} — ${outcome.reason}`));
+          break;
+        case "failed":
+          console.log(chalk.red(`    ✗ ${label} — ${outcome.reason}`));
+          break;
       }
-    } catch (err) {
-      console.log(chalk.yellow(`  ⚠ ${repoStr}: ${(err as Error).message}`));
     }
   }
 
-  // Summary
-  if (totalReviewed > 0) {
-    console.log(chalk.bold(`\n  ─── Summary: ${totalReviewed} PR(s) reviewed, ${totalFindings} finding(s) ───`));
-  } else {
-    console.log(chalk.gray(`\n  No new PRs to review.`));
+  const parts: string[] = [];
+  if (result.reviewed > 0) parts.push(`${result.reviewed} reviewed`);
+  if (result.reReviewed > 0) parts.push(`${result.reReviewed} re-reviewed`);
+  if (result.failed > 0) parts.push(`${result.failed} failed`);
+
+  console.log("");
+  if (parts.length === 0) {
+    console.log(chalk.gray(`  Nothing to review.\n`));
+    return;
+  }
+
+  console.log(chalk.bold(`  ${parts.join(", ")}, ${result.findings} finding(s) total\n`));
+  if (result.findings > 0) {
+    console.log(chalk.gray(`  Review them: ${chalk.cyan("lgtm review list")}`));
+    console.log(chalk.gray(`  Then post:   ${chalk.cyan("lgtm review post <owner/repo#pr>")}\n`));
   }
 }
 
+interface GitHubPR {
+  number: number;
+  title: string;
+  user?: { login: string };
+  created_at: string;
+  html_url: string;
+  head?: { sha: string };
+  requested_reviewers?: Array<{ login: string }>;
+  assignees?: Array<{ login: string }>;
+}
+
 /**
- * Load the set of PRs already auto-reviewed (to avoid re-reviewing).
+ * Every open PR for a watched repo.
+ *
+ * Paginates. It used to request a single page of 10 and stop, so a repo with
+ * more than 10 open PRs silently never had the rest reviewed.
+ *
+ * The stored `filter` is applied too. It was accepted by `watch add` and then
+ * ignored, so `--filter review_requested` did nothing.
  */
-async function loadReviewedPRs(store: OKFStore): Promise<Set<string>> {
+async function fetchOpenPRs(watched: WatchedRepo): Promise<GitHubPR[]> {
+  const { resolveGitHubToken } = await import("@lgtm/core/auth/github-oauth.js");
+  const token = resolveGitHubToken();
+  if (!token) throw new Error("No GitHub token — run `gh auth login` or set GITHUB_TOKEN");
+
+  const perPage = 100;
+  const maxPages = 10; // 1000 open PRs is far past anything worth polling.
+  const all: GitHubPR[] = [];
+
+  for (let page = 1; page <= maxPages; page++) {
+    const url =
+      `https://api.github.com/repos/${watched.owner}/${watched.repo}/pulls` +
+      `?state=open&per_page=${perPage}&page=${page}&sort=created&direction=asc`;
+
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "lgtm-cli",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!res.ok) throw new Error(`GitHub API ${res.status} listing PRs`);
+
+    const batch = (await res.json()) as GitHubPR[];
+    all.push(...batch);
+
+    if (batch.length < perPage) break;
+  }
+
+  return filterPRs(all, watched.filter, await currentLogin(token));
+}
+
+/** The authenticated user, for the assigned and review_requested filters. */
+async function currentLogin(token: string): Promise<string | null> {
   try {
-    const doc = await store.read("auto-reviewed.md");
-    if (!doc?.data?.reviewed || !Array.isArray(doc.data.reviewed)) return new Set();
-    return new Set(doc.data.reviewed as string[]);
+    const res = await fetch("https://api.github.com/user", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "lgtm-cli",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return null;
+    const user = (await res.json()) as { login?: string };
+    return user.login ?? null;
   } catch {
-    return new Set();
+    return null;
   }
 }
 
 /**
- * Mark a PR as auto-reviewed so we don't review it again.
+ * Apply a watch filter.
+ *
+ * Exported for testing. When the login cannot be resolved the filter is not
+ * applied, because reviewing every PR is a better failure than silently
+ * reviewing none.
  */
-async function markReviewed(store: OKFStore, repo: string, prNumber: number): Promise<void> {
-  const existing = await loadReviewedPRs(store);
-  existing.add(`${repo}#${prNumber}`);
+export function filterPRs(
+  prs: GitHubPR[],
+  filter: WatchedRepo["filter"],
+  login: string | null
+): GitHubPR[] {
+  if (filter === "all" || !login) return prs;
 
-  const cleanData = JSON.parse(JSON.stringify({
-    type: "lgtm/auto-reviewed",
-    lastUpdated: new Date().toISOString(),
-    reviewed: Array.from(existing),
-  }));
+  if (filter === "assigned") {
+    return prs.filter((pr) => pr.assignees?.some((a) => a.login === login));
+  }
 
-  await store.write("auto-reviewed.md", cleanData, "# Auto-Reviewed PRs\n\nPRs that have been auto-reviewed (won't be reviewed again).");
-}
+  if (filter === "review_requested") {
+    return prs.filter((pr) => pr.requested_reviewers?.some((r) => r.login === login));
+  }
 
-async function loadWatchConfig(store: OKFStore): Promise<WatchedRepo[]> {
-  const doc = await store.read("watch.md");
-  if (!doc) return [];
-  return (doc.data.repos as WatchedRepo[]) ?? [];
-}
-
-async function saveWatchConfig(store: OKFStore, repos: WatchedRepo[]): Promise<void> {
-  const cleanData = JSON.parse(JSON.stringify({
-    type: "lgtm/watch",
-    repos,
-    lastUpdated: new Date().toISOString(),
-  }));
-
-  const body = [
-    "# Watch Configuration",
-    "",
-    `Monitoring ${repos.length} repo(s) for new PRs.`,
-    "",
-    ...repos.map((r) => `- ${r.owner}/${r.repo} (filter: ${r.filter})`),
-    "",
-  ].join("\n");
-
-  await store.write("watch.md", cleanData, body);
-}
-
-async function fetchOpenPRs(watched: WatchedRepo): Promise<Array<{ number: number; title: string; user?: { login: string }; created_at: string; html_url: string }>> {
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  if (!token) throw new Error("No GitHub token (set GITHUB_TOKEN)");
-
-  let url = `https://api.github.com/repos/${watched.owner}/${watched.repo}/pulls?state=open&per_page=10`;
-
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "lgtm-cli",
-    },
-    signal: AbortSignal.timeout(15000),
-  });
-
-  if (!res.ok) throw new Error(`API ${res.status}`);
-  return await res.json() as any[];
+  return prs;
 }

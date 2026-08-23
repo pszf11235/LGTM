@@ -12,9 +12,15 @@
 
 import fs from "fs";
 import path from "path";
-import os from "os";
 import matter from "gray-matter";
 import type { ScannedRepo } from "./scanner.js";
+import {
+  addToWatchList,
+  removeFromWatchList,
+  watchedRepoKeys,
+  type WatchListChange,
+} from "./watch-list.js";
+import { loadBootstrap, resolveLgtmDir } from "../config/loader.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -81,18 +87,35 @@ export interface ReconcileResult {
   };
 }
 
+// ─── Store Location ─────────────────────────────────────────────────────────
+
+/**
+ * The store directory to operate on. Callers may override, which is how tests
+ * stay off the real store.
+ */
+function storeDir(lgtmDir?: string): string {
+  return lgtmDir ?? resolveLgtmDir(loadBootstrap());
+}
+
 // ─── Registry Path ──────────────────────────────────────────────────────────
 
-const INGEST_REGISTRY_PATH = path.join(os.homedir(), ".lgtm-ingest-registry.md");
+/**
+ * The ingest registry lives inside the store, next to the watch list it feeds.
+ * It used to sit at `~/.lgtm-ingest-registry.md`, outside any store, which made
+ * it impossible to isolate in tests and left a stray dotfile in $HOME.
+ */
+export function getIngestRegistryPath(lgtmDir?: string): string {
+  return path.join(storeDir(lgtmDir), "ingest-registry.md");
+}
 
 // ─── Load/Save Ingest Registry ──────────────────────────────────────────────
 
 /**
  * Load the ingest registry (tracks status of all discovered repos).
  */
-export function loadIngestRegistry(): IngestRegistryEntry[] {
+export function loadIngestRegistry(lgtmDir?: string): IngestRegistryEntry[] {
   try {
-    const raw = fs.readFileSync(INGEST_REGISTRY_PATH, "utf-8");
+    const raw = fs.readFileSync(getIngestRegistryPath(lgtmDir), "utf-8");
     const { data } = matter(raw);
     return (data.repos as IngestRegistryEntry[]) ?? [];
   } catch {
@@ -103,7 +126,7 @@ export function loadIngestRegistry(): IngestRegistryEntry[] {
 /**
  * Save the ingest registry.
  */
-export function saveIngestRegistry(repos: IngestRegistryEntry[]): void {
+export function saveIngestRegistry(repos: IngestRegistryEntry[], lgtmDir?: string): void {
   const activeCount = repos.filter((r) => r.status === "watching").length;
   const deniedCount = repos.filter((r) => r.status === "denied").length;
 
@@ -130,40 +153,22 @@ export function saveIngestRegistry(repos: IngestRegistryEntry[]): void {
 
   const cleanData = JSON.parse(JSON.stringify(data));
   const output = matter.stringify(body, cleanData);
-  fs.mkdirSync(path.dirname(INGEST_REGISTRY_PATH), { recursive: true });
-  fs.writeFileSync(INGEST_REGISTRY_PATH, output, "utf-8");
+  const registryPath = getIngestRegistryPath(lgtmDir);
+  fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+  fs.writeFileSync(registryPath, output, "utf-8");
 }
 
 // ─── Watch List Helpers ─────────────────────────────────────────────────────
 
 /**
- * Load watched repos from the watch.md file.
- * Returns a set of "owner/repo" strings.
+ * Load watched repos as a set of "owner/repo" strings.
+ *
+ * Only the central store is consulted. The previous version also probed
+ * `./.lgtm/watch.md`, which meant a stale per-repo directory could silently
+ * mark repos as watched that the watcher would never poll.
  */
 export function loadWatchedRepos(lgtmDir?: string): Set<string> {
-  const watched = new Set<string>();
-
-  // Try multiple locations for watch.md
-  const candidates = [
-    lgtmDir ? path.join(lgtmDir, "watch.md") : null,
-    path.join(os.homedir(), ".lgtm-farm", "watch.md"),
-    path.join(process.cwd(), ".lgtm", "watch.md"),
-  ].filter(Boolean) as string[];
-
-  for (const watchPath of candidates) {
-    try {
-      const raw = fs.readFileSync(watchPath, "utf-8");
-      const { data } = matter(raw);
-      const repos = (data.repos as Array<{ owner?: string; repo?: string }>) ?? [];
-      for (const r of repos) {
-        if (r.owner && r.repo) {
-          watched.add(`${r.owner}/${r.repo}`);
-        }
-      }
-    } catch { /* not found */ }
-  }
-
-  return watched;
+  return watchedRepoKeys(storeDir(lgtmDir));
 }
 
 // ─── Reconciliation ─────────────────────────────────────────────────────────
@@ -177,7 +182,7 @@ export function reconcile(
   scanned: ScannedRepo[],
   opts?: { lgtmDir?: string }
 ): ReconcileResult {
-  const registry = loadIngestRegistry();
+  const registry = loadIngestRegistry(opts?.lgtmDir);
   const watched = loadWatchedRepos(opts?.lgtmDir);
 
   // Build lookup of registry entries by path
@@ -242,10 +247,17 @@ export function reconcile(
 // ─── Status Updates ─────────────────────────────────────────────────────────
 
 /**
- * Accept a repo (mark as watching in registry).
+ * Accept a repo: mark it watching in the registry *and* add it to the watch list.
+ *
+ * The registry alone was updated before, so accepting a repo during ingest
+ * showed a green tick and then the watcher never polled it. The watch list is
+ * what the watcher reads, so both have to be written.
+ *
+ * Returns whether the watch list actually changed, plus a reason when it did
+ * not, so the caller can explain "no git remote" instead of implying success.
  */
-export function acceptRepo(repo: ScannedRepo): void {
-  const registry = loadIngestRegistry();
+export function acceptRepo(repo: ScannedRepo, opts?: { lgtmDir?: string }): WatchListChange {
+  const registry = loadIngestRegistry(opts?.lgtmDir);
   const existing = registry.find((r) => r.path === repo.path);
   const now = new Date().toISOString();
 
@@ -268,14 +280,24 @@ export function acceptRepo(repo: ScannedRepo): void {
     });
   }
 
-  saveIngestRegistry(registry);
+  saveIngestRegistry(registry, opts?.lgtmDir);
+
+  return addToWatchList(storeDir(opts?.lgtmDir), {
+    owner: repo.owner,
+    repo: repo.repoName,
+    filter: "all",
+    path: repo.path,
+  });
 }
 
 /**
- * Deny a repo (mark as skipped in registry).
+ * Deny a repo: mark it skipped in the registry and ensure it is not watched.
+ *
+ * Denying a repo that was previously accepted has to remove it from the watch
+ * list, otherwise the watcher keeps polling something the user just skipped.
  */
-export function denyRepo(repo: ScannedRepo): void {
-  const registry = loadIngestRegistry();
+export function denyRepo(repo: ScannedRepo, opts?: { lgtmDir?: string }): WatchListChange {
+  const registry = loadIngestRegistry(opts?.lgtmDir);
   const existing = registry.find((r) => r.path === repo.path);
   const now = new Date().toISOString();
 
@@ -296,23 +318,24 @@ export function denyRepo(repo: ScannedRepo): void {
     });
   }
 
-  saveIngestRegistry(registry);
+  saveIngestRegistry(registry, opts?.lgtmDir);
+
+  return removeFromWatchList(storeDir(opts?.lgtmDir), repo.owner, repo.repoName);
 }
 
 /**
- * Unwatch a repo (remove from watch, mark as denied in registry).
+ * Unwatch a repo. Same effect as denying it, named for the calling context.
  */
-export function unwatchRepo(repo: ScannedRepo): void {
-  denyRepo(repo);
-  // Note: caller is responsible for also removing from watch.md
+export function unwatchRepo(repo: ScannedRepo, opts?: { lgtmDir?: string }): WatchListChange {
+  return denyRepo(repo, opts);
 }
 
 /**
- * Prune removed repos from registry.
+ * Prune repos whose path no longer exists on disk, and stop watching them.
  * Returns the repos that were pruned.
  */
-export function pruneIngestRegistry(): IngestRegistryEntry[] {
-  const registry = loadIngestRegistry();
+export function pruneIngestRegistry(opts?: { lgtmDir?: string }): IngestRegistryEntry[] {
+  const registry = loadIngestRegistry(opts?.lgtmDir);
   const removed: IngestRegistryEntry[] = [];
   const kept: IngestRegistryEntry[] = [];
 
@@ -324,10 +347,15 @@ export function pruneIngestRegistry(): IngestRegistryEntry[] {
     }
   }
 
-  saveIngestRegistry(kept);
+  saveIngestRegistry(kept, opts?.lgtmDir);
+
+  // A deleted checkout cannot be reviewed, so it must leave the watch list too.
+  for (const entry of removed) {
+    removeFromWatchList(storeDir(opts?.lgtmDir), entry.owner, entry.repoName);
+  }
+
   return removed;
 }
-
 
 
 // ─── Sorting ────────────────────────────────────────────────────────────────

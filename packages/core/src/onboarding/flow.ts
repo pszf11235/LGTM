@@ -1,751 +1,104 @@
 /**
- * Onboarding flow runner.
+ * Store initialisation.
  *
- * Runs the onboarding questions sequentially via readline.
- * Each question is skippable with 's'. Entire flow skippable with Ctrl+C.
+ * There is no onboarding questionnaire. Storage is always the central store at
+ * ~/.lgtm-farm/, the review prompt ships as a default agent config, and the AI
+ * provider is detected when a review actually runs.
  *
- * Supports resuming: if a partial profile exists, only asks unanswered questions.
+ * `lgtm init` calls initStore(). Bare `lgtm` calls it silently when the store
+ * is missing, then opens the TUI.
  */
 
-import readline from "readline";
+import fs from "fs";
 import chalk from "chalk";
 import type { ProjectProfile } from "../plugin.js";
-import type { BootstrapConfig } from "../config/loader.js";
-import {
-  ONBOARDING_QUESTIONS,
-  type OnboardingQuestion,
-} from "./questions.js";
-import { detectTechStack } from "./detect.js";
-import { saveBootstrap, getDefaultFarmPath, loadBootstrap, resolveLgtmDir, loadProfile } from "../config/loader.js";
+import { resolveLgtmDir, loadBootstrap, loadProfile } from "../config/loader.js";
 import { ensureLgtmDirs } from "../store/paths.js";
+import { ensureDefaultAgent } from "../store/agents.js";
 import { createOKFStore } from "../store/okf.js";
-import { findGitRoot } from "../store/paths.js";
 
-/**
- * Check if onboarding is complete (all required questions answered).
- */
-export function isOnboardingComplete(lgtmDir: string): boolean {
-  const profile = loadProfile(lgtmDir);
-  if (!profile) return false;
-
-  // A complete profile has all required fields set to non-default placeholder values
-  return !!(
-    profile.goal &&
-    profile.feedbackStyle &&
-    profile.teamSize
-  );
+export interface InitResult {
+  lgtmDir: string;
+  created: boolean;
+  agentCreated: boolean;
 }
 
 /**
- * Run the onboarding flow.
- * If a partial profile exists, resumes from where it left off.
+ * Create the central store if it does not exist. Idempotent.
  */
-export async function runOnboarding(): Promise<{
-  profile: ProjectProfile;
-  bootstrap: BootstrapConfig;
-}> {
-  const repoRoot = findGitRoot();
-  const projectName = repoRoot.split("/").pop() ?? "unknown";
+export async function initStore(): Promise<InitResult> {
+  const bootstrap = loadBootstrap();
+  const lgtmDir = resolveLgtmDir(bootstrap);
+  const existed = fs.existsSync(lgtmDir);
 
-  // Load existing answers (if resuming)
-  const existingBootstrap = loadBootstrap();
-  const existingLgtmDir = resolveLgtmDir(existingBootstrap, repoRoot);
-  const existingProfile = loadProfile(existingLgtmDir);
+  ensureLgtmDirs(lgtmDir);
 
-  // Map existing profile back to answers (for resume)
-  const answers: Record<string, string> = {};
-  if (existingProfile) {
-    if (existingBootstrap.storageMode) answers.storageMode = existingBootstrap.storageMode;
-    if (existingProfile.goal) answers.goal = existingProfile.goal;
-    if (existingProfile.qualityReferences?.length > 0) {
-      answers.qualityReferences = existingProfile.qualityReferences.join(", ");
-    }
-    if (existingProfile.feedbackStyle) answers.feedbackStyle = existingProfile.feedbackStyle;
-    if (existingProfile.teamSize) answers.teamSize = existingProfile.teamSize;
-    if (existingProfile.ai?.provider) answers.aiProvider = existingProfile.ai.provider;
-    else if (existingProfile.ai?.enabled === false) answers.aiProvider = "none";
-    if (existingProfile.ai?.model) answers.aiModel = existingProfile.ai.model;
-  }
+  // The review prompt is store data, not code, so it ships as a file the user
+  // can edit rather than a string baked into the reviewer.
+  const agentCreated = ensureDefaultAgent(lgtmDir);
 
-  // Figure out which questions still need answers
-  const unansweredQuestions = ONBOARDING_QUESTIONS.filter((q) => !(q.id in answers));
-
-  if (unansweredQuestions.length === 0) {
-    // All questions already answered — re-run all for editing
-    console.log(
-      `\n${chalk.bold("👍 LGTM Setup")} — updating your configuration.\n`
-    );
-    console.log(
-      chalk.gray("  Press [s] to keep current value. Ctrl+C to exit.\n")
-    );
-  } else if (existingProfile) {
-    // Partial — resuming
-    console.log(
-      `\n${chalk.bold("👍 LGTM Setup")} — continuing where you left off.\n`
-    );
-    console.log(
-      chalk.gray("  Press [s] to skip any question. Ctrl+C to exit.\n")
-    );
-  } else {
-    // Fresh start
-    console.log(
-      `\n${chalk.bold("👍 Welcome to LGTM!")} Let's set up your workspace.\n`
-    );
-    console.log(
-      chalk.gray("  Press [s] to skip any question. Ctrl+C to exit.\n")
-    );
-  }
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  // ── Start AI autodiscovery in background (runs while user answers early questions) ──
-  const aiDiscoveryPromise = (async () => {
-    try {
-      const { discoverAIProviders } = await import("./detect-ai.js");
-      return await discoverAIProviders();
-    } catch {
-      return null;
-    }
-  })();
-
-  // Helper: build and save current state
-  const saveProgress = async () => {
-    const bootstrap: BootstrapConfig = {
-      storageMode: (answers.storageMode as "farm" | "repo") ?? "repo",
-    };
-    saveBootstrap(bootstrap);
-
-    const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
-    ensureLgtmDirs(lgtmDir);
-
-    const detectedStack = detectTechStack(repoRoot);
-
-    const aiEnabled = answers.aiProvider !== "none" && !!answers.aiProvider;
-    const aiFallback = answers._aiFallback ? JSON.parse(answers._aiFallback) : undefined;
+  // Minimal profile
+  if (!loadProfile(lgtmDir)) {
     const profile: ProjectProfile = {
-      project: projectName,
-      goal: answers.goal ?? "",
-      qualityReferences: answers.qualityReferences
-        ? answers.qualityReferences.split(",").map((s) => s.trim()).filter(Boolean)
-        : [],
-      feedbackStyle: (answers.feedbackStyle as ProjectProfile["feedbackStyle"]) ?? "",
-      techStack: detectedStack,
-      teamSize: (answers.teamSize as ProjectProfile["teamSize"]) ?? "",
-      ai: {
-        enabled: aiEnabled,
-        ...(aiEnabled && answers.aiProvider ? { provider: answers.aiProvider as "openai" | "anthropic" | "ollama" } : {}),
-        ...(aiEnabled && answers.aiModel ? { model: answers.aiModel } : {}),
-        ...(aiFallback ? { fallback: aiFallback } : {}),
-      },
-      createdAt: existingProfile?.createdAt ?? new Date().toISOString(),
+      ai: { enabled: false },
+      createdAt: new Date().toISOString(),
     };
-
     const store = createOKFStore(lgtmDir);
-    const cleanData = JSON.parse(JSON.stringify({ type: "lgtm/profile", ...profile }));
-    await store.write("profile.md", cleanData, generateProfileBody(profile));
-
-    return { profile, bootstrap, lgtmDir, detectedStack };
-  };
-
-  // Determine which questions to ask
-  const questionsToAsk = unansweredQuestions.length > 0 ? unansweredQuestions : ONBOARDING_QUESTIONS;
-
-  // ── Skip-all affordance: only shown on fresh start ──────────────────
-  if (!existingProfile) {
-    console.log(chalk.gray("  Press [q] to skip setup and use defaults, or [Enter] to continue\n"));
-
-    const shouldSkip = await waitForSkipOrContinue();
-    if (shouldSkip) {
-      // Apply sensible defaults
-      answers.storageMode = "repo";
-      answers.goal = "production";
-      answers.feedbackStyle = "direct";
-      answers.teamSize = "solo";
-
-      // Await AI discovery and auto-configure if possible
-      const discovery = await aiDiscoveryPromise;
-      const available = discovery?.providers.filter((p) => p.available) ?? [];
-      if (available.length >= 1) {
-        const primary = available[0];
-        answers.aiProvider = primary.id;
-        answers.aiModel = primary.defaultModel;
-        if (primary.apiKey) {
-          try {
-            const { saveToken } = await import("../auth/github-oauth.js");
-            const credId = primary.id === "anthropic" ? "claude" : primary.id;
-            saveToken(credId, primary.apiKey);
-          } catch { /* non-critical */ }
-        }
-      } else {
-        answers.aiProvider = "none";
-      }
-
-      const { profile, bootstrap } = await saveProgress();
-      console.log(`  ${chalk.green("✓")} Using defaults. Run ${chalk.cyan("`lgtm config --edit`")} to customize.\n`);
-      rl.close();
-      return { profile, bootstrap };
-    }
+    await store.write(
+      "profile.md",
+      JSON.parse(JSON.stringify({ type: "lgtm/profile", ...profile })),
+      [
+        "# LGTM Store",
+        "",
+        "Central store for review findings across every watched repository.",
+        "",
+        "- `agents/` — review prompts, edit these to change review style",
+        "- `reviews/<owner>-<repo>-<pr>/` — findings per PR, per round",
+        "- `rules/` — regex and prompt-context rules",
+        "- `watch.md` — watched repositories",
+        "",
+      ].join("\n")
+    );
   }
 
-  try {
-    for (const q of questionsToAsk) {
-      // ── Before AI questions: show autodiscovery results ──────────────
-      if (q.id === "aiProvider") {
-        // Use Promise.race to show a spinner if discovery takes >500ms
-        let discovery: Awaited<typeof aiDiscoveryPromise>;
-        const raceResult = await Promise.race([
-          aiDiscoveryPromise.then(r => ({ type: 'resolved' as const, value: r })),
-          new Promise<{ type: 'timeout' }>(resolve => setTimeout(() => resolve({ type: 'timeout' }), 500))
-        ]);
-
-        if (raceResult.type === 'timeout') {
-          process.stdout.write("  ⏳ Detecting AI providers...");
-          discovery = await aiDiscoveryPromise;
-          // Clear the spinner line
-          process.stdout.write("\r" + " ".repeat(40) + "\r");
-        } else {
-          discovery = raceResult.value;
-        }
-
-        const available = discovery?.providers.filter((p) => p.available) ?? [];
-
-        if (available.length === 1) {
-          // Single provider found — auto-configure it
-          const rec = available[0];
-          console.log(`  ${chalk.green("✓")} AI auto-detected: ${chalk.cyan(rec.name)} ${chalk.gray(`(${rec.detectedVia})`)}`);
-          if (rec.detail) {
-            console.log(chalk.gray(`    ${rec.detail}`));
-          }
-          console.log();
-
-          answers.aiProvider = rec.id;
-          answers.aiModel = rec.defaultModel;
-          if (rec.apiKey) {
-            try {
-              const { saveToken } = await import("../auth/github-oauth.js");
-              const credId = rec.id === "anthropic" ? "claude" : rec.id;
-              saveToken(credId, rec.apiKey);
-            } catch { /* non-critical */ }
-          }
-          await saveProgress();
-          continue; // Skip the aiProvider select question
-
-        } else if (available.length > 1) {
-          // Multiple providers found — let user pick priority order
-          console.log(`  ${chalk.green("✓")} Multiple AI providers detected:\n`);
-          for (const p of available) {
-            console.log(`    ${chalk.cyan("•")} ${chalk.bold(p.name)} ${chalk.gray(`— ${p.detectedVia}`)}`);
-            if (p.detail) console.log(chalk.gray(`      ${p.detail}`));
-          }
-          console.log();
-
-          // Let the user rank them
-          const ranked = await pickProviderPriority(available);
-
-          // Primary
-          const primary = ranked[0];
-          answers.aiProvider = primary.id;
-          answers.aiModel = primary.defaultModel;
-          if (primary.apiKey) {
-            try {
-              const { saveToken } = await import("../auth/github-oauth.js");
-              const credId = primary.id === "anthropic" ? "claude" : primary.id;
-              saveToken(credId, primary.apiKey);
-            } catch { /* non-critical */ }
-          }
-
-          // Save all provider keys
-          for (const p of ranked.slice(1)) {
-            if (p.apiKey) {
-              try {
-                const { saveToken } = await import("../auth/github-oauth.js");
-                const credId = p.id === "anthropic" ? "claude" : p.id;
-                saveToken(credId, p.apiKey);
-              } catch { /* non-critical */ }
-            }
-          }
-
-          // Store fallback chain in answers for profile serialization
-          if (ranked.length > 1) {
-            answers._aiFallback = JSON.stringify(
-              ranked.slice(1).map((p) => ({ provider: p.id, model: p.defaultModel, ...(p.baseUrl ? { baseUrl: p.baseUrl } : {}) }))
-            );
-          }
-
-          await saveProgress();
-          continue; // Skip the aiProvider select question
-
-        } else if (discovery && discovery.providers.length > 0) {
-          // Found providers but none available — show info but still ask
-          const names = discovery.providers.map((p) => `${p.name} (${p.detail ?? "not reachable"})`);
-          console.log(chalk.yellow(`  ⚠ Found AI tools but none reachable:`));
-          for (const name of names) {
-            console.log(chalk.gray(`    • ${name}`));
-          }
-          console.log();
-        }
-        // If no discovery results, fall through to ask the question normally
-      }
-
-      // ── Skip aiModel/aiApiKey if autodiscovery already configured them ──
-      if (q.id === "aiModel" && answers.aiProvider && answers.aiModel && answers.aiProvider !== "none") {
-        console.log(`  ${chalk.green("✓")} Model: ${chalk.cyan(answers.aiModel)}`);
-        continue;
-      }
-      if (q.id === "aiApiKey" && answers.aiProvider && answers.aiProvider !== "none") {
-        // Check if we already have a key from discovery
-        const discovery = await aiDiscoveryPromise;
-        const found = discovery?.providers.find((p) => p.id === answers.aiProvider && p.apiKey);
-        if (found) {
-          console.log(`  ${chalk.green("✓")} API key: ${chalk.cyan(found.keyHint ?? "configured")} ${chalk.gray(`(${found.detectedVia})`)}`);
-          continue;
-        }
-      }
-
-      // Show current value if re-running (editing mode)
-      const currentValue = answers[q.id];
-      const answer = await askQuestion(rl, q, currentValue, answers);
-      if (answer !== null) {
-        answers[q.id] = answer;
-      }
-      // Save after every answer
-      await saveProgress();
-    }
-
-    // Final save and summary
-    const { profile, bootstrap, lgtmDir, detectedStack } = await saveProgress();
-
-    if (detectedStack.length > 0) {
-      console.log(
-        `\n  ${chalk.green("✓")} Detected tech stack: ${chalk.cyan(detectedStack.join(", "))}`
-      );
-    }
-
-    // Show AI status in summary (no separate discovery block needed — it ran before questions)
-    if (profile.ai.enabled) {
-      console.log(
-        `  ${chalk.green("✓")} AI: ${chalk.cyan(profile.ai.provider ?? "enabled")}${profile.ai.model ? ` (${profile.ai.model})` : ""}`
-      );
-    } else {
-      console.log(chalk.gray(`  ○ AI disabled. Enable later: ${chalk.cyan("lgtm config --edit")}`));
-    }
-
-    if (bootstrap.storageMode === "farm") {
-      console.log(
-        chalk.gray(
-          `  LGTM-farm location: ${chalk.cyan(getDefaultFarmPath())}`
-        )
-      );
-    }
-
-    console.log(
-      `\n  ${chalk.green("✓")} Profile saved to ${chalk.cyan(lgtmDir + "/profile.md")}`
-    );
-    console.log(
-      `  ${chalk.green("✓")} Storage mode: ${chalk.cyan(bootstrap.storageMode === "farm" ? "lgtm-farm" : "per-repo (.lgtm/)")}`
-    );
-    console.log(`\n${chalk.bold("👍 You're all set!")} Run ${chalk.cyan("lgtm --help")} to get started.\n`);
-
-    return { profile, bootstrap };
-  } finally {
-    rl.close();
-  }
+  return { lgtmDir, created: !existed, agentCreated };
 }
 
 /**
- * Let user pick priority order for multiple detected AI providers.
- * Uses interactive numbered selection: pick 1st, 2nd, 3rd, etc.
+ * True when the central store exists.
  */
-async function pickProviderPriority(
-  providers: Array<{ id: string; name: string; defaultModel: string; detectedVia: string; apiKey?: string; baseUrl?: string; detail?: string }>
-): Promise<typeof providers> {
-  const remaining = [...providers];
-  const ranked: typeof providers = [];
+export function storeExists(): boolean {
+  return fs.existsSync(resolveLgtmDir(loadBootstrap()));
+}
 
-  for (let rank = 1; rank <= providers.length; rank++) {
-    if (remaining.length === 1) {
-      // Last one — auto-assign
-      ranked.push(remaining[0]);
-      break;
-    }
+/**
+ * `lgtm init` — create the store and report what happened.
+ */
+export async function runInit(): Promise<InitResult> {
+  const result = await initStore();
 
-    const ordinal = rank === 1 ? "Primary" : rank === 2 ? "Fallback" : `${rank}${rank === 3 ? "rd" : "th"} choice`;
-    const options = remaining.map((p) => ({
-      value: p.id,
-      label: p.name,
-      description: p.defaultModel,
-    }));
-
-    const result = await selectWithArrows(
-      `${ordinal} provider?`,
-      options,
-      0
-    );
-
-    const picked = remaining.find((p) => p.id === result);
-    if (picked) {
-      ranked.push(picked);
-      remaining.splice(remaining.indexOf(picked), 1);
-      const icon = rank === 1 ? "1️⃣" : rank === 2 ? "2️⃣" : "3️⃣";
-      // Confirmation is shown by selectWithArrows
-    } else {
-      // Skipped — add remaining in default order
-      ranked.push(...remaining);
-      break;
-    }
+  if (result.created) {
+    console.log(`\n${chalk.bold("👍 LGTM store created")}\n`);
+    console.log(`  ${chalk.cyan(result.lgtmDir)}`);
+    console.log(chalk.gray(`    agents/     review prompts`));
+    console.log(chalk.gray(`    reviews/    findings per PR`));
+    console.log(chalk.gray(`    rules/      regex and prompt-context rules`));
+  } else {
+    console.log(`\n${chalk.bold("👍 LGTM store")}\n`);
+    console.log(`  ${chalk.cyan(result.lgtmDir)} ${chalk.gray("(already initialised)")}`);
   }
 
-  // Show final priority
-  console.log(chalk.gray("  Priority order:"));
-  ranked.forEach((p, i) => {
-    const label = i === 0 ? chalk.green("primary") : chalk.gray(`fallback ${i}`);
-    console.log(`    ${i + 1}. ${chalk.cyan(p.name)} ${chalk.gray(`(${p.defaultModel})`)} — ${label}`);
-  });
+  if (result.agentCreated) {
+    console.log(
+      `\n  ${chalk.green("✓")} Wrote default review prompt to ${chalk.cyan("agents/reviewer.md")}`
+    );
+  }
+
+  console.log(chalk.gray("\n  Next:"));
+  console.log(chalk.gray(`    ${chalk.cyan("lgtm discover --ingest")}  find local repos to watch`));
+  console.log(chalk.gray(`    ${chalk.cyan("lgtm watch")}              poll for PRs and review them`));
+  console.log(chalk.gray(`    ${chalk.cyan("lgtm ai discover")}        check which review providers are available`));
   console.log();
 
-  return ranked;
-}
-
-/**
- * Ask a single onboarding question.
- * Uses arrow keys for select, readline for text.
- * Returns null if skipped.
- */
-async function askQuestion(
-  rl: readline.Interface,
-  q: OnboardingQuestion,
-  currentValue?: string,
-  answers?: Record<string, string>
-): Promise<string | null> {
-  if (q.type === "select" && q.options) {
-    // If editing, pre-select the current value
-    const currentIdx = currentValue
-      ? q.options.findIndex((o) => o.value === currentValue)
-      : -1;
-    const startIdx = currentIdx >= 0 ? currentIdx : 0;
-
-    const result = await selectWithArrows(
-      q.question,
-      q.options,
-      startIdx,
-      currentValue
-    );
-    return result;
-  }
-
-  if (q.type === "text") {
-    // Skip model question if AI is disabled
-    if (q.id === "aiModel" && (!answers?.aiProvider || answers.aiProvider === "none")) {
-      return null;
-    }
-
-    // Skip API key if provider is none or ollama (no key needed)
-    if (q.id === "aiApiKey") {
-      if (!answers?.aiProvider || answers.aiProvider === "none" || answers.aiProvider === "ollama") {
-        return null;
-      }
-      // Check if key already exists (env var or saved)
-      const envVar = answers.aiProvider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
-      if (process.env[envVar]) {
-        console.log(chalk.green(`  ✓ ${envVar} found in environment — skipping.`));
-        return null;
-      }
-      try {
-        const { loadToken } = await import("../auth/github-oauth.js");
-        const existing = loadToken(answers.aiProvider) || loadToken(answers.aiProvider === "anthropic" ? "claude" : answers.aiProvider);
-        if (existing) {
-          console.log(chalk.green(`  ✓ Key already saved in ~/.lgtm-credentials — skipping.`));
-          return null;
-        }
-      } catch { /* continue to prompt */ }
-
-      // Show where to get the key
-      const keyUrls: Record<string, string> = {
-        openai: "https://platform.openai.com/api-keys",
-        anthropic: "https://console.anthropic.com/settings/keys",
-      };
-      const url = keyUrls[answers.aiProvider];
-      if (url) {
-        console.log(chalk.gray(`\n  Get your key from: ${chalk.cyan(url)}`));
-      }
-    }
-
-    // Show model suggestions based on provider
-    let hint = currentValue ? chalk.gray(` (current: ${currentValue})`) : "";
-    if (q.id === "aiModel" && !currentValue) {
-      const suggestions = getModelSuggestions(answers?.aiProvider);
-      if (suggestions) {
-        hint = chalk.gray(`\n  Suggestions: ${suggestions}`);
-      }
-    }
-
-    const answer = await prompt(rl, `  ${chalk.bold(q.question)}${hint}\n  > `);
-    if (answer.toLowerCase() === "s" || answer === "") {
-      return currentValue ?? null;
-    }
-
-    // If it's an API key, save it to credentials file
-    if (q.id === "aiApiKey" && answer && answers?.aiProvider) {
-      try {
-        const { saveToken } = await import("../auth/github-oauth.js");
-        const credId = answers.aiProvider === "anthropic" ? "claude" : answers.aiProvider;
-        saveToken(credId, answer);
-        console.log(chalk.green(`  ✓ API key saved securely to ~/.lgtm-credentials`));
-      } catch (err) {
-        console.log(chalk.yellow(`  ⚠ Could not save key: ${(err as Error).message}`));
-      }
-      return answer; // Store in answers but won't be written to profile.md
-    }
-
-    return answer;
-  }
-
-  return currentValue ?? null;
-}
-
-/**
- * Wait for user to press 'q' (skip) or Enter (continue).
- * Returns true if user wants to skip, false if they want to continue.
- * Handles Ctrl+C for clean exit.
- */
-function waitForSkipOrContinue(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const stdin = process.stdin;
-    const wasRaw = stdin.isRaw;
-    try {
-      stdin.setRawMode(true);
-    } catch {
-      // If setRawMode fails (e.g., piped stdin), default to continue
-      resolve(false);
-      return;
-    }
-    stdin.resume();
-    stdin.setEncoding("utf-8");
-
-    const cleanup = () => {
-      stdin.setRawMode(wasRaw ?? false);
-      stdin.removeListener("data", onData);
-      stdin.resume();
-    };
-
-    const onData = (key: string) => {
-      // Ctrl+C
-      if (key === "\x03") {
-        cleanup();
-        console.log();
-        process.exit(0);
-      }
-
-      // 'q' or 'Q' — skip setup
-      if (key === "q" || key === "Q") {
-        cleanup();
-        console.log();
-        resolve(true);
-        return;
-      }
-
-      // Enter — continue with normal flow
-      if (key === "\r" || key === "\n") {
-        cleanup();
-        console.log();
-        resolve(false);
-        return;
-      }
-
-      // Any other key — treat as continue
-      cleanup();
-      console.log();
-      resolve(false);
-    };
-
-    stdin.on("data", onData);
-  });
-}
-
-/**
- * Interactive arrow-key selector.
- * ↑/↓ to navigate, Enter to confirm, s to skip.
- */
-function selectWithArrows(
-  question: string,
-  options: { value: string; label: string; description?: string }[],
-  defaultIdx: number,
-  currentValue?: string
-): Promise<string | null> {
-  return new Promise((resolve) => {
-    let selectedIdx = defaultIdx;
-
-    // Number of lines the options + help text occupy.
-    // Each option = 1 line, help text = 1 line.
-    // drawOptions writes each with explicit \n, so after drawing
-    // the cursor sits on the line AFTER the last \n.
-    const totalDrawnLines = options.length + 1;
-
-    const drawOptions = () => {
-      options.forEach((opt, i) => {
-        const marker = i === selectedIdx ? chalk.green("❯") : " ";
-        const label =
-          i === selectedIdx ? chalk.cyan(opt.label) : opt.label;
-        const desc = opt.description ? chalk.gray(` — ${opt.description}`) : "";
-        const current = opt.value === currentValue ? chalk.gray(" (current)") : "";
-        process.stdout.write(`  ${marker} ${label}${desc}${current}\n`);
-      });
-      process.stdout.write(
-        chalk.gray("  [↑/↓] navigate  [enter] select  [s] skip")
-      );
-    };
-
-    const redraw = () => {
-      // Move cursor to start of line, then up to first option line, clear to end of screen
-      process.stdout.write(`\r\x1b[${totalDrawnLines - 1}A`);
-      process.stdout.write(`\x1b[0J`);
-      drawOptions();
-    };
-
-    // Initial draw: question + blank line + options
-    console.log(`  ${chalk.bold(question)}\n`);
-    drawOptions();
-
-    // Switch stdin to raw mode for keypress detection
-    const stdin = process.stdin;
-    const wasRaw = stdin.isRaw;
-    try {
-      stdin.setRawMode(true);
-    } catch {
-      // If setRawMode fails (e.g., piped stdin), fall back
-      resolve(options[defaultIdx].value);
-      return;
-    }
-    stdin.resume();
-    stdin.setEncoding("utf-8");
-
-    const cleanup = () => {
-      stdin.setRawMode(wasRaw ?? false);
-      stdin.removeListener("data", onData);
-      // Don't pause stdin — readline needs it to remain active
-      stdin.resume();
-    };
-
-    const onData = (key: string) => {
-      // Ctrl+C
-      if (key === "\x03") {
-        cleanup();
-        console.log();
-        process.exit(0);
-      }
-
-      // Enter
-      if (key === "\r" || key === "\n") {
-        cleanup();
-        // Clear the options area and print confirmation
-        process.stdout.write(`\r\x1b[${totalDrawnLines - 1}A`);
-        process.stdout.write(`\x1b[0J`);
-        console.log(`  ${chalk.green("✓")} ${options[selectedIdx].label}\n`);
-        resolve(options[selectedIdx].value);
-        return;
-      }
-
-      // Skip
-      if (key === "s" || key === "S") {
-        cleanup();
-        process.stdout.write(`\r\x1b[${totalDrawnLines - 1}A`);
-        process.stdout.write(`\x1b[0J`);
-        if (currentValue) {
-          const currentLabel = options.find((o) => o.value === currentValue)?.label ?? currentValue;
-          console.log(`  ${chalk.gray("kept:")} ${currentLabel}\n`);
-        } else {
-          console.log(chalk.gray("  (skipped)\n"));
-        }
-        resolve(currentValue ?? null);
-        return;
-      }
-
-      // Arrow up
-      if (key === "\x1b[A" || key === "k") {
-        selectedIdx = (selectedIdx - 1 + options.length) % options.length;
-        redraw();
-        return;
-      }
-
-      // Arrow down
-      if (key === "\x1b[B" || key === "j") {
-        selectedIdx = (selectedIdx + 1) % options.length;
-        redraw();
-        return;
-      }
-    };
-
-    stdin.on("data", onData);
-  });
-}
-
-/**
- * Prompt the user for text input.
- */
-function prompt(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      resolve(answer.trim());
-    });
-  });
-}
-
-/**
- * Get model suggestions based on provider.
- */
-function getModelSuggestions(provider?: string): string | null {
-  switch (provider) {
-    case "openai":
-      return "gpt-4o-mini (fast/cheap), gpt-4o (thorough), o3-mini (reasoning)";
-    case "anthropic":
-      return "claude-sonnet-4-20250514 (balanced), claude-opus-4-20250514 (deep)";
-    case "ollama":
-      return "llama3.2 (general), codellama (code), qwen2.5-coder (code)";
-    default:
-      return null;
-  }
-}
-
-/**
- * Generate the markdown body for the profile file.
- */
-function generateProfileBody(profile: ProjectProfile): string {
-  const lines = [
-    `# Project Profile: ${profile.project}`,
-    "",
-  ];
-
-  if (profile.goal) {
-    lines.push("## Goals");
-    lines.push(`${profile.goal.charAt(0).toUpperCase() + profile.goal.slice(1)} project.`);
-    lines.push("");
-  }
-
-  if (profile.qualityReferences.length > 0) {
-    lines.push("## Quality References");
-    lines.push("Aspiring toward the code quality of:");
-    for (const ref of profile.qualityReferences) {
-      lines.push(`- ${ref}`);
-    }
-    lines.push("");
-  }
-
-  if (profile.techStack.length > 0) {
-    lines.push("## Tech Stack");
-    lines.push(`Detected: ${profile.techStack.join(", ")}`);
-    lines.push("");
-  }
-
-  lines.push("## Preferences");
-  if (profile.feedbackStyle) lines.push(`- Feedback style: ${profile.feedbackStyle}`);
-  if (profile.teamSize) lines.push(`- Team size: ${profile.teamSize}`);
-  lines.push(
-    `- AI: ${profile.ai.enabled ? `${profile.ai.provider}` : "disabled"}`
-  );
-  lines.push("");
-
-  return lines.join("\n");
+  return result;
 }

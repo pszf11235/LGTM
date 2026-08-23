@@ -15,7 +15,13 @@ import { registerRuleCommand } from "./commands/rule.js";
 import { registerScanCommand } from "./commands/scan.js";
 import { registerWatchCommand } from "./commands/watch.js";
 import { registerDashboardCommand } from "./commands/dashboard.js";
-import { registerAutoCommand } from "./commands/auto.js";
+import { registerReviewPrCommand } from "./commands/review-pr.js";
+import {
+  registerListCommand,
+  registerPostCommand,
+  registerSubmitCommand,
+  registerDiscardCommand,
+} from "./commands/post.js";
 import { ReviewTab } from "./pages/ReviewTab.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { RulesPage } from "./pages/RulesPage.js";
@@ -70,6 +76,22 @@ export const plugin: LGTMPlugin = {
     },
   ],
 
+  /**
+   * `lgtm watch` — the main loop, given a top-level name because it is the
+   * command people leave running, and `lgtm review watch auto` is a mouthful.
+   */
+  registerTopLevelCommands(program: Command, ctx: LGTMContext): void {
+    program
+      .command("watch")
+      .description("Poll watched repos and review new PRs locally (posts nothing)")
+      .option("--interval <minutes>", "Poll interval in minutes, 0 for a single run", "15")
+      .option("--once", "Run a single cycle and exit")
+      .action(async (opts: { interval?: string; once?: boolean }) => {
+        const { runWatch } = await import("./commands/watch.js");
+        await runWatch(ctx, opts);
+      });
+  },
+
   registerCommands(program: Command, ctx: LGTMContext): void {
     // Real commands (implemented)
     registerAddCommand(program, ctx);
@@ -80,7 +102,25 @@ export const plugin: LGTMPlugin = {
     registerScanCommand(program, ctx);
     registerWatchCommand(program, ctx);
     registerDashboardCommand(program, ctx);
-    registerAutoCommand(program, ctx);
+    registerReviewPrCommand(program, ctx);
+
+    // The human gate: findings sit locally until one of these runs.
+    registerListCommand(program, ctx);
+    registerPostCommand(program, ctx);
+    registerSubmitCommand(program, ctx);
+    registerDiscardCommand(program, ctx);
+
+    // The orchestrator spawns one of these per agent and speaks JSON to it over
+    // stdin and stdout. It is hidden because it is a process boundary, not a
+    // user-facing command, and it exists as a subcommand because a compiled
+    // binary has no source file on disk to spawn instead.
+    program
+      .command("internal-worker", { hidden: true })
+      .description("Internal: run one review in this process (JSON on stdin and stdout)")
+      .action(async () => {
+        const { runWorker } = await import("./workers/review-agent.js");
+        process.exit(await runWorker());
+      });
 
     // Placeholder commands (future tasks)
     program

@@ -16,7 +16,6 @@ export interface RegistryEntry {
   name: string;
   lastSeen: string;
   plugins: string[];
-  storageMode: "farm" | "repo";
 }
 
 interface RegistryData {
@@ -71,7 +70,7 @@ function saveRegistry(repos: RegistryEntry[]): void {
  */
 export function registerRepo(
   repoRoot: string,
-  opts?: { plugins?: string[]; storageMode?: "farm" | "repo" }
+  opts?: { plugins?: string[] }
 ): void {
   const repos = loadRegistry();
   const name = path.basename(repoRoot);
@@ -81,14 +80,12 @@ export function registerRepo(
   if (existing) {
     existing.lastSeen = now;
     if (opts?.plugins) existing.plugins = opts.plugins;
-    if (opts?.storageMode) existing.storageMode = opts.storageMode;
   } else {
     repos.push({
       path: repoRoot,
       name,
       lastSeen: now,
       plugins: opts?.plugins ?? ["review"],
-      storageMode: opts?.storageMode ?? "repo",
     });
   }
 

@@ -20,6 +20,27 @@ import {
   type ReconcileResult,
 } from "./reconcile.js";
 
+// ─── Accept Feedback ────────────────────────────────────────────────────────
+
+/**
+ * Accept a repo and describe what actually happened to the watch list.
+ *
+ * Accepting used to print a bare green tick regardless of outcome, which was
+ * misleading for a repo with no git remote: there are no pull requests to poll,
+ * so it never reaches the watcher. Say so rather than implying success.
+ */
+function acceptAndDescribe(repo: ScannedRepo): { watched: boolean; label: string } {
+  const result = acceptRepo(repo);
+
+  if (result.changed) {
+    return { watched: true, label: chalk.green("✓ added to watcher") };
+  }
+  if (result.reason === "already watching") {
+    return { watched: true, label: chalk.gray("• already watching") };
+  }
+  return { watched: false, label: chalk.yellow(`⚠ not watched (${result.reason})`) };
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface IngestOptions {
@@ -145,8 +166,8 @@ export async function runIngest(opts: IngestOptions = {}): Promise<void> {
     if (recommended.length > 0) {
       console.log(chalk.green(`  Auto-accepting ${recommended.length} recommended repo(s):\n`));
       for (const repo of recommended) {
-        acceptRepo(repo);
-        console.log(`    ${chalk.green("✓")} ${repo.name}`);
+        const { label } = acceptAndDescribe(repo);
+        console.log(`    ${chalk.cyan(repo.name)} ${label}`);
       }
       console.log();
     } else {
@@ -253,6 +274,7 @@ async function runPicker(repos: ScannedRepo[]): Promise<void> {
 
   let accepted = 0;
   let skipped = 0;
+  let unwatchable = 0;
 
   try {
     for (let i = 0; i < repos.length; i++) {
@@ -285,27 +307,35 @@ async function runPicker(repos: ScannedRepo[]): Promise<void> {
         stdin.on("data", onData);
       });
 
-      const key = answer.trim().toLowerCase();
+      const raw = answer.trim();
+      const key = raw.toLowerCase();
 
-      if (key === "a" || key === "\r" || key === "\n") {
-        acceptRepo(repo);
+      // Uppercase A must be tested before the lowercase comparison. It used to
+      // be a later branch, so `key === "a"` swallowed it and "accept all" was
+      // unreachable despite being advertised in the help line.
+      if (raw === "A") {
+        // Accept ALL remaining
+        const first = acceptAndDescribe(repo);
         accepted++;
-        console.log(chalk.green("✓ watching"));
+        if (!first.watched) unwatchable++;
+        console.log(first.label);
+
+        for (let j = i + 1; j < repos.length; j++) {
+          const { watched, label } = acceptAndDescribe(repos[j]);
+          accepted++;
+          if (!watched) unwatchable++;
+          console.log(`  ${chalk.gray(`[${j + 1}/${repos.length}]`)} ${chalk.cyan(repos[j].name)} ${label}`);
+        }
+        break;
+      } else if (key === "a" || key === "\r" || key === "\n") {
+        const { watched, label } = acceptAndDescribe(repo);
+        accepted++;
+        if (!watched) unwatchable++;
+        console.log(label);
       } else if (key === "s" || key === " ") {
         denyRepo(repo);
         skipped++;
         console.log(chalk.gray("○ skipped"));
-      } else if (answer === "A") {
-        // Accept ALL remaining
-        acceptRepo(repo);
-        accepted++;
-        console.log(chalk.green("✓ watching"));
-        for (let j = i + 1; j < repos.length; j++) {
-          acceptRepo(repos[j]);
-          accepted++;
-          console.log(`  ${chalk.gray(`[${j + 1}/${repos.length}]`)} ${chalk.cyan(repos[j].name)} ${chalk.green("✓ watching")}`);
-        }
-        break;
       } else if (key === "q" || key === "\x03") {
         // Quit — skip remaining
         console.log(chalk.gray("done"));
@@ -326,15 +356,19 @@ async function runPicker(repos: ScannedRepo[]): Promise<void> {
   }
 
   // Summary
+  const watching = accepted - unwatchable;
+
   console.log();
   console.log(
     `  ${chalk.bold("Done!")} ` +
-    `${chalk.green(`${accepted} accepted`)}` +
+    `${chalk.green(`${watching} watching`)}` +
     (skipped > 0 ? `, ${chalk.gray(`${skipped} skipped`)}` : "") +
+    (unwatchable > 0 ? `, ${chalk.yellow(`${unwatchable} without a remote`)}` : "") +
     "\n"
   );
 
-  if (accepted > 0) {
-    console.log(chalk.gray(`  Run ${chalk.cyan("lgtm review watch status")} to see your watched repos.\n`));
+  if (watching > 0) {
+    console.log(chalk.gray(`  Watched repos: ${chalk.cyan("lgtm review watch list")}`));
+    console.log(chalk.gray(`  Start polling: ${chalk.cyan("lgtm watch")}\n`));
   }
 }

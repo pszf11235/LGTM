@@ -9,15 +9,12 @@ export {
   getDefaultConfig,
   loadProfile,
   resolveLgtmDir,
-  getDefaultFarmPath,
+  getDefaultStorePath,
 } from "./loader.js";
 export type { BootstrapConfig } from "./loader.js";
 
 export {
   validateConfig,
   validateProfile,
-  PROJECT_GOALS,
-  FEEDBACK_STYLES,
-  TEAM_SIZES,
   AI_PROVIDERS,
 } from "./schema.js";

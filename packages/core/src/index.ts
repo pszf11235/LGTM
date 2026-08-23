@@ -47,24 +47,12 @@ async function main() {
   // Commander doesn't reliably call program.action() when subcommands exist.
   // So we intercept bare invocations here.
   if (process.argv.length <= 2) {
-    const { isOnboardingComplete } = await import("./onboarding/flow.js");
-    if (!isOnboardingComplete(ctx.lgtmDir)) {
-      const hasProfile = await ctx.store.exists("profile.md");
-      if (hasProfile) {
-        console.log(
-          chalk.gray("\n  LGTM profile is incomplete — resuming setup...\n")
-        );
-      } else {
-        console.log(
-          chalk.gray("\n  No lgtm profile found — starting first-time setup...\n")
-        );
-      }
-      const { runOnboarding } = await import("./onboarding/flow.js");
-      await runOnboarding();
-      // After onboarding completes, fall through to launch TUI
+    // No questions to ask — create the store silently if it is missing.
+    const { storeExists, initStore } = await import("./onboarding/flow.js");
+    if (!storeExists()) {
+      await initStore();
     }
 
-    // Profile complete — launch TUI
     const { buildAndLaunchTUI } = await import("./tui/render.js");
     await buildAndLaunchTUI({ ctx, plugins });
     return;
@@ -73,16 +61,9 @@ async function main() {
   // ─── Auto-register this repo ─────────────────────────────────────────
   try {
     const { registerRepo } = await import("./registry/index.js");
-    registerRepo(ctx.repoRoot, { storageMode: ctx.config.storageMode });
+    registerRepo(ctx.repoRoot);
   } catch {
     // Non-critical — don't block startup
-  }
-
-  // ─── Warn if API key might be in committed files ─────────────────────
-  if (ctx.config.storageMode === "repo" && ctx.config.ai.apiKey) {
-    console.log(
-      chalk.yellow("  ⚠ Warning: AI API key detected in config. In repo-mode, ensure .lgtm/ is in .gitignore.\n")
-    );
   }
 
   // ─── Core Commands ─────────────────────────────────────────────────────
@@ -148,7 +129,7 @@ async function main() {
     });
 
   // `lgtm plugins` → list all plugins with status
-  program
+  const pluginsCmd = program
     .command("plugins")
     .description("List installed plugins and their status")
     .action(() => {
@@ -176,9 +157,13 @@ async function main() {
       console.log();
     });
 
-  // `lgtm plugins enable/disable <name>`
-  program
-    .command("plugins:enable <name>")
+  // `lgtm plugins enable|disable <name>`
+  //
+  // Registered as subcommands of `plugins`, not as "plugins:enable". The colon
+  // form made the name literal, so the command the help text advertised did not
+  // exist and `lgtm plugins enable review` failed.
+  pluginsCmd
+    .command("enable <name>")
     .description("Enable a plugin")
     .action(async (name: string) => {
       await persistPluginState(ctx.repoRoot, name, true);
@@ -186,8 +171,8 @@ async function main() {
       console.log(chalk.gray(`  Saved to .lgtmrc.yaml. Restart lgtm to apply.`));
     });
 
-  program
-    .command("plugins:disable <name>")
+  pluginsCmd
+    .command("disable <name>")
     .description("Disable a plugin")
     .action(async (name: string) => {
       await persistPluginState(ctx.repoRoot, name, false);
@@ -195,63 +180,55 @@ async function main() {
       console.log(chalk.gray(`  Saved to .lgtmrc.yaml. Restart lgtm to apply.`));
     });
 
-  // `lgtm init` → run or resume onboarding
+  // `lgtm init` → create the central store. No questions.
   program
     .command("init")
-    .description("Initialize LGTM in this project (runs or resumes onboarding)")
-    .option("--skip-onboarding", "Skip interactive questions, use defaults")
-    .action(async (opts: { skipOnboarding?: boolean }) => {
-      if (opts.skipOnboarding) {
-        ctx.logger.info("Skipping onboarding — using defaults.");
-        ctx.logger.info("Run `lgtm init` again without --skip-onboarding to configure.");
-        return;
-      }
-
-      const { runOnboarding } = await import("./onboarding/flow.js");
-      await runOnboarding();
-
-      // After onboarding completes, launch TUI (Bug 1 fix)
-      const { buildAndLaunchTUI } = await import("./tui/render.js");
-      await buildAndLaunchTUI({ ctx, plugins });
+    .description("Create the central LGTM store (no questions asked)")
+    .action(async () => {
+      const { runInit } = await import("./onboarding/flow.js");
+      await runInit();
     });
 
-  // `lgtm config` → show current config, offer to re-run onboarding to change
+  // `lgtm config` → show resolved config and where things live
   program
     .command("config")
-    .description("View current config or re-run setup to change settings")
-    .option("-e, --edit", "Re-run onboarding to change settings")
-    .action(async (opts: { edit?: boolean }) => {
-      if (opts.edit) {
-        const { runOnboarding } = await import("./onboarding/flow.js");
-        await runOnboarding();
-        return;
+    .description("Show the resolved config and store location")
+    .action(async () => {
+      console.log(chalk.bold("\n👍 LGTM Config\n"));
+      console.log(`  Store:      ${chalk.cyan(ctx.lgtmDir)}`);
+      console.log(`  AI enabled: ${chalk.cyan(String(ctx.config.ai.enabled))}`);
+      if (ctx.config.ai.enabled && ctx.config.ai.provider) {
+        console.log(`  AI provider: ${chalk.cyan(ctx.config.ai.provider)}`);
       }
 
-      console.log(chalk.bold("\n👍 LGTM Config\n"));
-      console.log(`  Storage mode: ${chalk.cyan(ctx.config.storageMode === "farm" ? "lgtm-farm (~/.lgtm-farm/)" : "per-repo (.lgtm/)")}`);
-      console.log(`  AI enabled:   ${chalk.cyan(String(ctx.config.ai.enabled))}`);
-      if (ctx.config.ai.enabled && ctx.config.ai.provider) {
-        console.log(`  AI provider:  ${chalk.cyan(ctx.config.ai.provider)}`);
-      }
       console.log(`  Plugins:`);
       for (const [name, cfg] of Object.entries(ctx.config.plugins)) {
         const icon = cfg.enabled ? chalk.green("●") : chalk.gray("○");
         console.log(`    ${icon} ${name}`);
       }
 
-      if (ctx.profile) {
-        console.log(`\n  ${chalk.bold("Profile:")}`);
-        console.log(`    Project:   ${chalk.cyan(ctx.profile.project)}`);
-        console.log(`    Goal:      ${chalk.cyan(ctx.profile.goal)}`);
-        console.log(`    Feedback:  ${chalk.cyan(ctx.profile.feedbackStyle)}`);
-        console.log(`    Team:      ${chalk.cyan(ctx.profile.teamSize)}`);
-        if (ctx.profile.techStack.length > 0) {
-          console.log(`    Stack:     ${chalk.cyan(ctx.profile.techStack.join(", "))}`);
+      // Agents are the user-facing config that actually matters, so show the
+      // resolved settings rather than just the filenames.
+      const { loadAgentConfigs } = await import("./store/agents.js");
+      const agents = loadAgentConfigs(ctx.lgtmDir);
+
+      if (agents.length > 0) {
+        console.log(`\n  ${chalk.bold("Review agents:")}`);
+        for (const agent of agents) {
+          const icon = agent.enabled ? chalk.green("●") : chalk.gray("○");
+          const model = agent.model ? ` ${chalk.gray(agent.model)}` : "";
+          console.log(
+            `    ${icon} ${chalk.cyan(agent.name)}` +
+            `  ${agent.provider}${model}` +
+            chalk.gray(`  min severity ${agent.severity}, timeout ${agent.timeout}s`)
+          );
         }
+        console.log(chalk.gray(`\n  Edit ${chalk.cyan("agents/<name>.md")} to change how reviews are written.`));
+        console.log(chalk.gray(`  Copy it to a second file to run two reviewers per PR.`));
       }
 
       console.log(
-        chalk.gray(`\n  Run ${chalk.cyan("lgtm config --edit")} to change settings.\n`)
+        chalk.gray(`\n  Providers: ${chalk.cyan("lgtm ai discover")}\n`)
       );
     });
 

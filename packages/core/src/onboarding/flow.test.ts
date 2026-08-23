@@ -1,118 +1,90 @@
 /**
- * Tests for onboarding flow logic.
+ * Tests for store initialisation.
  *
- * These test the non-interactive parts: profile completion detection,
- * profile building, resume logic. Interactive prompts are not tested here
- * (would need a PTY mock).
- *
- * Run with: bun test packages/core/src/onboarding/flow.test.ts
+ * Onboarding asks nothing, so these cover the store being created correctly
+ * and initStore() being safe to call repeatedly.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { isOnboardingComplete } from "./flow.js";
-import { createOKFStore } from "../store/okf.js";
-import { ensureLgtmDirs } from "../store/paths.js";
 
-describe("isOnboardingComplete", () => {
-  let tmpDir: string;
+let tmpHome: string;
+let realHome: string | undefined;
 
-  beforeEach(() => {
-    tmpDir = path.join(os.tmpdir(), `lgtm-test-${Date.now()}`);
-    fs.mkdirSync(tmpDir, { recursive: true });
+beforeEach(() => {
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "lgtm-init-"));
+  realHome = process.env.HOME;
+  process.env.HOME = tmpHome;
+});
+
+afterEach(() => {
+  if (realHome !== undefined) process.env.HOME = realHome;
+  try {
+    fs.rmSync(tmpHome, { recursive: true });
+  } catch { /* ignore */ }
+});
+
+describe("initStore", () => {
+  test("creates the central store with all subdirectories", async () => {
+    const { initStore } = await import("./flow.js");
+    const result = await initStore();
+
+    expect(result.created).toBe(true);
+    expect(result.lgtmDir).toBe(path.join(tmpHome, ".lgtm-farm"));
+
+    for (const sub of ["agents", "reviews", "rules", "cache"]) {
+      expect(fs.existsSync(path.join(result.lgtmDir, sub))).toBe(true);
+    }
   });
 
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+  test("writes a default reviewer agent on first run", async () => {
+    const { initStore } = await import("./flow.js");
+    const result = await initStore();
+
+    expect(result.agentCreated).toBe(true);
+
+    const agentPath = path.join(result.lgtmDir, "agents", "reviewer.md");
+    expect(fs.existsSync(agentPath)).toBe(true);
+
+    const content = fs.readFileSync(agentPath, "utf-8");
+    expect(content).toContain("name: reviewer");
+    expect(content).toContain("provider: auto");
+    expect(content).toContain("prompt: |");
   });
 
-  test("returns false when no profile exists", () => {
-    expect(isOnboardingComplete(tmpDir)).toBe(false);
+  test("writes a profile", async () => {
+    const { initStore } = await import("./flow.js");
+    const result = await initStore();
+
+    const profilePath = path.join(result.lgtmDir, "profile.md");
+    expect(fs.existsSync(profilePath)).toBe(true);
+    expect(fs.readFileSync(profilePath, "utf-8")).toContain("type: lgtm/profile");
   });
 
-  test("returns false when profile exists but goal is empty", async () => {
-    const store = createOKFStore(tmpDir);
-    await store.write(
-      "profile.md",
-      {
-        type: "lgtm/profile",
-        project: "test",
-        goal: "",
-        feedbackStyle: "direct",
-        teamSize: "solo",
-      },
-      "# Test"
-    );
-    expect(isOnboardingComplete(tmpDir)).toBe(false);
-  });
+  test("is idempotent — second run reports nothing new and preserves edits", async () => {
+    const { initStore } = await import("./flow.js");
+    const first = await initStore();
 
-  test("returns false when profile has goal but missing feedbackStyle", async () => {
-    const store = createOKFStore(tmpDir);
-    await store.write(
-      "profile.md",
-      {
-        type: "lgtm/profile",
-        project: "test",
-        goal: "production",
-        feedbackStyle: "",
-        teamSize: "solo",
-      },
-      "# Test"
-    );
-    expect(isOnboardingComplete(tmpDir)).toBe(false);
-  });
+    const agentPath = path.join(first.lgtmDir, "agents", "reviewer.md");
+    fs.writeFileSync(agentPath, "---\nname: reviewer\nprompt: custom\n---\n", "utf-8");
 
-  test("returns false when profile has goal and feedback but missing teamSize", async () => {
-    const store = createOKFStore(tmpDir);
-    await store.write(
-      "profile.md",
-      {
-        type: "lgtm/profile",
-        project: "test",
-        goal: "production",
-        feedbackStyle: "direct",
-        teamSize: "",
-      },
-      "# Test"
-    );
-    expect(isOnboardingComplete(tmpDir)).toBe(false);
-  });
+    const second = await initStore();
 
-  test("returns true when all required fields are set", async () => {
-    const store = createOKFStore(tmpDir);
-    await store.write(
-      "profile.md",
-      {
-        type: "lgtm/profile",
-        project: "test",
-        goal: "production",
-        feedbackStyle: "direct",
-        teamSize: "solo",
-        techStack: ["typescript"],
-        qualityReferences: [],
-        ai: { enabled: false },
-      },
-      "# Test"
-    );
-    expect(isOnboardingComplete(tmpDir)).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.agentCreated).toBe(false);
+    // A user's edited prompt must survive re-initialisation
+    expect(fs.readFileSync(agentPath, "utf-8")).toContain("prompt: custom");
   });
+});
 
-  test("returns true regardless of AI provider being set or not", async () => {
-    const store = createOKFStore(tmpDir);
-    await store.write(
-      "profile.md",
-      {
-        type: "lgtm/profile",
-        project: "test",
-        goal: "vibed",
-        feedbackStyle: "gentle",
-        teamSize: "small",
-        ai: { enabled: false },
-      },
-      "# Test"
-    );
-    expect(isOnboardingComplete(tmpDir)).toBe(true);
+describe("storeExists", () => {
+  test("false before init, true after", async () => {
+    const { storeExists, initStore } = await import("./flow.js");
+
+    expect(storeExists()).toBe(false);
+    await initStore();
+    expect(storeExists()).toBe(true);
   });
 });

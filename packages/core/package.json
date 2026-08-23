@@ -9,14 +9,19 @@
     "./plugin.js": "./src/plugin.ts",
     "./store/okf.js": "./src/store/okf.ts",
     "./store/paths.js": "./src/store/paths.ts",
+    "./store/agents.js": "./src/store/agents.ts",
     "./config/loader.js": "./src/config/loader.ts",
+    "./cli/self.js": "./src/cli/self.ts",
+    "./auth/github-oauth.js": "./src/auth/github-oauth.ts",
     "./utils/git.js": "./src/utils/git.ts",
     "./llm/provider.js": "./src/llm/provider.ts",
+    "./ai/providers.js": "./src/ai/providers.ts",
     "./llm/cache.js": "./src/llm/cache.ts",
     "./tui/hooks/index.js": "./src/tui/hooks/index.ts",
     "./registry/scanner.js": "./src/registry/scanner.ts",
     "./registry/reconcile.js": "./src/registry/reconcile.ts",
-    "./registry/ingest.js": "./src/registry/ingest.ts"
+    "./registry/ingest.js": "./src/registry/ingest.ts",
+    "./registry/watch-list.js": "./src/registry/watch-list.ts"
   },
   "scripts": {
     "dev": "bun run src/index.ts",

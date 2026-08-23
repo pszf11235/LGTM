@@ -38,9 +38,10 @@ export function DashboardPage({ onStatusHint }: DashboardPageProps) {
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
       const { loadBootstrap, resolveLgtmDir } = await import("@lgtm/core/config/loader.js");
 
-      const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+      const { resolveGitHubToken } = await import("@lgtm/core/auth/github-oauth.js");
+      const token = resolveGitHubToken();
       if (!token) {
-        setError("Set GITHUB_TOKEN to use the dashboard");
+        setError("No GitHub token. Run `gh auth login` or set GITHUB_TOKEN.");
         setLoading(false);
         return;
       }

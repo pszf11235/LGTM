@@ -6,6 +6,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import matter from "gray-matter";
 import { scanAllRepos, type ScannedRepo } from "./scanner.js";
 import {
   reconcile,
@@ -15,6 +16,7 @@ import {
   saveIngestRegistry,
   pruneIngestRegistry,
 } from "./reconcile.js";
+import { saveWatchList } from "./watch-list.js";
 
 // ─── Test Helpers ───────────────────────────────────────────────────────────
 
@@ -42,19 +44,45 @@ function createFakeRepo(name: string, opts?: { remote?: string; withCommit?: boo
   return repoDir;
 }
 
-beforeEach(() => {
-  tempDir = path.join(os.tmpdir(), `lgtm-scanner-test-${Date.now()}`);
-  fs.mkdirSync(tempDir, { recursive: true });
+// The registry and watch list both live in the store, which resolves from
+// $HOME. Redirecting HOME per test gives each one a private store instead of
+// deleting files out of the developer's real home directory.
+let tmpHome: string;
+let originalHome: string | undefined;
 
-  // Clean ingest registry for isolated tests
-  const registryPath = path.join(os.homedir(), ".lgtm-ingest-registry.md");
-  try { fs.unlinkSync(registryPath); } catch { /* doesn't exist */ }
+/** The store the code under test will resolve to. */
+function storeDir(): string {
+  return path.join(tmpHome, ".lgtm-farm");
+}
+
+/** The watch list as the watcher would read it. */
+function readWatchList(): Array<{
+  owner?: string;
+  repo?: string;
+  filter?: string;
+  path?: string;
+}> {
+  try {
+    const raw = fs.readFileSync(path.join(storeDir(), "watch.md"), "utf-8");
+    return (matter(raw).data.repos as Array<{ owner?: string; repo?: string }>) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+beforeEach(() => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "lgtm-scanner-test-"));
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "lgtm-scanner-home-"));
+  originalHome = process.env.HOME;
+  process.env.HOME = tmpHome;
 });
 
 afterEach(() => {
-  try { fs.rmSync(tempDir, { recursive: true }); } catch { /* ignore */ }
-  const registryPath = path.join(os.homedir(), ".lgtm-ingest-registry.md");
-  try { fs.unlinkSync(registryPath); } catch { /* doesn't exist */ }
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+
+  try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
 // ─── Scanner Tests ──────────────────────────────────────────────────────────
@@ -347,5 +375,98 @@ describe("ingest registry", () => {
     const matches = registry.filter((r) => r.name === "idem-test");
 
     expect(matches.length).toBe(1);
+  });
+});
+
+// ─── Watch List Wiring ──────────────────────────────────────────────────────
+//
+// Accepting a repo used to update the registry only, so the watcher never
+// polled it. These cover the wiring, not the registry.
+
+describe("accept reaches the watcher", () => {
+  function repoWithRemote(name: string): ScannedRepo {
+    const repo: ScannedRepo = {
+      path: path.join(tempDir, name),
+      name,
+      owner: "acme",
+      repoName: name,
+      platform: "github",
+      remote: `https://github.com/acme/${name}.git`,
+    };
+    fs.mkdirSync(repo.path, { recursive: true });
+    return repo;
+  }
+
+  test("accepting a repo adds it to the watch list", () => {
+    const repo = repoWithRemote("watched");
+
+    const result = acceptRepo(repo);
+
+    expect(result.changed).toBe(true);
+    expect(readWatchList()).toEqual([
+      { owner: "acme", repo: "watched", filter: "all", path: repo.path },
+    ]);
+  });
+
+  test("accepting twice does not duplicate the watch entry", () => {
+    const repo = repoWithRemote("twice");
+
+    acceptRepo(repo);
+    const second = acceptRepo(repo);
+
+    expect(second.changed).toBe(false);
+    expect(second.reason).toBe("already watching");
+    expect(readWatchList().length).toBe(1);
+  });
+
+  test("a repo with no remote is recorded but not watched", () => {
+    const repo: ScannedRepo = {
+      path: path.join(tempDir, "local-only"),
+      name: "local-only",
+    };
+    fs.mkdirSync(repo.path, { recursive: true });
+
+    const result = acceptRepo(repo);
+
+    expect(result.changed).toBe(false);
+    expect(result.reason).toContain("no git remote");
+    expect(readWatchList()).toEqual([]);
+
+    // Still tracked, so discovery will not re-prompt for it.
+    expect(loadIngestRegistry().find((r) => r.name === "local-only")?.status).toBe("watching");
+  });
+
+  test("denying a watched repo removes it from the watch list", () => {
+    const repo = repoWithRemote("later-denied");
+    acceptRepo(repo);
+    expect(readWatchList().length).toBe(1);
+
+    const result = denyRepo(repo);
+
+    expect(result.changed).toBe(true);
+    expect(readWatchList()).toEqual([]);
+  });
+
+  test("pruning a deleted checkout stops watching it", () => {
+    const repo = repoWithRemote("vanished");
+    acceptRepo(repo);
+    fs.rmSync(repo.path, { recursive: true, force: true });
+
+    const removed = pruneIngestRegistry();
+
+    expect(removed.map((r) => r.name)).toEqual(["vanished"]);
+    expect(readWatchList()).toEqual([]);
+  });
+
+  test("reconcile reads watching status from the watch list", () => {
+    const repo = repoWithRemote("via-watch-list");
+
+    // Simulate a repo added by `lgtm review watch add`, with no registry entry.
+    saveWatchList(storeDir(), [{ owner: "acme", repo: "via-watch-list", filter: "all" }]);
+
+    const result = reconcile([repo]);
+
+    expect(result.counts.watching).toBe(1);
+    expect(result.counts.new).toBe(0);
   });
 });

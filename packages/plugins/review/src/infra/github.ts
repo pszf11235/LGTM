@@ -6,9 +6,11 @@
  * - Post reviews (APPROVE / REQUEST_CHANGES)
  * - Post inline comments at specific file/line positions
  *
- * Auth: GITHUB_TOKEN env var or `gh auth token` output.
- * Uses raw fetch() to GitHub REST API.
+ * Auth goes through resolveGitHubToken(): GITHUB_TOKEN, then `gh auth token`,
+ * then ~/.lgtm-credentials. Uses raw fetch() to the GitHub REST API.
  */
+
+import { resolveGitHubToken } from "@lgtm/core/auth/github-oauth.js";
 
 /**
  * GitHub PR metadata.
@@ -18,6 +20,8 @@ export interface GitHubPR {
   title: string;
   body: string;
   state: string;
+  /** The PR author's login, or "unknown". */
+  author: string;
   head: { ref: string; sha: string };
   base: { ref: string };
   changedFiles: number;
@@ -35,36 +39,20 @@ export function createGitHubAdapter(owner: string, repo: string) {
   let cachedToken: string | null = null;
   let tokenResolved = false;
 
+  /**
+   * Resolved once per adapter, via the one shared resolver.
+   *
+   * This used to have its own copy of the resolution order, which drifted from
+   * the shared one, and it shelled out to `gh auth token` with stderr inherited,
+   * so on a machine where `gh` is broken the shim's error text landed in the
+   * middle of our output.
+   */
   function getToken(): string | null {
     if (tokenResolved) return cachedToken;
     tokenResolved = true;
 
-    // Check env var first
-    if (process.env.GITHUB_TOKEN) { cachedToken = process.env.GITHUB_TOKEN; return cachedToken; }
-    if (process.env.GH_TOKEN) { cachedToken = process.env.GH_TOKEN; return cachedToken; }
-
-    // Check saved OAuth token (~/.lgtm-credentials)
-    try {
-      const fs = require("fs");
-      const path = require("path");
-      const os = require("os");
-      const credFile = path.join(os.homedir(), ".lgtm-credentials");
-      const raw = fs.readFileSync(credFile, "utf-8");
-      const creds = JSON.parse(raw);
-      if (creds.github) { cachedToken = creds.github; return cachedToken; }
-    } catch { /* no saved credentials */ }
-
-    // Try `gh auth token` (only once)
-    try {
-      const { execSync } = require("child_process");
-      const token = execSync("gh auth token", { encoding: "utf-8" }).trim();
-      if (token) { cachedToken = token; return cachedToken; }
-    } catch {
-      // gh not available or not logged in
-    }
-
-    cachedToken = null;
-    return null;
+    cachedToken = resolveGitHubToken();
+    return cachedToken;
   }
 
   async function request(
@@ -111,6 +99,8 @@ export function createGitHubAdapter(owner: string, repo: string) {
       title: data.title,
       body: data.body ?? "",
       state: data.state,
+      // Recorded on every review so findings say who wrote the PR.
+      author: data.user?.login ?? "unknown",
       head: { ref: data.head.ref, sha: data.head.sha },
       base: { ref: data.base.ref },
       changedFiles: data.changed_files,
