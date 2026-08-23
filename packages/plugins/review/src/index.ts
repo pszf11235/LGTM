@@ -16,6 +16,12 @@ import { registerScanCommand } from "./commands/scan.js";
 import { registerWatchCommand } from "./commands/watch.js";
 import { registerDashboardCommand } from "./commands/dashboard.js";
 import { registerAutoCommand } from "./commands/auto.js";
+import {
+  registerListCommand,
+  registerPostCommand,
+  registerSubmitCommand,
+  registerDiscardCommand,
+} from "./commands/post.js";
 import { ReviewTab } from "./pages/ReviewTab.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { RulesPage } from "./pages/RulesPage.js";
@@ -81,6 +87,12 @@ export const plugin: LGTMPlugin = {
     registerWatchCommand(program, ctx);
     registerDashboardCommand(program, ctx);
     registerAutoCommand(program, ctx);
+
+    // The human gate: findings sit locally until one of these runs.
+    registerListCommand(program, ctx);
+    registerPostCommand(program, ctx);
+    registerSubmitCommand(program, ctx);
+    registerDiscardCommand(program, ctx);
 
     // The orchestrator spawns one of these per agent and speaks JSON to it over
     // stdin and stdout. It is hidden because it is a process boundary, not a
