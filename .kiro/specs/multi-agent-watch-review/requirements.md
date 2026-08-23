@@ -52,57 +52,57 @@ Watcher detects new PR
 **Acceptance Criteria:**
 - Agent configs stored at `.lgtm/agents/` (one file per agent, OKF format)
 - Each agent file defines: name, prompt, provider, severity threshold, model override
-- Default ships with 2 agents: `security.md` (uses claude-cli) + `architecture.md` (uses codex-cli)
+- Default ships with 2 agents: `reviewer.md` (claude-cli, per-PR review) + `ops.md` (codex-cli, overview/standup)
 - Can add more agents by creating new `.md` files in the directory
 - Per-repo agents override global agents (same as rules precedence)
 - `provider` field determines how the agent executes: `claude-cli`, `codex-cli`, `openrouter`, `ollama`
 
-Example `.lgtm/agents/security.md`:
+Example `.lgtm/agents/reviewer.md`:
 ```markdown
 ---
-name: security
+name: reviewer
 provider: claude-cli
 prompt: |
-  You are a security-focused code reviewer. Look for:
-  - Hardcoded secrets, API keys, tokens
-  - SQL injection, XSS, CSRF vulnerabilities
-  - Auth/authz bypasses
-  - Insecure data handling
-  Only flag HIGH or CRITICAL issues. Be concise.
+  Review this pull request diff. Focus on HIGH and CRITICAL issues only.
+  Provide feedback concisely, actionably, no fluff, dev to dev.
+  Never use em dashes or semicolons.
+  Don't spell out severity labels in the body.
+  Instead of: "**High — these events won't make it to GA4.**"
+  Use: "These events probably won't make it to GA4 (this is an important one)..."
   Output findings as JSON array: [{file, line, comment, severity}]
 severity: high
 enabled: true
 priority: 1
 ---
 
-# Security Review Agent
+# Code Review Agent
 
-Focuses on vulnerabilities, auth issues, and data exposure.
-Uses Claude Code CLI (Max/Pro subscription).
+Reviews each PR for high/critical issues. Tone: concise, dev-to-dev.
 ```
 
-Example `.lgtm/agents/architecture.md`:
+Example `.lgtm/agents/ops.md`:
 ```markdown
 ---
-name: architecture
+name: ops
 provider: codex-cli
 prompt: |
-  You are an architecture reviewer. Look for:
-  - Functions over 50 lines (suggest splitting)
-  - Circular dependencies
-  - Leaky abstractions
-  - Missing error handling
-  Focus on maintainability and separation of concerns.
-  Output findings as JSON array: [{file, line, comment, severity}]
+  Review all open pull requests. For each PR, report:
+  1. Title and author
+  2. How long it's been open
+  3. Review status: approved, changes requested, or awaiting review
+  4. CI status: passing, failing, or pending
+  5. Merge conflicts: whether the branch is up to date
+  Highlight PRs open >3 days or with failing checks. Sort oldest first.
+  Provide standup summary if user has authored PRs.
+  Output as JSON: {prs: [...], standup: string|null}
 severity: medium
 enabled: true
 priority: 2
 ---
 
-# Architecture Review Agent
+# Ops Agent
 
-Focuses on code structure and maintainability.
-Uses Codex CLI (ChatGPT subscription).
+PR health dashboard + standup generator.
 ```
 
 ### US-3: Separate processes per agent

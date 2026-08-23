@@ -6,7 +6,7 @@
 - [ ] Define `AgentConfig` interface: name, provider, prompt, severity, model, enabled, priority
 - [ ] `provider` field: `"claude-cli" | "codex-cli" | "openrouter" | "ollama"`
 - [ ] Implement `loadAgentConfigs(lgtmDir)` — reads all `.md` files from `agents/` dir
-- [ ] Ship 2 default agent configs: `security.md` (claude-cli) + `architecture.md` (codex-cli)
+- [ ] Ship 2 default agent configs: `reviewer.md` (claude-cli, per-PR code review) + `ops.md` (codex-cli, PR dashboard/standup)
 - [ ] Support global agents at `~/.lgtm-farm/agents/` (fallback if no local)
 - [ ] Implement `detectAvailableProviders()` — checks which CLIs/APIs are available
 - [ ] Tests: load configs, parse OKF, handle missing dir gracefully
@@ -65,16 +65,19 @@
 - [ ] After posting: mark in OKF, change annotation to "✓ posted"
 - [ ] After discarding: remove annotation
 
-## Task 7: Selective posting
+## Task 7: Selective posting with delay
 - [ ] Implement `postApprovedFindings(store, prNumber, github)`:
   - Collect all findings where `posted: false` and not discarded
   - Batch into one GitHub review (COMMENT event)
   - Mark all as `posted: true` in OKF
+- [ ] **Comment delay**: wait 20s–1.5min between individual comment posts (configurable)
+  - Prevents spam detection, looks more human
+  - Configured in agent OKF or .lgtmrc.yaml: `commentDelay: [20, 90]`
 - [ ] Wire `p`/`P` keys in TUI to call this
 - [ ] Support CLI posting: `lgtm review post 42` posts all unposted findings
-- [ ] Support agent filter: `lgtm review post 42 --agent security`
+- [ ] Support agent filter: `lgtm review post 42 --agent reviewer`
 - [ ] Support dry-run: `lgtm review post 42 --dry-run`
-- [ ] Tests: selective posting, batch creation, marking
+- [ ] Tests: selective posting, batch creation, delay timing, marking
 
 ## Task 8: Per-PR agent count override
 - [ ] Add `--agents <count>` or `--agents <names...>` flag to `lgtm review auto`

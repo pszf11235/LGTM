@@ -158,65 +158,83 @@ const res = await fetch("http://localhost:11434/api/generate", {
 
 ## Storage (OKF Format)
 
-### Agent Config: `.lgtm/agents/security.md`
+### Agent Config: `.lgtm/agents/reviewer.md`
+
+The primary code review agent — reviews individual PRs with your tone and style.
+
 ```markdown
 ---
-name: security
+name: reviewer
 provider: claude-cli
 prompt: |
-  You are a security-focused code reviewer. Look for:
-  - Hardcoded secrets, API keys, tokens
-  - SQL injection, XSS, CSRF vulnerabilities
-  - Auth/authz bypasses
-  Only flag HIGH or CRITICAL issues.
-  Output findings as JSON: [{file, line, comment, severity}]
+  Review this pull request diff. Focus on HIGH and CRITICAL issues only.
+  Provide feedback concisely, actionably, no fluff, dev to dev.
+  Never use em dashes or semicolons.
+  When flagging an issue, don't spell out "HIGH" or "Critical" in the body.
+  Instead of: "**High / borderline critical — these events probably won't make it to GA4.**"
+  Use: "These events probably won't make it to GA4 (this is an important one)..."
+  Keep it direct: what's wrong, why it matters, what to do.
+  Output findings as JSON array: [{file, line, comment, severity}]
 severity: high
 enabled: true
 priority: 1
 ---
 
-# Security Review Agent
+# Code Review Agent
 
-Focuses on vulnerabilities, auth issues, and data exposure.
-Uses Claude Code CLI (your Max/Pro subscription).
+Reviews each PR for high and critical issues.
+Tone: concise, actionable, dev-to-dev. No fluff.
 ```
 
-### Agent Config: `.lgtm/agents/architecture.md`
+### Agent Config: `.lgtm/agents/ops.md`
+
+The ops/overview agent — provides PR status dashboard and standup generation.
+
 ```markdown
 ---
-name: architecture
+name: ops
 provider: codex-cli
 prompt: |
-  You are an architecture reviewer. Look for:
-  - Functions over 50 lines (suggest splitting)
-  - Circular dependencies
-  - Leaky abstractions
-  - Missing error handling
-  - God objects / God functions
-  Focus on maintainability and separation of concerns.
-  Output findings as JSON: [{file, line, comment, severity}]
+  Review all open pull requests. For each PR, report:
+  1. Title and author
+  2. How long it's been open
+  3. Review status: approved, changes requested, or awaiting review
+  4. CI status: passing, failing, or pending
+  5. Merge conflicts: whether the branch is up to date
+
+  Highlight any PRs open for more than 3 days or with failing checks.
+  Sort by oldest first.
+  If there are no open PRs, confirm briefly.
+
+  Provide a clear view on which ones should be approved (comments resolved,
+  clean after review).
+
+  Lastly, if there are any PRs where the user is the author, provide a
+  standup summary: "Yesterday I ..., today I will..."
+
+  Output as JSON: {prs: [{number, title, author, age_days, review_status,
+  ci_status, has_conflicts, recommendation}], standup: string|null}
 severity: medium
 enabled: true
 priority: 2
 ---
 
-# Architecture Review Agent
+# Ops / Dashboard Agent
 
-Focuses on code structure and long-term maintainability.
-Uses Codex CLI (your ChatGPT subscription).
+Provides PR health overview across repos: status, age, CI, conflicts.
+Generates daily standup if user has authored PRs.
 ```
 
-### Agent Findings: `.lgtm/reviews/42/agent-security.md`
+### Agent Findings: `.lgtm/reviews/42/agent-reviewer.md`
 ```markdown
 ---
 type: lgtm/agent-review
 pr: 42
 repo: org/backend
-agent: security
-model: claude-sonnet-4-20250514
+agent: reviewer
+provider: claude-cli
 reviewedAt: "2026-08-22T14:30:00Z"
 durationMs: 8500
-tokensUsed: 2340
 findings:
   - file: src/auth.ts
     line: 42
@@ -225,14 +243,51 @@ findings:
     posted: false
   - file: src/db.ts
     line: 18
-    comment: "SQL query built with string concatenation — use parameterized queries."
+    comment: "SQL query built with string concatenation. Use parameterized queries — this is exploitable."
     severity: high
     posted: false
 ---
 
-# Security Agent Review — PR #42
+# Reviewer Agent — PR #42
 
 Reviewed 5 files, found 2 issues (1 critical, 1 high).
+```
+
+### Agent Findings: `.lgtm/reviews/42/agent-ops.md`
+```markdown
+---
+type: lgtm/agent-review
+pr: 42
+repo: org/backend
+agent: ops
+provider: codex-cli
+reviewedAt: "2026-08-22T14:30:05Z"
+durationMs: 4200
+overview:
+  prs:
+    - number: 42
+      title: "Add user auth"
+      author: "pascalhampel"
+      age_days: 1
+      review_status: "awaiting review"
+      ci_status: "passing"
+      has_conflicts: false
+      recommendation: "review"
+    - number: 38
+      title: "Fix login redirect"
+      author: "teammate"
+      age_days: 5
+      review_status: "changes requested"
+      ci_status: "failing"
+      has_conflicts: true
+      recommendation: "needs attention"
+  standup: "Yesterday I opened PR #42 (user auth). Today I will address review feedback and merge."
+findings: []
+---
+
+# Ops Agent — PR Overview
+
+2 open PRs. 1 needs attention (>3 days, failing CI).
 ```
 
 ### Watcher Config Extension: `watch.md`
