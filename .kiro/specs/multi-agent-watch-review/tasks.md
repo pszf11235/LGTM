@@ -60,7 +60,7 @@
 ## Task 6: TUI — show agent findings on diff
 - [ ] Update ReviewPage to load agent findings for the current PR
 - [ ] Display findings as inline annotations on diff lines
-- [ ] Color/icon per agent: 🔒 security (red), 🏗 architecture (yellow), etc.
+- [ ] Label per agent name in annotations
 - [ ] Show finding count in queue page: "[🔒 2, 🏗 1]"
 - [ ] Keyboard: `p` post finding, `x` discard, `e` edit, `P` post all
 - [ ] After posting: mark in OKF, change annotation to "✓ posted"

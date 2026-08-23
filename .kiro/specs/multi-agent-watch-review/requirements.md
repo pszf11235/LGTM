@@ -112,7 +112,7 @@ Provider dispatch in worker:
 - `lgtm review status` shows "2 agent reviews ready for PR #42"
 - In TUI Review tab: agent findings shown as inline annotations on the diff
 - Human can: approve (→ post), edit (→ modify then post), discard (→ delete)
-- Bulk approve: "Post all findings" / "Post findings from security agent only"
+- Bulk approve: "Post all findings" / "Post findings from specific agent only"
 - After posting, findings are marked as `posted: true` in the OKF file
 
 ### US-5: Human review + selective posting
@@ -121,7 +121,7 @@ Provider dispatch in worker:
 **So that** I can evaluate each finding in context and decide what to post.
 
 **Acceptance Criteria:**
-- Diff view shows agent annotations: `[🔒 security] Hardcoded API key on line 42`
+- Diff view shows agent annotations: `[reviewer] Hardcoded API key on line 42`
 - Different agents use different colors/icons
 - Keyboard: `p` post selected finding, `P` post all from cursor down, `x` discard
 - `Shift+P` post all approved findings for this PR at once
@@ -136,7 +136,7 @@ Provider dispatch in worker:
 **Acceptance Criteria:**
 - `lgtm review auto --pr 42 --agents 4` overrides the default count
 - Extra agents reuse the prompt pool with different temperature/sampling
-- Or: user can specify which agent configs to use: `--agents security,architecture,testing`
+- Or: user can specify which agent configs to use: `--agents reviewer,reviewer-2,reviewer-3`
 - Configurable default in `.lgtmrc.yaml`: `watch.auto_review.agent_count: 2`
 
 ### US-7: Provider auto-detection and fallback
@@ -151,7 +151,7 @@ Provider dispatch in worker:
   - `openrouter`: check `OPENROUTER_API_KEY` env var
   - `ollama`: check `http://localhost:11434` reachable
 - If configured provider unavailable: fall back to next available in priority order
-- Show warning: "Agent 'security' configured for claude-cli but not available — falling back to openrouter"
+- Show warning: "Agent 'reviewer' configured for claude-cli but not available — falling back to openrouter"
 - `lgtm ai discover` shows which providers are available for agent use
 
 ## Non-Functional Requirements

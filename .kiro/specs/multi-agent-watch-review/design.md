@@ -18,8 +18,8 @@
 │  │  Agent Worker 1  │  │  Agent Worker 2  │  │  Agent Worker N  │    │
 │  │  (separate proc) │  │  (separate proc) │  │  (separate proc) │    │
 │  │                  │  │                  │  │                  │     │
-│  │  prompt: secur.  │  │  prompt: arch.   │  │  prompt: custom  │    │
-│  │  model: claude   │  │  model: gpt-4o   │  │  model: ollama   │    │
+│  │  prompt: review  │  │  prompt: review  │  │  prompt: review  │    │
+│  │  via: claude-cli │  │  via: codex-cli  │  │  via: openrouter │    │
 │  │                  │  │                  │  │                  │     │
 │  │  stdin ← diff    │  │  stdin ← diff    │  │  stdin ← diff    │    │
 │  │  stdout → JSON   │  │  stdout → JSON   │  │  stdout → JSON   │    │
@@ -28,17 +28,16 @@
 │           ▼                      ▼                      ▼             │
 │  ┌──────────────────────────────────────────────────────────────┐    │
 │  │         .lgtm/reviews/42/                                    │    │
-│  │           agent-security.md    (OKF: findings)               │    │
-│  │           agent-architecture.md (OKF: findings)              │    │
-│  │           agent-custom.md       (OKF: findings)              │    │
+│  │           agent-reviewer.md     (OKF: findings)              │    │
+│  │           agent-reviewer-2.md   (if multiple workers)        │    │
 │  └──────────────────────────────────────────────────────────────┘    │
 │                                                                      │
 ├─────────────────────────────────────────────────────────────────────┤
-│                     Human Review (TUI)                                │
+│                     Human Review (UI / CLI)                           │
 │                                                                      │
 │  Diff view with agent annotations:                                   │
-│    Line 42: [🔒 security] Hardcoded API key detected                 │
-│    Line 67: [🏗 architecture] Function too complex (cyclomatic: 12)  │
+│    Line 42: [reviewer] Hardcoded API key detected                    │
+│    Line 67: [reviewer] Missing error handling                        │
 │                                                                      │
 │  Actions: p=post  x=discard  e=edit  P=post all  Shift+P=batch post │
 │                                                                      │
@@ -64,11 +63,10 @@ const worker = Bun.spawn(["bun", "run", "packages/plugins/review/src/workers/rev
 {
   "diff": "<raw unified diff>",
   "agent": {
-    "name": "security",
+    "name": "reviewer",
     "provider": "claude-cli",
-    "prompt": "You are a security reviewer...",
-    "severity": "high",
-    "model": null
+    "prompt": "Review all open pull requests...",
+    "severity": "high"
   },
   "rules": [
     { "id": "r1", "description": "...", "pattern": "...", "enforcement": "regex" }
@@ -132,7 +130,7 @@ const res = await fetch("http://localhost:11434/api/generate", {
 ### Output (via stdout — JSON)
 ```json
 {
-  "agent": "security",
+  "agent": "reviewer",
   "findings": [
     {
       "file": "src/auth.ts",
