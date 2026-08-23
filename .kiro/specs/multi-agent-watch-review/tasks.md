@@ -16,8 +16,10 @@
 - [ ] Create `packages/plugins/review/src/workers/review-agent.ts` (standalone entry point)
 - [ ] Worker reads JSON from stdin: { diff, agent, rules, pr, profile }
 - [ ] Provider dispatch based on `agent.provider`:
-  - `claude-cli`: spawn `claude -p "<prompt>" --output-format json`, pipe diff via stdin
-  - `codex-cli`: spawn `codex exec "<prompt>" --json-output-schema <schema>`
+  - `claude-cli`: prefer `/review <pr-url>` or `/code-review` (built-in multi-agent review)
+    - Falls back to raw `-p "<prompt>"` if custom prompt specified
+  - `codex-cli`: prefer `/review` (trained GPT-5.x review model)
+    - Falls back to `exec "<prompt>"` if custom prompt specified
   - `openrouter`: HTTP POST to `https://openrouter.ai/api/v1/chat/completions`
   - `ollama`: HTTP POST to `http://localhost:11434/api/generate`
 - [ ] Check provider availability before calling (which claude / which codex / env var / ping)

@@ -87,23 +87,42 @@ const worker = Bun.spawn(["bun", "run", "packages/plugins/review/src/workers/rev
 
 Inside the worker, based on `agent.provider`:
 
-**claude-cli:**
+**claude-cli (preferred — uses built-in review commands):**
 ```ts
-const proc = Bun.spawn(["claude", "-p", combinedPrompt, "--output-format", "json"], {
-  stdin: "pipe",  // pipe the diff content if too large for arg
+// Option 1: Use Claude's built-in /review (fetches PR diff itself, multi-agent)
+const proc = Bun.spawn(["claude", "-p", `/review https://github.com/${repo}/pull/${pr}`, "--output-format", "json"], {
+  cwd: repoPath,
 });
-// Parse JSON output from Claude
+
+// Option 2: Use /code-review on local diff (4 parallel agents on Anthropic infra)
+const proc = Bun.spawn(["claude", "-p", `/code-review`, "--output-format", "json"], {
+  cwd: repoPath,  // must be in the git repo
+});
+
+// Option 3: Raw prompt with custom instructions (user's prompt from OKF)
+const proc = Bun.spawn(["claude", "-p", combinedPrompt, "--output-format", "json"], {
+  stdin: "pipe",  // pipe diff if too large for arg
+});
 ```
 
-**codex-cli:**
+Note: Claude's `/code-review ultra` already runs 4 agents in parallel with false-positive filtering. When available, we delegate to it rather than reimplementing.
+
+**codex-cli (preferred — has trained review model):**
 ```ts
+// Option 1: Use Codex's built-in review (GPT-5.2/5.5 trained for code review)
+const proc = Bun.spawn(["codex", "exec", `/review`, "--json-output-schema", schema], {
+  cwd: repoPath,
+});
+
+// Option 2: Raw prompt with custom instructions
 const proc = Bun.spawn(["codex", "exec", combinedPrompt, "--json-output-schema", schema], {
   cwd: repoPath,
 });
-// Parse structured JSON output
 ```
 
-**openrouter:**
+Note: Codex has a dedicated code review prompt trained into GPT-5.2/5.5 that produces prioritized findings with file/line citations.
+
+**openrouter (fallback — raw prompt, any model):**
 ```ts
 const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
   headers: { "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}` },
@@ -115,7 +134,7 @@ const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
 });
 ```
 
-**ollama:**
+**ollama (local fallback — free, private):**
 ```ts
 const res = await fetch("http://localhost:11434/api/generate", {
   body: JSON.stringify({
@@ -126,6 +145,16 @@ const res = await fetch("http://localhost:11434/api/generate", {
   }),
 });
 ```
+
+### Provider selection logic
+
+When the agent's provider has a built-in review command available, prefer it over raw prompting:
+1. `claude-cli` + PR URL available → use `/review <url>` (delegates multi-agent to Claude)
+2. `claude-cli` + local repo → use `/code-review` (local diff review)
+3. `claude-cli` + custom prompt → use `-p "<prompt>"` (raw)
+4. `codex-cli` + local repo → use `/review` (trained review model)
+5. `codex-cli` + custom prompt → use `exec "<prompt>"` (raw)
+6. `openrouter` / `ollama` → always raw prompt (no built-in review)
 
 ### Output (via stdout — JSON)
 ```json
