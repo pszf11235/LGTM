@@ -253,7 +253,7 @@ describe("re-review after new commits", () => {
     await checkPR(store, watched, openPR(), [agent()], deps(), "", silent);
 
     // The author sees it, so it becomes eligible for verification.
-    markFindingsPosted(store, ref, ["f1"], 555);
+    markFindingsPosted(store, ref, [`1:${defaultAgentConfig().name}:f1`], 555);
 
     // New commits. The fake now answers verification and then the new review.
     // First call returns verdicts, second returns findings.

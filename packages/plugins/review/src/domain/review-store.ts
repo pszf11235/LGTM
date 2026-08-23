@@ -534,18 +534,28 @@ function updateFindings(
   return changed;
 }
 
+/**
+ * Address one finding across the whole store.
+ *
+ * Ids restart at f1 in every round file and for every agent, so a bare id names
+ * several different findings. Anything that writes has to say which one.
+ */
+export function findingKey(round: number, agent: string, id: string): string {
+  return `${round}:${agent}:${id}`;
+}
+
 /** Mark findings as posted, tying them to the pending review they went out in. */
 export function markFindingsPosted(
   lgtmDir: string,
   ref: PRRef,
-  ids: string[],
+  keys: string[],
   pendingReviewId: number
 ): string[] {
-  const wanted = new Set(ids);
+  const wanted = new Set(keys);
   const postedAt = new Date().toISOString();
 
-  const changed = updateFindings(lgtmDir, ref, (f) => {
-    if (!wanted.has(f.id) || f.posted) return false;
+  const changed = updateFindings(lgtmDir, ref, (f, round) => {
+    if (!wanted.has(findingKey(round.round, round.agent, f.id)) || f.posted) return false;
 
     f.posted = true;
     f.postedAt = postedAt;
@@ -569,15 +579,18 @@ export function markFindingsPosted(
 export function markFindingsSkipped(
   lgtmDir: string,
   ref: PRRef,
-  entries: Array<{ id: string; reason: string }>
+  entries: Array<{ key: string; reason: string }>
 ): string[] {
-  const reasons = new Map(entries.map((e) => [e.id, e.reason]));
+  const reasons = new Map(entries.map((e) => [e.key, e.reason]));
 
-  return updateFindings(lgtmDir, ref, (f) => {
-    if (!reasons.has(f.id)) return false;
+  return updateFindings(lgtmDir, ref, (f, round) => {
+    const key = findingKey(round.round, round.agent, f.id);
+    // Already on GitHub is not "held back". Without this a later round's skip
+    // could relabel a published finding.
+    if (!reasons.has(key) || f.posted) return false;
 
     f.skipped = true;
-    f.skipReason = reasons.get(f.id);
+    f.skipReason = reasons.get(key);
     return true;
   });
 }
@@ -586,12 +599,12 @@ export function markFindingsSkipped(
  * Drop findings before they are posted. They stay on disk, marked discarded,
  * so a discarded finding is auditable rather than vanished.
  */
-export function markFindingsDiscarded(lgtmDir: string, ref: PRRef, ids: string[]): string[] {
-  const wanted = new Set(ids);
+export function markFindingsDiscarded(lgtmDir: string, ref: PRRef, keys: string[]): string[] {
+  const wanted = new Set(keys);
 
-  return updateFindings(lgtmDir, ref, (f) => {
+  return updateFindings(lgtmDir, ref, (f, round) => {
     // Already on GitHub means it is too late for us to take it back here.
-    if (!wanted.has(f.id) || f.posted) return false;
+    if (!wanted.has(findingKey(round.round, round.agent, f.id)) || f.posted) return false;
 
     f.discarded = true;
     return true;

@@ -164,17 +164,44 @@ describe("posting state", () => {
     ]);
     saveMeta(store, metaInput(1, ["reviewer"], 3));
 
-    markFindingsPosted(store, ref, ["f1"], 999);
-    markFindingsDiscarded(store, ref, ["f2"]);
+    markFindingsPosted(store, ref, ["1:reviewer:f1"], 999);
+    markFindingsDiscarded(store, ref, ["1:reviewer:f2"]);
 
     expect(pendingFindings(store, ref).map((f) => f.comment)).toEqual(["three"]);
+  });
+
+  test("posting r2's f1 leaves r1's f1 alone, because ids restart every round", () => {
+    // Ids are only unique within a round file. Keying on the bare id meant
+    // posting one round stamped every other round's f1 as posted too: those
+    // findings were never sent, dropped out of pendingFindings forever, and
+    // showed as [posted] in `review list`.
+    writeRound(ref, 1, "reviewer", [finding({ comment: "round one" })]);
+    writeRound(ref, 2, "reviewer", [finding({ comment: "round two" })]);
+    saveMeta(store, metaInput(2, ["reviewer"], 2));
+
+    markFindingsPosted(store, ref, ["2:reviewer:f1"], 4242);
+
+    expect(loadRound(store, ref, 1, "reviewer")!.findings[0].posted).toBe(false);
+    expect(loadRound(store, ref, 2, "reviewer")!.findings[0].posted).toBe(true);
+    expect(pendingFindings(store, ref).map((f) => f.comment)).toEqual(["round one"]);
+  });
+
+  test("discarding is scoped to one round too", () => {
+    writeRound(ref, 1, "reviewer", [finding({ comment: "round one" })]);
+    writeRound(ref, 2, "reviewer", [finding({ comment: "round two" })]);
+    saveMeta(store, metaInput(2, ["reviewer"], 2));
+
+    markFindingsDiscarded(store, ref, ["1:reviewer:f1"]);
+
+    expect(loadRound(store, ref, 1, "reviewer")!.findings[0].discarded).toBe(true);
+    expect(loadRound(store, ref, 2, "reviewer")!.findings[0].discarded).toBe(false);
   });
 
   test("marking posted records the pending review it went out in", () => {
     writeRound(ref, 1, "reviewer", [finding()]);
     saveMeta(store, metaInput(1, ["reviewer"], 1));
 
-    const changed = markFindingsPosted(store, ref, ["f1"], 2847362);
+    const changed = markFindingsPosted(store, ref, ["1:reviewer:f1"], 2847362);
 
     expect(changed).toEqual(["f1"]);
 
@@ -189,8 +216,8 @@ describe("posting state", () => {
     writeRound(ref, 1, "reviewer", [finding()]);
     saveMeta(store, metaInput(1, ["reviewer"], 1));
 
-    markFindingsPosted(store, ref, ["f1"], 1);
-    expect(markFindingsPosted(store, ref, ["f1"], 2)).toEqual([]);
+    markFindingsPosted(store, ref, ["1:reviewer:f1"], 1);
+    expect(markFindingsPosted(store, ref, ["1:reviewer:f1"], 2)).toEqual([]);
 
     // The original review id stands, since that is where the comment actually is.
     expect(loadRound(store, ref, 1, "reviewer")!.findings[0].pendingReviewId).toBe(1);
@@ -199,21 +226,21 @@ describe("posting state", () => {
   test("an id that does not exist is reported as unchanged, not silently ignored", () => {
     writeRound(ref, 1, "reviewer", [finding()]);
 
-    expect(markFindingsDiscarded(store, ref, ["f9"])).toEqual([]);
+    expect(markFindingsDiscarded(store, ref, ["1:reviewer:f9"])).toEqual([]);
   });
 
   test("a posted finding cannot be discarded, because it is already on GitHub", () => {
     writeRound(ref, 1, "reviewer", [finding()]);
     saveMeta(store, metaInput(1, ["reviewer"], 1));
-    markFindingsPosted(store, ref, ["f1"], 1);
+    markFindingsPosted(store, ref, ["1:reviewer:f1"], 1);
 
-    expect(markFindingsDiscarded(store, ref, ["f1"])).toEqual([]);
+    expect(markFindingsDiscarded(store, ref, ["1:reviewer:f1"])).toEqual([]);
     expect(loadRound(store, ref, 1, "reviewer")!.findings[0].discarded).toBe(false);
   });
 
   test("a discarded finding stays on disk, so the decision is auditable", () => {
     writeRound(ref, 1, "reviewer", [finding()]);
-    markFindingsDiscarded(store, ref, ["f1"]);
+    markFindingsDiscarded(store, ref, ["1:reviewer:f1"]);
 
     const stored = loadRound(store, ref, 1, "reviewer")!.findings[0];
     expect(stored.discarded).toBe(true);
@@ -229,7 +256,7 @@ describe("skipped findings", () => {
     // not the same as dropping it.
     writeRound(ref, 1, "reviewer", [finding({ line: 900 })]);
 
-    markFindingsSkipped(store, ref, [{ id: "f1", reason: "line 900 not present in PR diff" }]);
+    markFindingsSkipped(store, ref, [{ key: "1:reviewer:f1", reason: "line 900 not present in PR diff" }]);
 
     const stored = loadRound(store, ref, 1, "reviewer")!.findings[0];
     expect(stored.skipped).toBe(true);
@@ -241,9 +268,9 @@ describe("skipped findings", () => {
   test("posting a previously skipped finding clears the skip", () => {
     writeRound(ref, 1, "reviewer", [finding()]);
     saveMeta(store, metaInput(1, ["reviewer"], 1));
-    markFindingsSkipped(store, ref, [{ id: "f1", reason: "not in diff" }]);
+    markFindingsSkipped(store, ref, [{ key: "1:reviewer:f1", reason: "not in diff" }]);
 
-    markFindingsPosted(store, ref, ["f1"], 5);
+    markFindingsPosted(store, ref, ["1:reviewer:f1"], 5);
 
     const stored = loadRound(store, ref, 1, "reviewer")!.findings[0];
     expect(stored.posted).toBe(true);
@@ -322,7 +349,7 @@ describe("meta", () => {
     writeRound(ref, 1, "reviewer", [finding({ comment: "one" }), finding({ comment: "two" })]);
     saveMeta(store, metaInput(1, ["reviewer"], 2));
 
-    markFindingsPosted(store, ref, ["f1"], 77);
+    markFindingsPosted(store, ref, ["1:reviewer:f1"], 77);
 
     const meta = loadMeta(store, ref)!;
     expect(meta.rounds[0].postedCount).toBe(1);
@@ -390,7 +417,7 @@ describe("multiple agents and rounds", () => {
     // finding nobody was ever shown.
     writeRound(ref, 1, "reviewer", [finding({ comment: "shown" }), finding({ comment: "held back" })]);
     saveMeta(store, metaInput(1, ["reviewer"], 2));
-    markFindingsPosted(store, ref, ["f1"], 1);
+    markFindingsPosted(store, ref, ["1:reviewer:f1"], 1);
 
     expect(postedFindings(store, ref).map((f) => f.comment)).toEqual(["shown"]);
   });
@@ -402,7 +429,7 @@ describe("applyVerdicts", () => {
   test("maps 1-based verdict indices back onto the findings that were checked", () => {
     writeRound(ref, 1, "reviewer", [finding({ comment: "one" }), finding({ comment: "two" })]);
     saveMeta(store, metaInput(1, ["reviewer"], 2));
-    markFindingsPosted(store, ref, ["f1", "f2"], 1);
+    markFindingsPosted(store, ref, ["1:reviewer:f1", "1:reviewer:f2"], 1);
 
     const checked = postedFindings(store, ref).map((f) => ({ id: f.id, round: f.round, agent: f.agent }));
 
@@ -424,7 +451,7 @@ describe("applyVerdicts", () => {
     writeRound(ref, 1, "reviewer", [finding({ comment: "round one issue" })]);
     writeRound(ref, 2, "reviewer", [finding({ comment: "round two issue" })]);
     saveMeta(store, metaInput(1, ["reviewer"], 1));
-    markFindingsPosted(store, ref, ["f1"], 1);
+    markFindingsPosted(store, ref, ["1:reviewer:f1"], 1);
 
     applyVerdicts(store, ref, [{ id: "f1", round: 1, agent: "reviewer" }], [
       { index: 1, resolved: true, note: "done" },
@@ -510,7 +537,7 @@ describe("hand-edited files", () => {
     const { data } = matter(fs.readFileSync(filePath, "utf-8"));
     fs.writeFileSync(filePath, matter.stringify("my own notes here", data), "utf-8");
 
-    markFindingsDiscarded(store, ref, ["f1"]);
+    markFindingsDiscarded(store, ref, ["1:reviewer:f1"]);
 
     expect(fs.readFileSync(filePath, "utf-8")).toContain("my own notes here");
     expect(loadRound(store, ref, 1, "reviewer")!.findings[0].discarded).toBe(true);

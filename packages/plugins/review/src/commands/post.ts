@@ -17,6 +17,7 @@ import {
   markFindingsPosted,
   markFindingsSkipped,
   markFindingsDiscarded,
+  findingKey,
   setPendingReviewId,
   markSubmitted,
   listReviewedPRs,
@@ -285,7 +286,10 @@ export function registerPostCommand(program: Command, ctx: LGTMContext) {
           markFindingsSkipped(
             ctx.lgtmDir,
             ref,
-            skipped.map((s) => ({ id: s.finding.id, reason: s.reason }))
+            skipped.map((s) => ({
+              key: findingKey(s.finding.round, s.finding.agent, s.finding.id),
+              reason: s.reason,
+            }))
           );
         }
       }
@@ -348,7 +352,7 @@ export function registerPostCommand(program: Command, ctx: LGTMContext) {
         markFindingsPosted(
           ctx.lgtmDir,
           ref,
-          postable.map((f) => f.id),
+          postable.map((f) => findingKey(f.round, f.agent, f.id)),
           result.reviewId
         );
         setPendingReviewId(ctx.lgtmDir, ref, result.reviewId);
@@ -408,8 +412,35 @@ export function registerDiscardCommand(program: Command, ctx: LGTMContext) {
       const ref = resolve(ctx, prArg, "lgtm review discard");
       if (!ref) return;
 
-      const changed = markFindingsDiscarded(ctx.lgtmDir, ref, opts.finding);
-      const missed = opts.finding.filter((id) => !changed.includes(id));
+      // Ids restart at f1 per round and per agent, so a bare "f3" can name
+      // several findings. Resolve against what is actually discardable and
+      // refuse an ambiguous one rather than discarding all of its namesakes.
+      const pending = pendingFindings(ctx.lgtmDir, ref);
+      const keys: string[] = [];
+      const ambiguous: string[] = [];
+      const missed: string[] = [];
+
+      for (const wanted of opts.finding) {
+        const qualified = wanted.includes(":")
+          ? pending.filter((f) => findingKey(f.round, f.agent, f.id) === wanted)
+          : pending.filter((f) => f.id === wanted);
+
+        if (qualified.length === 0) missed.push(wanted);
+        else if (qualified.length > 1) ambiguous.push(wanted);
+        else keys.push(findingKey(qualified[0].round, qualified[0].agent, qualified[0].id));
+      }
+
+      if (ambiguous.length > 0) {
+        console.log(chalk.yellow(`\n  ⚠ Ambiguous: ${ambiguous.join(", ")}`));
+        console.log(chalk.gray(`    That id exists in more than one round. Use the full form:`));
+        for (const id of ambiguous) {
+          for (const f of pending.filter((p) => p.id === id)) {
+            console.log(chalk.gray(`      ${findingKey(f.round, f.agent, f.id)}  ${f.file}:${f.line}`));
+          }
+        }
+      }
+
+      const changed = keys.length > 0 ? markFindingsDiscarded(ctx.lgtmDir, ref, keys) : [];
 
       if (changed.length > 0) {
         console.log(chalk.gray(`\n  ○ Discarded ${changed.join(", ")}`));
