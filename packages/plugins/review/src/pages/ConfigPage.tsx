@@ -1,64 +1,52 @@
 /**
- * Config/Profile Viewer Page — TUI page for viewing current config and profile.
+ * Config Viewer Page — read-only view of the resolved config and store layout.
  *
- * Shows:
- * - Profile: project, goal, stack, feedback style, team size, AI config
- * - Config: storage mode, enabled plugins, AI settings
- * - Bootstrap: farm path
- *
- * Read-only viewer with section navigation.
+ * Sections:
+ * - Configuration: plugins, AI settings
+ * - Agents: the review prompts that actually shape reviews
+ * - Paths: where the central store lives and what is in it
  */
 
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useApp } from "ink";
+import { Box, Text, useInput } from "ink";
+import { useScrollableList } from "@lgtm/core/tui/hooks/index.js";
 
 interface ConfigPageProps {
   onStatusHint: (hint: string) => void;
 }
 
-interface ProfileData {
-  project: string;
-  goal: string;
-  qualityReferences: string[];
-  feedbackStyle: string;
-  techStack: string[];
-  teamSize: string;
-  ai: { enabled: boolean; provider?: string; model?: string; baseUrl?: string };
-  createdAt: string;
-}
-
 interface ConfigData {
-  storageMode: string;
   plugins: Record<string, { enabled: boolean }>;
   ai: { enabled: boolean; provider?: string; model?: string; baseUrl?: string; apiKey?: string };
 }
 
-interface BootstrapData {
-  storageMode: string;
-  farmPath?: string;
+interface ProfileData {
+  ai: { enabled: boolean; provider?: string; model?: string; baseUrl?: string };
+  createdAt: string;
 }
 
-type Section = "profile" | "config" | "paths";
+type Section = "config" | "agents" | "paths";
 
 const SECTIONS: { key: Section; label: string; icon: string }[] = [
-  { key: "profile", label: "Profile", icon: "👤" },
   { key: "config", label: "Configuration", icon: "⚙" },
+  { key: "agents", label: "Agents", icon: "🤖" },
   { key: "paths", label: "Paths & Storage", icon: "📁" },
 ];
 
 export function ConfigPage({ onStatusHint }: ConfigPageProps) {
-  const [profile, setProfile] = useState<ProfileData | null>(null);
   const [config, setConfig] = useState<ConfigData | null>(null);
-  const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [agents, setAgents] = useState<string[]>([]);
   const [lgtmDir, setLgtmDir] = useState<string>("");
   const [repoRoot, setRepoRoot] = useState<string>("");
-  const [sectionIdx, setSectionIdx] = useState(0);
+  const [reviewCount, setReviewCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { exit } = useApp();
+
+  const { selectedIdx, moveDown, moveUp } = useScrollableList(SECTIONS, { reservedLines: 6 });
 
   useEffect(() => {
-    onStatusHint("↑↓ sections  q quit");
+    onStatusHint("↑↓ sections  ←→ tabs");
     loadData();
   }, []);
 
@@ -68,18 +56,30 @@ export function ConfigPage({ onStatusHint }: ConfigPageProps) {
         "@lgtm/core/config/loader.js"
       );
       const { findGitRoot } = await import("@lgtm/core/store/paths.js");
+      const { createOKFStore } = await import("@lgtm/core/store/okf.js");
 
       const root = findGitRoot();
-      const bs = loadBootstrap();
-      const dir = resolveLgtmDir(bs, root);
-      const cfg = loadConfig();
-      const prof = loadProfile(dir);
+      const dir = resolveLgtmDir(loadBootstrap());
+      const store = createOKFStore(dir);
 
       setRepoRoot(root);
       setLgtmDir(dir);
-      setBootstrap(bs);
-      setConfig(cfg);
-      setProfile(prof);
+      setConfig(loadConfig());
+      setProfile(loadProfile(dir));
+
+      try {
+        const agentFiles = await store.list("agents");
+        setAgents(agentFiles.map((f) => f.replace(/^agents\//, "")));
+      } catch { /* no agents dir */ }
+
+      try {
+        const fs = await import("fs");
+        const path = await import("path");
+        const reviewsDir = path.default.join(dir, "reviews");
+        if (fs.default.existsSync(reviewsDir)) {
+          setReviewCount(fs.default.readdirSync(reviewsDir).length);
+        }
+      } catch { /* no reviews dir */ }
     } catch (err) {
       setError((err as Error).message);
     }
@@ -87,21 +87,14 @@ export function ConfigPage({ onStatusHint }: ConfigPageProps) {
   }
 
   useInput((input, key) => {
-    if (key.downArrow || input === "j") {
-      setSectionIdx((prev) => Math.min(prev + 1, SECTIONS.length - 1));
-    }
-    if (key.upArrow || input === "k") {
-      setSectionIdx((prev) => Math.max(prev - 1, 0));
-    }
-    if (input === "q") {
-      exit();
-    }
+    if (key.downArrow || input === "j") moveDown();
+    if (key.upArrow || input === "k") moveUp();
   });
 
   if (loading) {
     return (
       <Box paddingY={1}>
-        <Text color="gray">Loading configuration...</Text>
+        <Text color="gray">  Loading configuration...</Text>
       </Box>
     );
   }
@@ -109,103 +102,38 @@ export function ConfigPage({ onStatusHint }: ConfigPageProps) {
   if (error) {
     return (
       <Box paddingY={1} flexDirection="column">
-        <Text color="red">Error: {error}</Text>
-        <Text color="gray">Run `lgtm init` to set up your project.</Text>
+        <Text color="red">  Error: {error}</Text>
+        <Text color="gray">  Run `lgtm init` to create the store.</Text>
       </Box>
     );
   }
 
   return (
     <Box flexDirection="column">
-      {/* Section tabs */}
       <Box marginBottom={1}>
         {SECTIONS.map((s, i) => (
           <Box key={s.key} marginRight={2}>
-            <Text inverse={i === sectionIdx} bold={i === sectionIdx} color={i === sectionIdx ? "cyan" : "gray"}>
+            <Text inverse={i === selectedIdx} bold={i === selectedIdx} color={i === selectedIdx ? "cyan" : "gray"}>
               {" "}{s.icon} {s.label}{" "}
             </Text>
           </Box>
         ))}
       </Box>
 
-      {/* Section content */}
-      {SECTIONS[sectionIdx].key === "profile" && renderProfile()}
-      {SECTIONS[sectionIdx].key === "config" && renderConfig()}
-      {SECTIONS[sectionIdx].key === "paths" && renderPaths()}
+      {SECTIONS[selectedIdx].key === "config" && renderConfig()}
+      {SECTIONS[selectedIdx].key === "agents" && renderAgents()}
+      {SECTIONS[selectedIdx].key === "paths" && renderPaths()}
     </Box>
   );
-
-  function renderProfile() {
-    if (!profile) {
-      return (
-        <Box flexDirection="column" paddingY={1}>
-          <Text color="yellow">No profile found.</Text>
-          <Text color="gray">Run `lgtm init` to create a project profile.</Text>
-        </Box>
-      );
-    }
-
-    return (
-      <Box flexDirection="column" paddingLeft={1}>
-        <Box marginBottom={1}>
-          <Text bold>👤 Project Profile</Text>
-        </Box>
-
-        <Field label="Project" value={profile.project} />
-        <Field label="Goal" value={profile.goal} color={goalColor(profile.goal)} />
-        <Field label="Feedback Style" value={profile.feedbackStyle} color="cyan" />
-        <Field label="Team Size" value={profile.teamSize} />
-        <Field label="Created" value={formatDate(profile.createdAt)} color="gray" />
-
-        <Box marginTop={1} marginBottom={1}>
-          <Text bold color="gray">Tech Stack</Text>
-        </Box>
-        {profile.techStack.length > 0 ? (
-          <Box flexDirection="column" paddingLeft={2}>
-            {profile.techStack.map((tech, i) => (
-              <Text key={i} color="white">• {tech}</Text>
-            ))}
-          </Box>
-        ) : (
-          <Text color="gray" dimColor>  (none configured)</Text>
-        )}
-
-        {profile.qualityReferences.length > 0 && (
-          <>
-            <Box marginTop={1} marginBottom={1}>
-              <Text bold color="gray">Quality References</Text>
-            </Box>
-            <Box flexDirection="column" paddingLeft={2}>
-              {profile.qualityReferences.map((ref, i) => (
-                <Text key={i} color="white">• {ref}</Text>
-              ))}
-            </Box>
-          </>
-        )}
-
-        <Box marginTop={1} marginBottom={1}>
-          <Text bold color="gray">AI Configuration</Text>
-        </Box>
-        <Box paddingLeft={2} flexDirection="column">
-          <Field label="Enabled" value={profile.ai.enabled ? "yes" : "no"} color={profile.ai.enabled ? "green" : "red"} />
-          {profile.ai.provider && <Field label="Provider" value={profile.ai.provider} />}
-          {profile.ai.model && <Field label="Model" value={profile.ai.model} />}
-          {profile.ai.baseUrl && <Field label="Base URL" value={profile.ai.baseUrl} color="gray" />}
-        </Box>
-      </Box>
-    );
-  }
 
   function renderConfig() {
     if (!config) {
       return (
         <Box paddingY={1}>
-          <Text color="yellow">No configuration loaded.</Text>
+          <Text color="yellow">  No configuration loaded.</Text>
         </Box>
       );
     }
-
-    const pluginNames = Object.keys(config.plugins);
 
     return (
       <Box flexDirection="column" paddingLeft={1}>
@@ -213,13 +141,11 @@ export function ConfigPage({ onStatusHint }: ConfigPageProps) {
           <Text bold>⚙ Resolved Configuration</Text>
         </Box>
 
-        <Field label="Storage Mode" value={config.storageMode} color={config.storageMode === "farm" ? "yellow" : "cyan"} />
-
-        <Box marginTop={1} marginBottom={1}>
+        <Box marginBottom={1}>
           <Text bold color="gray">Plugins</Text>
         </Box>
         <Box flexDirection="column" paddingLeft={2}>
-          {pluginNames.map((name) => {
+          {Object.keys(config.plugins).map((name) => {
             const enabled = config.plugins[name]?.enabled;
             return (
               <Text key={name}>
@@ -232,15 +158,55 @@ export function ConfigPage({ onStatusHint }: ConfigPageProps) {
         </Box>
 
         <Box marginTop={1} marginBottom={1}>
-          <Text bold color="gray">AI Settings</Text>
+          <Text bold color="gray">AI (openrouter / ollama HTTP paths)</Text>
         </Box>
         <Box paddingLeft={2} flexDirection="column">
-          <Field label="Enabled" value={config.ai.enabled ? "yes" : "no"} color={config.ai.enabled ? "green" : "red"} />
+          <Field label="Enabled" value={config.ai.enabled ? "yes" : "no"} color={config.ai.enabled ? "green" : "gray"} />
           {config.ai.provider && <Field label="Provider" value={config.ai.provider} />}
           {config.ai.model && <Field label="Model" value={config.ai.model} />}
           {config.ai.baseUrl && <Field label="Base URL" value={config.ai.baseUrl} color="gray" />}
           {config.ai.apiKey && <Field label="API Key" value={maskKey(config.ai.apiKey)} color="gray" />}
         </Box>
+
+        <Box marginTop={1}>
+          <Text color="gray">  CLI providers are detected at review time — see `lgtm ai discover`.</Text>
+        </Box>
+
+        {profile && (
+          <Box marginTop={1}>
+            <Field label="Store created" value={formatDate(profile.createdAt)} color="gray" />
+          </Box>
+        )}
+      </Box>
+    );
+  }
+
+  function renderAgents() {
+    return (
+      <Box flexDirection="column" paddingLeft={1}>
+        <Box marginBottom={1}>
+          <Text bold>🤖 Review Agents</Text>
+        </Box>
+
+        {agents.length === 0 ? (
+          <Box flexDirection="column">
+            <Text color="yellow">  No agents configured.</Text>
+            <Text color="gray">  Run `lgtm init` to write the default reviewer.</Text>
+          </Box>
+        ) : (
+          <>
+            <Box flexDirection="column" paddingLeft={2}>
+              {agents.map((a) => (
+                <Text key={a} color="white">• {a}</Text>
+              ))}
+            </Box>
+            <Box marginTop={1} flexDirection="column">
+              <Text color="gray">  Agent files hold the review prompt, provider and severity.</Text>
+              <Text color="gray">  Edit them to change how reviews are written:</Text>
+              <Text color="cyan">  {lgtmDir}/agents/</Text>
+            </Box>
+          </>
+        )}
       </Box>
     );
   }
@@ -252,30 +218,33 @@ export function ConfigPage({ onStatusHint }: ConfigPageProps) {
           <Text bold>📁 Paths & Storage</Text>
         </Box>
 
-        <Field label="Repo Root" value={repoRoot} color="white" />
-        <Field label="LGTM Data Dir" value={lgtmDir} color="white" />
-        <Field label="Storage Mode" value={bootstrap?.storageMode ?? "unknown"} color={bootstrap?.storageMode === "farm" ? "yellow" : "cyan"} />
-        {bootstrap?.farmPath && <Field label="Farm Path" value={bootstrap.farmPath} color="white" />}
+        <Field label="Central store" value={lgtmDir} color="white" />
+        <Field label="Current repo" value={repoRoot} color="gray" />
+        <Field label="Reviews stored" value={String(reviewCount)} color="white" />
+
+        <Box marginTop={1} marginBottom={1}>
+          <Text bold color="gray">Store Layout</Text>
+        </Box>
+        <Box flexDirection="column" paddingLeft={2}>
+          <Text color="gray">agents/                      <Text color="white">review prompts</Text></Text>
+          <Text color="gray">reviews/{"<owner>-<repo>-<pr>"}/  <Text color="white">findings per round</Text></Text>
+          <Text color="gray">rules/                       <Text color="white">regex + prompt-context rules</Text></Text>
+          <Text color="gray">watch.md                     <Text color="white">watched repositories</Text></Text>
+          <Text color="gray">cache/                       <Text color="white">fetched diffs</Text></Text>
+        </Box>
 
         <Box marginTop={1} marginBottom={1}>
           <Text bold color="gray">Config Resolution Order</Text>
         </Box>
         <Box flexDirection="column" paddingLeft={2}>
           <Text color="gray">1. Built-in defaults</Text>
-          <Text color="gray">2. ~/.lgtmrc (bootstrap)</Text>
-          <Text color="gray">3. Profile (AI prefs from onboarding)</Text>
-          <Text color="white">4. .lgtmrc.yaml (repo override)</Text>
-          <Text color="gray">5. CLI flags</Text>
+          <Text color="gray">2. Profile ({lgtmDir}/profile.md)</Text>
+          <Text color="white">3. .lgtmrc.yaml (repo override)</Text>
+          <Text color="gray">4. CLI flags</Text>
         </Box>
 
-        <Box marginTop={1} marginBottom={1}>
-          <Text bold color="gray">Key Files</Text>
-        </Box>
-        <Box flexDirection="column" paddingLeft={2}>
-          <Text color="gray">Bootstrap:  <Text color="white">~/.lgtmrc</Text></Text>
-          <Text color="gray">Profile:    <Text color="white">{lgtmDir}/profile.md</Text></Text>
-          <Text color="gray">Config:     <Text color="white">{repoRoot}/.lgtmrc.yaml</Text></Text>
-          <Text color="gray">Credentials:<Text color="white"> ~/.lgtm-credentials</Text></Text>
+        <Box marginTop={1}>
+          <Text color="gray">  One store serves every repo. Findings are namespaced by owner-repo-pr.</Text>
         </Box>
       </Box>
     );
@@ -293,16 +262,6 @@ function Field({ label, value, color }: { label: string; value: string; color?: 
   );
 }
 
-function goalColor(goal: string): string {
-  switch (goal) {
-    case "production": return "green";
-    case "enterprise": return "cyan";
-    case "vibed": return "magenta";
-    case "learning": return "yellow";
-    default: return "white";
-  }
-}
-
 function maskKey(key: string): string {
   if (key.length <= 8) return "••••••••";
   return key.slice(0, 4) + "•".repeat(key.length - 8) + key.slice(-4);
@@ -310,8 +269,9 @@ function maskKey(key: string): string {
 
 function formatDate(iso: string): string {
   try {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+    return new Date(iso).toLocaleDateString("en-US", {
+      year: "numeric", month: "short", day: "numeric",
+    });
   } catch {
     return iso;
   }

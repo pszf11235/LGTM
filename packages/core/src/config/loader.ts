@@ -1,92 +1,87 @@
 /**
  * Configuration loader — layered config resolution.
  *
+ * Storage is always central: ~/.lgtm-farm/ (flat, no per-repo subdirectory).
+ * Review artefacts are namespaced by repo inside it, e.g.
+ *   ~/.lgtm-farm/reviews/<owner>-<repo>-<pr>/
+ *
  * Resolution order (last wins):
  * 1. Built-in defaults
- * 2. Storage config from bootstrap (.lgtm/ or lgtm-farm)
- * 3. Plugin-specific config
- * 4. Repo override (.lgtmrc.yaml in repo root — always checked)
- * 5. CLI flags (handled by Commander, not here)
- *
- * On first `lgtm init`, user chooses storage mode:
- * - "farm": All lgtm data in one place (the "lgtm-farm", default: ~/.lgtm-farm/)
- * - "repo": Each repo has its own .lgtm/ (committed to git, team-shareable)
- *
- * Either way, ~/.lgtmrc stores the choice + a registry of known repos (Task 21).
+ * 2. Profile (~/.lgtm-farm/profile.md)
+ * 3. Repo override (.lgtmrc.yaml in repo root — always checked)
+ * 4. CLI flags (handled by Commander, not here)
  */
 
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
 import type { LGTMConfig, ProjectProfile } from "../plugin.js";
 import { findGitRoot, getProfilePath } from "../store/paths.js";
 
 /**
  * Bootstrap config stored in ~/.lgtmrc.
- * This is the ONLY central file — determines where everything else lives.
+ * Kept as an extension point — the store location is no longer configurable,
+ * but future global settings belong here.
  */
 export interface BootstrapConfig {
-  /**
-   * Storage mode:
-   * - "farm": All lgtm data in one central location (the "lgtm-farm")
-   *           Default: ~/.lgtm-farm/
-   *           Good for: keeping everything in one place, cross-repo queries, personal use
-   * - "repo": Each repo has its own .lgtm/ directory (committed to git)
-   *           Good for: sharing config/rules with team, per-repo reviews tracked in git
-   */
-  storageMode: "farm" | "repo";
-
-  /** Custom path for lgtm-farm (default: ~/.lgtm-farm/) — only used in farm mode */
-  farmPath?: string;
+  /** Override the central store location (default: ~/.lgtm-farm/) */
+  storePath?: string;
 }
 
 /**
- * Default lgtm-farm location.
+ * Resolve the user's home directory.
+ *
+ * `HOME` is honoured ahead of `os.homedir()` so the store can be relocated by
+ * the environment. Bun resolves `os.homedir()` from the passwd entry, which
+ * ignores a reassigned `process.env.HOME`, so tests could not otherwise
+ * redirect the store to a temp dir.
  */
-export function getDefaultFarmPath(): string {
-  return path.join(os.homedir(), ".lgtm-farm");
+function homeDir(): string {
+  return process.env.HOME || os.homedir();
+}
+
+/**
+ * The central LGTM store location.
+ * One store for every repo — reviews are namespaced by owner-repo-pr inside it.
+ */
+export function getDefaultStorePath(): string {
+  return path.join(homeDir(), ".lgtm-farm");
 }
 
 /**
  * Load the bootstrap config from ~/.lgtmrc.
- * Returns defaults if file doesn't exist (first run).
+ * Returns an empty object if the file doesn't exist (the common case).
  */
 export function loadBootstrap(): BootstrapConfig {
-  const bootstrapPath = path.join(os.homedir(), ".lgtmrc");
+  const bootstrapPath = path.join(homeDir(), ".lgtmrc");
 
   try {
     const raw = fs.readFileSync(bootstrapPath, "utf-8");
     const parsed = parseYaml(raw) as Partial<BootstrapConfig>;
-    return {
-      storageMode: parsed.storageMode ?? "repo",
-      farmPath: parsed.farmPath,
-    };
+    return { storePath: parsed?.storePath };
   } catch {
-    // First run — default to repo mode
-    return { storageMode: "repo" };
+    return {};
   }
 }
 
 /**
  * Save bootstrap config to ~/.lgtmrc.
+ * Only written when a non-default store path is set.
  */
 export function saveBootstrap(config: BootstrapConfig): void {
-  const bootstrapPath = path.join(os.homedir(), ".lgtmrc");
+  const bootstrapPath = path.join(homeDir(), ".lgtmrc");
 
   const lines = [
     "# LGTM bootstrap config",
-    "# Created by `lgtm init`",
     "#",
-    "# storageMode:",
-    '#   "farm" = all lgtm data in one place (the lgtm-farm)',
-    '#   "repo" = .lgtm/ per repo (committed to git)',
+    "# storePath: override the central store location",
+    "#            (default: ~/.lgtm-farm/)",
     "",
-    `storageMode: ${config.storageMode}`,
   ];
 
-  if (config.farmPath) {
-    lines.push(`farmPath: ${config.farmPath}`);
+  if (config.storePath) {
+    lines.push(`storePath: ${config.storePath}`);
   }
 
   lines.push("");
@@ -94,32 +89,27 @@ export function saveBootstrap(config: BootstrapConfig): void {
 }
 
 /**
- * Resolve the lgtm data directory based on storage mode.
+ * Resolve the LGTM data directory.
  *
- * - Farm mode: ~/.lgtm-farm/<repo-name>/ (or custom farmPath)
- * - Repo mode: <repoRoot>/.lgtm/
+ * Always the central store — flat, shared across every repo.
+ * `repoRoot` is accepted for signature compatibility but not used to build
+ * the path; repo identity lives in the review directory names instead.
  */
 export function resolveLgtmDir(
-  config: BootstrapConfig,
-  repoRoot: string
+  config: BootstrapConfig = {},
+  _repoRoot?: string
 ): string {
-  if (config.storageMode === "farm") {
-    const farmBase = config.farmPath ?? getDefaultFarmPath();
-    const repoName = path.basename(repoRoot);
-    return path.join(farmBase, repoName);
-  }
-  return path.join(repoRoot, ".lgtm");
+  return config.storePath ?? getDefaultStorePath();
 }
 
 /**
  * Load the repo-level override (.lgtmrc.yaml in repo root).
- * Always checked regardless of storage mode — teams can commit shared config.
+ * Teams can commit shared plugin/AI config even though the store is central.
  */
 function loadRepoOverride(repoRoot: string): Partial<LGTMConfig> {
   const candidates = [
     path.join(repoRoot, ".lgtmrc.yaml"),
     path.join(repoRoot, ".lgtmrc.yml"),
-    path.join(repoRoot, ".lgtm", "config.yaml"),
   ];
 
   for (const filePath of candidates) {
@@ -139,11 +129,8 @@ function loadRepoOverride(repoRoot: string): Partial<LGTMConfig> {
  */
 export function getDefaultConfig(): LGTMConfig {
   return {
-    storageMode: "repo",
     plugins: {
       review: { enabled: true },
-      specify: { enabled: false },
-      learn: { enabled: false },
     },
     ai: {
       enabled: false,
@@ -153,7 +140,6 @@ export function getDefaultConfig(): LGTMConfig {
 
 /**
  * Load and resolve the full LGTM configuration.
- * Merges all layers in order.
  */
 export function loadConfig(): LGTMConfig {
   const defaults = getDefaultConfig();
@@ -161,14 +147,11 @@ export function loadConfig(): LGTMConfig {
   const repoRoot = findGitRoot();
   const repoOverride = loadRepoOverride(repoRoot);
 
-  // Load profile (has AI preference from onboarding)
-  const lgtmDir = resolveLgtmDir(bootstrap, repoRoot);
+  const lgtmDir = resolveLgtmDir(bootstrap);
   const profile = loadProfile(lgtmDir);
 
-  // Merge: defaults ← profile ← repo override
-  const config: LGTMConfig = {
+  return {
     ...defaults,
-    storageMode: bootstrap.storageMode,
     plugins: {
       ...defaults.plugins,
       ...(repoOverride.plugins ?? {}),
@@ -179,13 +162,11 @@ export function loadConfig(): LGTMConfig {
       ...(repoOverride.ai ?? {}),
     },
   };
-
-  return config;
 }
 
 /**
- * Load the project profile from the lgtm data dir.
- * Returns null if no profile exists (not yet initialized).
+ * Load the project profile from the central store.
+ * Returns null if the store has not been initialised.
  */
 export function loadProfile(lgtmDir: string): ProjectProfile | null {
   const profilePath = getProfilePath(lgtmDir);
@@ -196,15 +177,8 @@ export function loadProfile(lgtmDir: string): ProjectProfile | null {
     if (!match) return null;
 
     const parsed = parseYaml(match[1]) as Partial<ProjectProfile>;
-    if (!parsed.project) return null;
 
     return {
-      project: parsed.project ?? "unknown",
-      goal: parsed.goal ?? "production",
-      qualityReferences: parsed.qualityReferences ?? [],
-      feedbackStyle: parsed.feedbackStyle ?? "direct",
-      techStack: parsed.techStack ?? [],
-      teamSize: parsed.teamSize ?? "solo",
       ai: parsed.ai ?? { enabled: false },
       createdAt: parsed.createdAt ?? new Date().toISOString(),
     };

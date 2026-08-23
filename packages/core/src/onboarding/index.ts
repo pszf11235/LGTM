@@ -1,8 +1,6 @@
 /**
- * Onboarding module — interactive first-time setup.
+ * Store initialisation.
  */
 
-export { runOnboarding, isOnboardingComplete } from "./flow.js";
+export { initStore, runInit, storeExists, type InitResult } from "./flow.js";
 export { detectTechStack } from "./detect.js";
-export { ONBOARDING_QUESTIONS } from "./questions.js";
-export type { OnboardingQuestion } from "./questions.js";

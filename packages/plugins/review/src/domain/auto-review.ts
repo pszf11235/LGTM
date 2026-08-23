@@ -153,7 +153,7 @@ export async function generateAutoReview(
   config: Partial<AutoReviewConfig> = {}
 ): Promise<AutoReviewResult> {
   const resolvedConfig = { ...DEFAULT_CONFIG, ...config };
-  const feedbackStyle = profile?.feedbackStyle ?? "direct";
+  const feedbackStyle = "direct";
   const findings: ReviewFinding[] = [];
 
   // ── Step 1: Rule-based regex matching (zero tokens) ────────────────────

@@ -120,46 +120,35 @@ export interface OnboardingStep {
 
 // ─── Shared Types (will be fleshed out in Task 3) ────────────────────────
 
-/** Project profile created during onboarding */
+/**
+ * Stored profile for the central LGTM store.
+ *
+ * Onboarding asks nothing, so this holds only what the tool discovers or the
+ * user sets later. Review tone and focus live in the agent config
+ * (~/.lgtm-farm/agents/*.md), not here.
+ */
 export interface ProjectProfile {
-  project: string;
-  goal: "vibed" | "production" | "enterprise" | "learning" | string;
-  qualityReferences: string[];
-  feedbackStyle: "direct" | "gentle" | "socratic" | "minimal";
-  techStack: string[];
-  teamSize: "solo" | "small" | "large";
   ai: {
     enabled: boolean;
     provider?: "openai" | "anthropic" | "ollama";
     model?: string;
     baseUrl?: string;
-    /** Fallback providers in priority order (tried if primary fails) */
-    fallback?: Array<{ provider: "openai" | "anthropic" | "ollama"; model?: string; baseUrl?: string }>;
   };
   createdAt: string;
 }
 
 /** LGTM configuration (resolved from all layers) */
 export interface LGTMConfig {
-  /**
-   * Where lgtm data lives:
-   * - "farm": central lgtm-farm (default: ~/.lgtm-farm/<repo-name>/)
-   * - "repo": .lgtm/ in each repo root (committed to git)
-   */
-  storageMode: "farm" | "repo";
-
   /** Enabled plugins */
   plugins: Record<string, { enabled: boolean }>;
 
-  /** AI config */
+  /** AI config — used by the openrouter/ollama HTTP paths */
   ai: {
     enabled: boolean;
     provider?: "openai" | "anthropic" | "ollama";
     model?: string;
     baseUrl?: string;
     apiKey?: string;
-    /** Fallback providers in priority order (tried if primary fails) */
-    fallback?: Array<{ provider: "openai" | "anthropic" | "ollama"; model?: string; baseUrl?: string }>;
   };
 }
 

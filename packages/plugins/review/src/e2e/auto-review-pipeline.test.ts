@@ -86,12 +86,6 @@ diff --git a/src/utils/helpers.ts b/src/utils/helpers.ts
 
 /** Profile with "direct" feedback style */
 const TEST_PROFILE: ProjectProfile = {
-  project: "test-app",
-  goal: "production",
-  qualityReferences: [],
-  feedbackStyle: "direct",
-  techStack: ["typescript", "node"],
-  teamSize: "small",
   ai: { enabled: true, provider: "openai" },
   createdAt: "2024-01-01T00:00:00Z",
 };
@@ -366,7 +360,6 @@ describe("E2E: Auto-Review Pipeline", () => {
     // Test with "socratic" style
     const socraticProfile: ProjectProfile = {
       ...TEST_PROFILE,
-      feedbackStyle: "socratic",
     };
 
     const mockLLM: LLMProvider = {

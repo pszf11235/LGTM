@@ -56,12 +56,6 @@ function makeRule(overrides: Partial<Rule> = {}): Rule {
 
 function makeProfile(overrides: Partial<ProjectProfile> = {}): ProjectProfile {
   return {
-    project: "test-project",
-    goal: "production",
-    qualityReferences: [],
-    feedbackStyle: "direct",
-    techStack: ["typescript"],
-    teamSize: "solo",
     ai: { enabled: true, provider: "openai" },
     createdAt: new Date().toISOString(),
     ...overrides,

@@ -70,12 +70,13 @@ async function runSmokeTests(ctx: LGTMContext, opts: SmokeOptions): Promise<void
 
   // ─── Test 1: Config Loading ────────────────────────────────────────────
   results.push(await runTest("Config Loading", isVerbose, isDemo, async () => {
-    const { loadConfig } = await import("../../config/loader.js");
+    const { loadConfig, resolveLgtmDir, loadBootstrap } = await import("../../config/loader.js");
     const config = loadConfig();
-    if (!config.storageMode) throw new Error("No storageMode in config");
     if (!config.plugins) throw new Error("No plugins in config");
-    return `storageMode=${config.storageMode}, plugins=${Object.keys(config.plugins).join(",")}`;
-  }, "Loads .lgtmrc.yaml and resolves config with defaults. This is the foundation of all LGTM features."));
+    const dir = resolveLgtmDir(loadBootstrap());
+    if (!dir) throw new Error("Could not resolve the store path");
+    return `store=${dir}, plugins=${Object.keys(config.plugins).join(",")}`;
+  }, "Resolves the central store location and merges config layers. Foundation for everything else."));
 
   // ─── Test 2: OKF Store ─────────────────────────────────────────────────
   const tempDir = path.join(os.tmpdir(), `lgtm-smoke-${Date.now()}`);

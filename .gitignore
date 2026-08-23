@@ -4,9 +4,9 @@ node_modules/
 # Build output
 dist/
 
-# Yak runtime data (sessions are local, not committed)
-.lgtm/sessions/
-.lgtm/scans/
+# LGTM runtime data. The store is central (~/.lgtm-farm/), so a local .lgtm/
+# is only ever a stale artefact from an older version.
+.lgtm/
 
 # OS
 .DS_Store
