@@ -27,7 +27,12 @@ jobs:
             target: bun-darwin-arm64
             short-target: darwin-arm64
             artifact: lgtm-darwin-arm64
-          - os: macos-13
+          # Cross-compiled from arm64 rather than built on an Intel runner.
+          # `macos-13` queues for hours and is what left v0.1.0 pending until it
+          # was cancelled after 24h, with no binaries published and a README
+          # telling people to curl them. Bun's --target handles this: the output
+          # is a real "Mach-O 64-bit executable x86_64".
+          - os: macos-latest
             target: bun-darwin-x64
             short-target: darwin-x64
             artifact: lgtm-darwin-x64
