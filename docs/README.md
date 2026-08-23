@@ -1,48 +1,35 @@
-# 📚 LGTM Documentation
+# LGTM documentation
 
-All project documentation lives here. Start with [TESTING.md](./TESTING.md) for a hands-on walkthrough.
+The user-facing docs are in the repository root, because that is where people
+look first:
 
----
+| Document | What it covers |
+|---|---|
+| [../README.md](../README.md) | What LGTM is, install, the loop, every command |
+| [../TESTING.md](../TESTING.md) | Running the suite, and driving the loop by hand with no provider and no token |
 
-## User Guides
+What is left in here is background, not instructions.
 
-| Document | Description |
-|----------|-------------|
-| [TESTING.md](./TESTING.md) | Complete feature testing walkthrough (15 sections + smoke test) |
-| [AI-REVIEW.md](./AI-REVIEW.md) | AI-powered PR review — architecture, usage, configuration |
-| [LLM-INTEGRATION.md](./LLM-INTEGRATION.md) | How LLM tools trigger reviews — prompts, routing, budgets |
-
-## Development
-
-| Document | Description |
-|----------|-------------|
+| Document | What it covers |
+|---|---|
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Dev setup, code style, PR guidelines |
-| [ROADMAP.md](./ROADMAP.md) | Release plan, future features, phasing |
-| [TUI-UX-ANALYSIS.md](./TUI-UX-ANALYSIS.md) | TUI usability audit — 12 issues identified with fixes |
+| [IDEA.md](./IDEA.md) | The original problem statement this was built from |
+| [COMPETITIVE_ANALYSIS.md](./COMPETITIVE_ANALYSIS.md) | What else exists and why this is shaped differently |
 
-## Context & Design
+## Design records
 
-| Document | Description |
-|----------|-------------|
-| [IDEA.md](./IDEA.md) | Original concept, motivation, "why this tool" |
-| [COMPETITIVE_ANALYSIS.md](./COMPETITIVE_ANALYSIS.md) | Market landscape, differentiation, positioning |
+Specs live in [`.kiro/specs/`](../.kiro/specs/), one directory per feature, each
+with `requirements.md`, `design.md` and `tasks.md`. They are the design record:
+what was decided, why, and what shipped. Start with
+[`mvp-review-pipeline`](../.kiro/specs/mvp-review-pipeline/), which is the
+current review pipeline.
 
-## Specs (internal)
+## Removed
 
-Design specs and implementation plans are in [`.kiro/specs/lgtm/`](../.kiro/specs/lgtm/):
-
-| Spec | Description |
-|------|-------------|
-| `requirements.md` | Original requirements document |
-| `design.md` | Architecture and design decisions |
-| `tasks.md` | Task breakdown |
-| `plan-51-ai-review.md` | Implementation plan for AI auto-review (#51) |
-| `plan-52-dashboard.md` | Implementation plan for dashboard (#52) |
-
----
-
-## Quick Links
-
-- **README**: [../README.md](../README.md) — install, quick start, feature overview
-- **Webapp**: [../webapp/README.md](../webapp/README.md) — standalone web daily checker
-- **Config example**: [../.lgtmrc.yaml.example](../.lgtmrc.yaml.example) — full config reference
+`AI-REVIEW.md`, `LLM-INTEGRATION.md`, `TESTING.md` and `ROADMAP.md` used to live
+here. They documented `lgtm review auto`, which posted findings straight to a
+pull request. That command was deleted in the MVP review pipeline work, and
+LGTM now only ever creates a draft (`PENDING`) review that nobody but you can
+see. Leaving those files in place would have described the opposite of what the
+tool does. The roadmap is tracked as GitHub issues instead, linked from the
+root README.

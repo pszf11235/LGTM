@@ -350,7 +350,7 @@ index abc1234..def5678 100644
       console.log(chalk.gray("    • Run `lgtm review add <PR#> --demo` to try the review queue"));
       console.log(chalk.gray("    • Run `lgtm review rule add \"...\" --pattern '...'` to create rules"));
       console.log(chalk.gray("    • Run `lgtm` to open the TUI"));
-      console.log(chalk.gray("    • See docs/TESTING.md for the full feature walkthrough\n"));
+      console.log(chalk.gray("    • See TESTING.md for the full feature walkthrough\n"));
     }
   }
 
