@@ -8,6 +8,8 @@
  * actually ship.
  */
 
+import { fileURLToPath } from "node:url";
+
 /**
  * Set on a subprocess's environment. Its presence means "you are already inside
  * a spawned child", which is the guard against recursive spawning.
@@ -37,7 +39,10 @@ export function isCompiledBinary(): boolean {
  */
 export function entryPath(): string {
   // This file lives at packages/core/src/cli/self.ts, so the entry is one level up.
-  return new URL("../index.ts", import.meta.url).pathname;
+  // fileURLToPath, not .pathname: a URL percent-encodes, so a checkout under
+  // "~/My Projects" produced ".../My%20Projects/index.ts", which does not exist,
+  // and every spawned worker died with "Module not found".
+  return fileURLToPath(new URL("../index.ts", import.meta.url));
 }
 
 /**
