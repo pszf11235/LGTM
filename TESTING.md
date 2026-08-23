@@ -7,7 +7,7 @@ Two ways to exercise this: the automated suite, and driving the real loop by han
 ```bash
 bun install
 bun run lint            # tsc --noEmit
-bun test                # 426 tests
+bun test                # 420 tests
 bun run build:binary
 ./dist/lgtm smoke       # 12 checks against the compiled binary
 ```
@@ -74,7 +74,7 @@ With both enabled, a review spawns two worker processes. They report their own d
 ```bash
 printf '#!/bin/sh\nsleep 300\n' > "$HOME/bin/claude" && chmod +x "$HOME/bin/claude"
 
-time (echo '{"mode":"review","provider":"claude-cli","agent":{"name":"r","provider":"claude-cli","model":null,"severity":"high","timeout":2,"commentDelay":[0,0],"enabled":true,"prompt":"p","sourcePath":"x"},"diff":"d"}' \
+time (echo '{"mode":"review","provider":"claude-cli","agent":{"name":"r","provider":"claude-cli","model":null,"severity":"high","timeout":2,"enabled":true,"prompt":"p","sourcePath":"x"},"diff":"d"}' \
   | ./dist/lgtm review internal-worker)
 ```
 
@@ -106,13 +106,19 @@ Push a commit to that PR and run `lgtm watch --once` again. It should verify the
 | Run `lgtm watch` with nothing watched | Points at `discover --ingest`, does not error |
 | Remove every provider from `PATH` | One clear report before polling, not one error per PR |
 | Accept a repo with no git remote during ingest | "not watched (no git remote)", counted separately |
+| Finish `discover --ingest` with `q`, `a`, `s` or `A` | Prints the summary and **exits**, rather than sitting there |
 | `provider: nonsense` in an agent file | Falls back to `auto` rather than failing the review |
 | `severity: catastrophic` in an agent file | Falls back to `high` |
 | A finding on a line outside the diff | Held back with a reason, and declared in the review summary |
 | `lgtm review post` twice | Refuses the second, points at `--recreate` |
+| `lgtm review post --dry-run`, then `review list` | Nothing changed on disk. A preview writes nothing. |
+| `lgtm review pr <ref> --force` on an already reviewed commit | Reviews it again at the next round, instead of skipping |
 | `lgtm review discard` on a posted finding | Refuses. It is already on GitHub. |
+| `lgtm review discard -f f1` when two rounds both have an `f1` | Refuses as ambiguous and prints the `round:agent:id` forms |
+| Kill the provider mid-review so every agent fails | The PR is **not** marked reviewed, so the next cycle retries it |
 | Hand-edit a round file and delete a `posted:` flag | Reads as unposted, never as posted |
 | Corrupt one round file's YAML | That file is skipped, the PR still loads |
+| Two round files with byte-identical content | Editing one leaves the other alone |
 
 ## Cleaning up
 
