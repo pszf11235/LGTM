@@ -33,11 +33,24 @@ Everything cut from the codebase to reach the focused MVP, with the issue that t
 
 | Path | Change | Issue |
 |---|---|---|
-| `core/src/onboarding/questions.ts` | 8 questions → 1 (`storageMode`) | [#140](https://github.com/pszf11235/LGTM/issues/140) |
-| `core/src/onboarding/flow.ts` | 751 → ~250 lines: no AI discovery, no priority picker, no skip affordance | [#140](https://github.com/pszf11235/LGTM/issues/140) |
+| `core/src/onboarding/questions.ts` | **Deleted** — zero questions remain | [#140](https://github.com/pszf11235/LGTM/issues/140) |
+| `core/src/onboarding/flow.ts` | 751 → ~80 lines: becomes `initStore()`, no questions, no AI discovery, no priority picker, no skip affordance | [#140](https://github.com/pszf11235/LGTM/issues/140) |
+| `core/src/onboarding/detect-ai.ts` | 615 → ~80 lines: only the 5-provider availability check. All credential extraction (Keychain, Continue.dev, Aider, Cursor, config files) removed — the CLIs handle their own auth | none — the extraction existed only to feed a raw LLM provider |
+| `core/src/config/loader.ts` | `resolveLgtmDir()` always returns `~/.lgtm-farm/` flat. `storageMode` dropped from bootstrap and config | none — central-only was a deliberate simplification |
 | `core/src/llm/provider.ts` | Drop `getProviderForTask` and `LLMTaskType` routing; keep the OpenRouter/Ollama HTTP paths | none — routing had 2 call sites, both replaced |
+| `plugins/review/src/domain/rules.ts` | Delete `matchLLM()` (~60 lines). LLM-enforced rules become agent prompt context via `rulesAsPromptContext()` | none — behaviour preserved, mechanism changed |
 | `plugins/review/src/commands/watch.ts` | No longer posts to GitHub; calls the orchestrator | n/a |
 | `plugins/review/src/commands/rule.ts` | Drop `import`, `export`, `suggest` subcommands | [#136](https://github.com/pszf11235/LGTM/issues/136), [#133](https://github.com/pszf11235/LGTM/issues/133) |
+
+## Not built (design decision, not a removal)
+
+| Feature | Why | Issue |
+|---|---|---|
+| Terminal diff renderer (`review show`) | GitHub's pending review UI anchors comments to diff lines natively and allows editing before submission | [#142](https://github.com/pszf11235/LGTM/issues/142) |
+| TUI inline finding annotations | Same reason. `ReviewPage.tsx` is 441 lines of scroll/cursor logic and threading findings through it is high risk for a worse result | [#143](https://github.com/pszf11235/LGTM/issues/143) |
+
+Together these saved ~2.5 hours and removed the need to keep a diff renderer in sync
+with GitHub's line numbering.
 
 ## Deleted tests
 
@@ -71,4 +84,19 @@ Fixed as part of this spec rather than filed separately:
 3. **`which` leaks stderr into onboarding output** — provider detection prints `which: no claude in /usr/...` mid-wizard. → Task 1
 4. **`lgtm plugins enable <name>` does not exist** — registered as `plugins:enable` with a colon while the help text advertises the space form. → fix in Task 13
 5. **`fetchOpenPRs` ignores the stored `filter`** — `watch.md` records `all|assigned|review_requested` but the query is always `state=open`, hardcoded to 10 results with no pagination. → Task 8
-6. **`rateLimitThreshold` is never used** — `post-review.ts` accepts it but never reads `X-RateLimit-Remaining`; rate limiting is reactive error-string sniffing only. → note in Task 10, not fixed
+6. **`rateLimitThreshold` is never used** — `post-review.ts` accepts it but never reads `X-RateLimit-Remaining`; rate limiting is reactive error-string sniffing only. → moot once posting is a single pending-review call
+7. **Cache keys collide across repos** — `cache/pr-42.md` is not repo-qualified. Harmless while storage was per-repo, but a real collision once the store is central. → Task 1
+
+## Posting: the `event` field trap
+
+Worth recording because it has burned other tools. `POST /repos/{owner}/{repo}/pulls/{n}/reviews`
+creates a **PENDING** draft only when the `event` field is **absent**. Sending
+`event: "COMMENT"` submits the review immediately and irreversibly. There is no
+`draft: true` parameter — [anthropics/claude-code#82964](https://github.com/anthropics/claude-code/issues/82964)
+documents a live review being published because that parameter was assumed to exist.
+
+The post path must never construct an `event` key. Task 10 requires a code comment
+at the call site stating this.
+
+A second constraint: [the API cannot append comments to an existing pending review](https://github.com/orgs/community/discussions/168380).
+One round produces one create call produces one draft. Further edits happen in GitHub's UI.

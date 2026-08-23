@@ -32,19 +32,83 @@
 └──────────────────────────────────────────────────────────────────────────┘
                                     ↓
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  HUMAN GATE — nothing posted yet                                          │
-│    lgtm review status          → which PRs have unposted findings         │
-│    lgtm review show <pr>       → diff with inline annotations             │
-│    lgtm (TUI) → Review tab     → same, interactive                        │
+│  HUMAN GATE — nothing on GitHub yet                                       │
+│    lgtm review status                → repos + PRs with unposted findings │
+│    lgtm review list <repo>#<pr>      → plain listing of rounds/findings   │
+│    lgtm review discard <repo>#<pr> -f f3   → drop one before posting      │
 └──────────────────────────────────────────────────────────────────────────┘
                                     ↓
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  lgtm review post <pr>                                                    │
-│    read findings where posted:false, discarded:false                     │
-│    post-review.ts → GitHub (batched or delayed individual)               │
-│    write back posted:true, postedAt, commentId                           │
+│  lgtm review post <repo>#<pr>                                             │
+│    findings where posted:false && discarded:false                        │
+│    POST /pulls/{n}/reviews  with NO event field  → PENDING review        │
+│    store response.id as meta.pendingReviewId                             │
+│    mark findings posted:true                                             │
+└──────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│  YOU, on github.com                                                       │
+│    open the PR → draft review with every comment on its diff line        │
+│    edit / delete comments in GitHub's native UI                          │
+│    click "Submit review"                                                 │
+│    (or: lgtm review submit <repo>#<pr>)                                   │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
+
+## Why pending reviews instead of a terminal diff renderer
+
+`POST /repos/{owner}/{repo}/pulls/{n}/reviews` creates a review in **PENDING** state
+when the `event` field is omitted. A pending review:
+
+- is visible only to its author until submitted
+- shows every comment anchored to the correct diff line in GitHub's UI
+- is fully editable — change wording, delete comments, add your own
+- becomes live only when the author clicks "Submit review"
+
+That is a better review surface than anything renderable in a terminal, and it is free.
+So the tool's job ends at creating a good draft.
+
+**Two API constraints that shape the implementation:**
+
+1. **`event` must be omitted, not set to a falsy value.** Sending `event: "COMMENT"`
+   submits the review immediately. There is no `draft: true` parameter. This has bitten
+   other tools — see anthropics/claude-code#82964 where a live review was published by
+   accident because `draft: true` was assumed to work.
+2. **All comments must be in the create call.** The API cannot append comments to an
+   existing pending review (community discussion #168380). So one round → one create
+   call → one pending review. If the user wants to add to it, they do so in the UI.
+
+### Posting implementation
+
+```ts
+async function postPendingReview(owner, repo, pr, findings, summary, token) {
+  const comments = findings
+    .filter((f) => !f.posted && !f.discarded)
+    .map((f) => ({ path: f.file, line: f.line, body: formatBody(f) }));
+
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${pr}/reviews`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+      // NOTE: no `event` key. Its absence is what creates a PENDING review.
+      body: JSON.stringify({ body: summary, comments }),
+    }
+  );
+
+  if (!res.ok) throw new Error(`GitHub ${res.status}: ${await res.text()}`);
+  const review = await res.json();
+  return { reviewId: review.id, commentCount: comments.length };
+}
+```
+
+**Line validation.** GitHub rejects the whole call if any comment targets a line outside
+the diff. Before posting, every finding's `file` + `line` is checked against the parsed
+diff; misses are dropped with a warning and left `posted: false` so nothing is silently lost.
+
+**Optional submit.** `lgtm review submit <repo>#<pr>` calls
+`POST /pulls/{n}/reviews/{reviewId}/events` with `{"event": "COMMENT"}` for users who
+would rather not open a browser.
 
 ## Provider Dispatch
 
@@ -157,20 +221,47 @@ Every finding is validated: `file` non-empty, `line` a positive int, `severity` 
 
 ## OKF Storage Layout
 
-Root is `resolveLgtmDir(bootstrap, repoRoot)` — respects central/decentral mode.
+**One central store, always.** `resolveLgtmDir()` returns `~/.lgtm-farm/` flat — no
+per-repo subdirectory, no `storageMode` branch. Repo identity lives in the review
+directory name and in every file's frontmatter.
 
 ```
-<lgtmDir>/
+~/.lgtm-farm/
   agents/
-    reviewer.md              ← the review prompt (user-editable)
+    reviewer.md                       ← the review prompt (user-editable)
   reviews/
-    pszf11235-LGTM-42/       ← one dir per PR: <owner>-<repo>-<pr>
-      meta.md                ← round tracking + last reviewed SHA
-      r1-reviewer.md         ← round 1 findings from the "reviewer" agent
-      r2-reviewer.md         ← round 2 findings (after new commits)
-  watch.md                   ← watched repos (existing)
-  cache/pr-42.md             ← cached diff (existing)
+    pszf11235-LGTM-42/                ← <owner>-<repo>-<pr>
+      meta.md                         ← rounds, lastReviewedSha, pendingReviewId
+      r1-reviewer.md                  ← round 1 findings
+      r2-reviewer.md                  ← round 2 findings (after new commits)
+    someorg-backend-108/              ← a different repo, same store
+      meta.md
+      r1-reviewer.md
+  watch.md                            ← all watched repos, one file
+  rules/                              ← rules apply across all repos
+  cache/
+    pszf11235-LGTM-42.md              ← cached diff, repo-qualified
 ```
+
+Because the store is shared across repos, **cache keys and review dirs are repo-qualified**.
+The existing `cache/pr-42.md` naming would collide between repos, so it becomes
+`cache/<owner>-<repo>-<pr>.md`.
+
+### PR reference parsing
+
+Commands accept both forms:
+
+```
+lgtm review post pszf11235/LGTM#42     ← explicit, always works
+lgtm review post 42                    ← resolved against watched repos
+```
+
+`resolvePrRef(input)`:
+1. Matches `owner/repo#N` → use directly
+2. Matches bare `N` → scan `reviews/` for directories ending `-N`
+   - exactly one match → use it
+   - several matches → error listing each candidate as `owner/repo#N`
+   - none → error suggesting the explicit form
 
 ### `agents/reviewer.md`
 
@@ -212,6 +303,7 @@ title: Add user auth
 author: someone
 currentRound: 2
 lastReviewedSha: a1b2c3d4e5f6
+pendingReviewId: 2847362        # set by `review post`, cleared after submit
 rounds:
   - round: 1
     sha: 9f8e7d6c5b4a
@@ -219,12 +311,15 @@ rounds:
     agents: [reviewer]
     findingCount: 3
     postedCount: 2
+    pendingReviewId: 2847362
+    submittedAt: "2026-08-23T09:20:00Z"
   - round: 2
     sha: a1b2c3d4e5f6
     reviewedAt: "2026-08-23T14:30:00Z"
     agents: [reviewer]
     findingCount: 2
     postedCount: 0
+    pendingReviewId: null
     verifiedPriorRound: 1
     resolvedFromPrior: 1
     unresolvedFromPrior: 1
@@ -258,7 +353,7 @@ findings:
     comment: "Hardcoded API key. Move it to an env var before this ships."
     posted: true
     postedAt: "2026-08-23T09:15:00Z"
-    commentId: 2847362
+    pendingReviewId: 2847362
     discarded: false
     resolved: true
     resolvedNote: "Replaced with process.env.API_KEY in a1b2c3d"
@@ -268,8 +363,8 @@ findings:
     severity: high
     comment: "Query built by string concat. Use parameterised queries, this is exploitable."
     posted: true
-    postedAt: "2026-08-23T09:16:30Z"
-    commentId: 2847363
+    postedAt: "2026-08-23T09:15:00Z"
+    pendingReviewId: 2847362
     discarded: false
     resolved: false
     resolvedNote: "Still concatenating on line 18"
@@ -280,6 +375,14 @@ findings:
     comment: "Unused import."
     posted: false
     discarded: true
+  - id: f4
+    file: src/gone.ts
+    line: 900
+    severity: low
+    comment: "Line no longer in the diff."
+    posted: false
+    skipped: true
+    skipReason: "line 900 not present in PR diff"
 ---
 
 # Round 1 — reviewer (claude-cli)
@@ -415,15 +518,53 @@ lgtm discover --prune         → drop repos that no longer exist
 lgtm watch [--interval 15]    → poll + review (alias of `review watch auto`)
 lgtm watch --once             → single cycle
 
-lgtm review add <prs...>      → manual queue add (works for unwatched repos)
-lgtm review status            → queue + pending findings per PR
-lgtm review show <pr>         → diff with inline findings
-lgtm review post <pr>         → post approved findings to GitHub
-lgtm review discard <pr> -f <id>  → mark a finding discarded
-lgtm review approve <pr>      → mark PR approved locally
-lgtm review flag <pr> -r <reason> → mark PR flagged locally
-lgtm review rule add|list|enable|disable  → rules (regex, feeds agent context)
+lgtm review add <prs...>           → manual review of an unwatched repo's PR
+lgtm review status                 → all repos + PRs with unposted findings
+lgtm review list <repo>#<pr>       → plain listing of rounds and findings
+lgtm review post <repo>#<pr>       → create a PENDING review on GitHub
+lgtm review post <repo>#<pr> --recreate  → replace an existing pending review
+lgtm review submit <repo>#<pr>     → submit the pending review (optional)
+lgtm review discard <repo>#<pr> -f <id>  → mark a finding discarded
+lgtm review rule add|list|enable|disable → rules (regex local, llm as prompt context)
 ```
+
+All PR arguments accept `owner/repo#N` or bare `N` when unambiguous.
+
+## Rules feed the agent, they do not call the LLM themselves
+
+`matchLLM()` in `domain/rules.ts` is deleted. Once review is delegated to
+`claude -p /review` there is no raw `llm.complete()` provider to hand it, so LLM-enforced
+rules become prompt context instead:
+
+| Enforcement | Behaviour |
+|---|---|
+| `regex` | Runs locally against added lines, zero cost. Violations become findings directly, tagged `source: "rule-regex"` |
+| `llm` | The rule description and examples are appended to the agent prompt: *"Also enforce these project rules: …"*. The agent already has the diff, so this costs nothing extra |
+
+This removes ~60 lines and the last dependency on the raw LLM provider inside the rules engine.
+
+## GitHub token resolution
+
+No OAuth app, no registration. In order:
+
+```ts
+async function resolveGitHubToken(): Promise<string | null> {
+  // 1. gh CLI — zero setup for anyone who has it
+  const gh = Bun.spawnSync(["gh", "auth", "token"], { stdio: ["ignore", "pipe", "ignore"] });
+  if (gh.exitCode === 0) {
+    const token = gh.stdout.toString().trim();
+    if (token) return token;
+  }
+  // 2. environment
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
+  // 3. saved credentials
+  return loadSavedToken("github");
+}
+```
+
+`stdio: ["ignore","pipe","ignore"]` matters — without it a missing `gh` binary prints to
+the terminal mid-command.
 
 ## Files: New, Modified, Deleted
 
@@ -436,19 +577,27 @@ lgtm review rule add|list|enable|disable  → rules (regex, feeds agent context)
 | `plugins/review/src/domain/orchestrator.ts` | Spawn workers, timeout, collect | 180 |
 | `plugins/review/src/domain/review-store.ts` | meta.md + r<N>-<agent>.md read/write, rounds, mark posted | 300 |
 | `plugins/review/src/domain/verify.ts` | Verification pass for prior findings | 120 |
-| `plugins/review/src/commands/show.ts` | `review show <pr>` — diff + inline findings | 180 |
-| `plugins/review/src/commands/post.ts` | `review post <pr>` — post from OKF, mark posted | 160 |
+| `plugins/review/src/domain/pr-ref.ts` | Parse/resolve `owner/repo#N` and bare `N` | 90 |
+| `plugins/review/src/commands/list.ts` | `review list` — plain text rounds/findings | 110 |
+| `plugins/review/src/commands/post.ts` | `review post` — create PENDING review, mark posted | 200 |
+| `plugins/review/src/commands/submit.ts` | `review submit` — submit the pending review | 60 |
 
 ### Modified
 | File | Change |
 |---|---|
+| `core/src/config/loader.ts` | `resolveLgtmDir()` always returns `~/.lgtm-farm/` flat; drop `storageMode` |
 | `core/src/registry/reconcile.ts` | `acceptRepo()` also writes `watch.md` |
-| `core/src/onboarding/questions.ts` | 8 questions → 1 (`storageMode`) |
-| `core/src/onboarding/flow.ts` | Strip AI discovery, priority picker, skip affordance, tech detect; ~751 → ~250 lines |
-| `plugins/review/src/commands/watch.ts` | Default interval 15, run on startup, call orchestrator instead of `generateAutoReview`, no auto-post |
-| `plugins/review/src/commands/status.ts` | Show pending findings + round per PR |
-| `plugins/review/src/index.ts` | Register `show`, `post`, `discard`; drop removed commands |
-| `core/src/index.ts` | Add top-level `lgtm watch` alias |
+| `core/src/onboarding/questions.ts` | Delete — no questions remain |
+| `core/src/onboarding/flow.ts` | Becomes `initStore()`: create dirs, write default agent, print summary. ~751 → ~80 lines |
+| `core/src/onboarding/detect-ai.ts` | 615 → ~80 lines, only the 5-provider availability check |
+| `core/src/auth/github-oauth.ts` | Add `resolveGitHubToken()` with the `gh auth token` path |
+| `plugins/review/src/domain/rules.ts` | Delete `matchLLM()`; add `rulesAsPromptContext(rules)` |
+| `plugins/review/src/commands/watch.ts` | Interval default 15, run on startup, orchestrator instead of `generateAutoReview`, **no posting** |
+| `plugins/review/src/commands/status.ts` | Repo-qualified output, rounds, unposted counts |
+| `plugins/review/src/commands/add.ts` | Repo-qualified cache keys |
+| `plugins/review/src/domain/post-review.ts` | Add `postPendingReview()`; keep `formatCommentBody` |
+| `plugins/review/src/index.ts` | Register `list`, `post`, `submit`, `discard`; drop removed commands |
+| `core/src/index.ts` | Top-level `lgtm watch` alias; `init` becomes non-interactive |
 | `core/src/cli/commands/ai.ts` | `ai discover` reports the 5 review providers |
 
 ### Deleted (filed as issues — see `removals.md`)

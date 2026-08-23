@@ -12,11 +12,17 @@ Everything not serving that loop is removed and filed as an issue.
 1. lgtm discover --ingest        → find local repos, accept into watcher
 2. lgtm watch                    → poll every 15min (+ once on startup)
 3. PR found                      → spawn review agent(s) via CLI
-4. findings → .lgtm/reviews/     → local OKF, NOT posted
-5. lgtm (TUI) or lgtm review show → inspect findings inline on diff
-6. approve                       → agent posts to GitHub, marks posted: true
-7. new commits detected          → verify old findings closed, run next round
+4. findings → ~/.lgtm-farm/      → central OKF store, nothing posted
+5. lgtm review post <pr>         → creates a PENDING review on GitHub
+6. you open the PR on GitHub     → edit/delete comments in the native diff UI
+7. you click "Submit review"     → review goes live
+8. new commits detected          → verify prior findings closed, run next round
 ```
+
+**Why pending reviews:** GitHub's own diff UI is the review surface. A PENDING review
+is a draft visible only to its author, with every comment anchored to the correct
+line, fully editable before submission. That is strictly better than rendering a
+diff in a terminal, so the tool posts a draft and gets out of the way.
 
 ## Requirements
 
@@ -68,62 +74,97 @@ Everything not serving that loop is removed and filed as an issue.
   - Claude: `/review <url>` (multi-agent, fetches diff itself) or `/code-review` (local diff)
   - Codex: `/review` (GPT-5.x trained for review)
   - Kiro: custom agent from `.kiro/agents/` if present, else raw prompt
-- The user's custom prompt from `.lgtm/agents/reviewer.md` is **appended as additional instructions**, not a replacement
+- The user's custom prompt from `~/.lgtm-farm/agents/reviewer.md` is **appended as additional instructions**, not a replacement
 - Each agent runs as a **separate child process** (`Bun.spawn`)
 - Timeout per agent: 300s default (CLI reviews are slower than raw API calls)
 - If a provider is unavailable, fall back to the next in priority order and log it
 - `lgtm ai discover` reports which providers are available for review
 
-### R4: Findings land in local OKF first
+### R4: Findings land in a central OKF store first
 
-**As a** reviewer,
-**I want** findings saved locally before anything is posted,
-**So that** nothing goes public without my approval.
+**As a** reviewer watching several repos,
+**I want** one central store for all findings, with the repo always identified,
+**So that** nothing goes public without my approval and I can always tell which repo a finding belongs to.
 
 **Acceptance Criteria:**
-- Findings written to `<lgtmDir>/reviews/<owner>-<repo>-<pr>/` where `lgtmDir` respects storage mode (`.lgtm/` or `~/.lgtm-farm/<repo>/`)
+- **Storage is always central** — `~/.lgtm-farm/`. The per-repo `.lgtm/` mode is dropped
+  - Removes the `storageMode` question from onboarding entirely
+  - `resolveLgtmDir()` always returns the central root, flat (no per-repo subdirectory)
+- Findings written to `~/.lgtm-farm/reviews/<owner>-<repo>-<pr>/`
 - Per-PR directory contains:
-  - `meta.md` — PR metadata, round tracking, last reviewed SHA
+  - `meta.md` — PR metadata, round tracking, last reviewed SHA, pending review id
   - `r<N>-<agent>.md` — findings from round N by that agent
+- **Every review artefact carries `owner`, `repo`, and `url` in its frontmatter**
+- **Every command that displays findings shows the repo name**, never a bare PR number:
+  - `lgtm review status` → `pszf11235/LGTM#42  round 1  3 unposted`
+  - `lgtm review post pszf11235/LGTM#42` accepted, plus bare `42` when unambiguous
+  - Ambiguous bare numbers (same PR number in two watched repos) → error listing the candidates
 - **Nothing is posted to GitHub during the review step**
-  - Current behavior: `watch auto` and `review auto` post immediately — this must change
-- `lgtm review status` shows PRs with pending findings: `#42 — 3 findings (round 1, unposted)`
+  - Current behaviour: `watch auto` and `review auto` post immediately — this must change
 - Findings include: file, line, comment, severity, `posted: false`, `discarded: false`
 
-### R5: Human review inline on diff, then approve and post
+### R5: Post as a PENDING GitHub review, edit and submit on GitHub
 
 **As a** reviewer,
-**I want** to see findings on the actual diff lines and approve them selectively,
-**So that** I have code context and control what gets posted.
+**I want** findings pushed to GitHub as a draft review I can edit before submitting,
+**So that** I get GitHub's diff context for free and stay in control of what goes live.
 
 **Acceptance Criteria:**
-- **CLI path** (P0): `lgtm review show <pr>` prints the diff with findings annotated inline
-- **TUI path** (P1): Review tab diff view shows findings as inline annotations with agent label
-- Approve actions:
-  - `lgtm review post <pr>` — post all unposted, non-discarded findings
-  - `lgtm review post <pr> --dry-run` — show what would post
-  - `lgtm review discard <pr> --finding <n>` — mark a finding discarded
-  - TUI: `p` post finding under cursor, `x` discard, `P` post all
-- Posting behavior:
-  - Batched as one GitHub review by default
-  - `--no-batch` posts individually with 20s–90s random delay between comments
-- **After posting, the OKF file is updated**: `posted: true`, `postedAt: <iso>`, `commentId: <github-id>`
-- Re-running `post` skips already-posted findings (idempotent)
+- `lgtm review post <repo>#<pr>` creates a **PENDING** review via
+  `POST /repos/{owner}/{repo}/pulls/{n}/reviews` **with the `event` field omitted**
+  - Omitting `event` is what makes it a draft. `event: "COMMENT"` submits immediately and must never be sent by the post command
+  - There is no `draft: true` parameter — omission is the only mechanism
+  - All comments go in the single create call; the API cannot append to an existing pending review
+- The response `id` is stored as `pendingReviewId` in `meta.md`
+- Output tells the user exactly where to go:
+  ```
+  Created pending review on pszf11235/LGTM#42 with 3 comments.
+  Edit and submit: https://github.com/pszf11235/LGTM/pull/42
+  ```
+- `--dry-run` prints the comment payload without calling the API
+- `lgtm review discard <repo>#<pr> -f <id>` marks a finding discarded so `post` skips it
+- **After posting, each finding is updated**: `posted: true`, `postedAt`, `pendingReviewId`
+- Re-running `post` refuses when a pending review already exists, pointing at the PR URL
+  - `--recreate` deletes the existing pending review and posts a fresh one
+- Findings whose `line` is not present in the PR diff are skipped with a warning rather than failing the whole call
+- **Optional convenience**: `lgtm review submit <repo>#<pr>` submits the pending review via
+  `POST /pulls/{n}/reviews/{review_id}/events` for users who prefer not to open the browser
 
-### R6: Onboarding asks one question
+**Not building:** a terminal diff renderer or TUI inline annotations. GitHub's diff view
+is the review surface. Filed as issues for later if a terminal-only workflow is wanted.
+
+### R6: Onboarding asks nothing
 
 **As a** new user,
-**I want** setup to take 5 seconds,
-**So that** I can start using the tool immediately.
+**I want** zero setup,
+**So that** the first command I run just works.
 
 **Acceptance Criteria:**
-- Only question: **storage mode** (per-repo `.lgtm/` vs central `~/.lgtm-farm/`)
-- Everything else is defaulted or auto-detected:
-  - `goal`, `feedbackStyle`, `teamSize`, `qualityReferences` → removed from profile entirely (or defaulted silently)
-  - AI provider → detected at review time, not during onboarding
-- `lgtm init` completes in one keypress
-- Removed from onboarding: AI provider question, model question, API key question, provider priority picker, tech stack detection prompt, "press q to skip" affordance
-- The removed questions are filed as an issue for a future `lgtm config --advanced`
+- **No questions at all.** Storage is always central (`~/.lgtm-farm/`), so the last remaining question is gone
+- `lgtm init` creates the store, writes a default `agents/reviewer.md`, prints what it did, exits
+- Everything else is defaulted or detected at the point of use:
+  - AI provider → detected when a review runs, not during setup
+  - GitHub token → resolved from `gh auth token`, then env vars, then `~/.lgtm-credentials`
+  - `goal`, `feedbackStyle`, `teamSize`, `qualityReferences` → dropped from the profile entirely
+- Removed: the storage-mode question, AI provider question, model question, API key question, provider priority picker, tech-stack detection prompt, "press q to skip" affordance
+- `init` is idempotent — running it again reports the existing store and changes nothing
+- The removed questions are filed for a future `lgtm config --advanced` (#140)
+
+### R6b: GitHub token needs no registration
+
+**As a** user,
+**I want** GitHub access to work without registering an OAuth app,
+**So that** I can use the tool immediately.
+
+**Acceptance Criteria:**
+- Token resolution order:
+  1. `gh auth token` — shell out to the `gh` CLI (zero setup for anyone who has it)
+  2. `GITHUB_TOKEN` / `GH_TOKEN` env var
+  3. `~/.lgtm-credentials`
+- If none resolve, print all three options with copy-pasteable commands
+- `gh` invocation suppresses stderr so a missing `gh` binary produces no noise
+- OAuth device flow stays out of the MVP (#84, #139). When added, one registered app's
+  public client ID ships in the binary and serves every user — no per-user registration
 
 ### R7: Multiple review rounds with commit detection
 
@@ -141,17 +182,24 @@ Everything not serving that loop is removed and filed as an issue.
   2. Mark each previous finding `resolved: true|false` with a short reason
   3. **New review round**: run the review on the new diff, passing unresolved findings as context so the agent doesn't duplicate them
   4. Save as `r<N+1>-<agent>.md`, bump `currentRound`, update `lastReviewedSha`
-- Rounds are identifiable: `lgtm review status` shows `#42 — round 2, 1 unresolved from round 1, 2 new findings`
-- `lgtm review show <pr>` shows all rounds, marking which findings are resolved/unresolved/new
+- Rounds are identifiable and always repo-qualified:
+  `pszf11235/LGTM#42  round 2  1 unresolved from round 1  2 new findings`
+- Each round posts its own pending review, so round 2's draft contains only round 2's
+  findings plus anything still unresolved from round 1
+- `lgtm review list <repo>#<pr>` prints a plain text listing of all rounds and findings
+  with their state — no diff rendering, just the facts
 
 ## Non-Functional Requirements
 
-- **Storage**: everything in OKF (YAML frontmatter + markdown), respecting central/decentral mode
-- **No auto-posting**: network writes only on explicit user approval
+- **Storage**: everything in OKF (YAML frontmatter + markdown) in one central store at `~/.lgtm-farm/`
+- **Repo attribution**: every stored artefact and every line of user-facing output that
+  references a PR includes the `owner/repo`
+- **No auto-posting**: the only network write is `review post`, and it creates a draft, not a live review
 - **Process isolation**: each review agent is a separate OS process
 - **Idempotent**: re-running watch/review/post never duplicates work
 - **Graceful degradation**: no AI provider → clear message, tool still usable for queue/rules
 - **Demo-able without secrets**: `--demo` flag and `lgtm smoke` must work with zero credentials
+- **No shell noise**: `which` and `gh` probes suppress stderr
 
 ## Out of Scope (removed, filed as issues)
 
