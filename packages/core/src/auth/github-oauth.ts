@@ -239,3 +239,52 @@ export function loadToken(provider: string): string | null {
     return null;
   }
 }
+
+// ─── Token Resolution ───────────────────────────────────────────────────────
+
+/**
+ * Resolve a GitHub token without requiring any OAuth app registration.
+ *
+ * Order:
+ *   1. `gh auth token` — zero setup for anyone with the GitHub CLI logged in
+ *   2. GITHUB_TOKEN / GH_TOKEN environment variables
+ *   3. ~/.lgtm-credentials
+ *
+ * Returns null when nothing resolves. Callers should surface
+ * `describeMissingGitHubToken()` in that case.
+ */
+export function resolveGitHubToken(): string | null {
+  // 1. gh CLI. stdio must suppress stderr — without it a missing `gh` binary
+  //    prints "command not found" into the middle of our output.
+  try {
+    const proc = Bun.spawnSync(["gh", "auth", "token"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (proc.exitCode === 0) {
+      const token = proc.stdout.toString().trim();
+      if (token) return token;
+    }
+  } catch {
+    // gh not installed
+  }
+
+  // 2. Environment
+  const envToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  if (envToken) return envToken;
+
+  // 3. Saved credentials
+  return loadToken("github");
+}
+
+/**
+ * Human-readable guidance for when no token could be resolved.
+ */
+export function describeMissingGitHubToken(): string[] {
+  return [
+    "No GitHub token found. Any one of these works:",
+    "",
+    "  gh auth login                      easiest, nothing else to configure",
+    "  export GITHUB_TOKEN=ghp_...        for a one-off shell",
+    "  lgtm auth login github             saves to ~/.lgtm-credentials",
+  ];
+}

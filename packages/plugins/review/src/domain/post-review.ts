@@ -431,7 +431,8 @@ export async function fetchExistingComments(
   repo: string
 ): Promise<Array<{ file?: string; line?: number; body: string }>> {
   try {
-    const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+    const { resolveGitHubToken } = await import("@lgtm/core/auth/github-oauth.js");
+    const token = resolveGitHubToken();
     if (!token) return [];
 
     const res = await fetch(

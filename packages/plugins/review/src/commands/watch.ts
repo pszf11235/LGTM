@@ -172,9 +172,12 @@ export function registerWatchCommand(program: Command, ctx: LGTMContext) {
     .option("--interval <minutes>", "Poll interval in minutes (default: 15, 0 = single run)", "0")
     .option("--no-batch", "Post comments individually with delays")
     .action(async (opts: { severity?: string; dryRun?: boolean; interval?: string; batch?: boolean }) => {
-      const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+      const { resolveGitHubToken, describeMissingGitHubToken } = await import(
+        "@lgtm/core/auth/github-oauth.js"
+      );
+      const token = resolveGitHubToken();
       if (!token) {
-        ctx.logger.error("Set GITHUB_TOKEN to use watch auto.");
+        for (const line of describeMissingGitHubToken()) console.log(`  ${line}`);
         return;
       }
 
@@ -424,8 +427,9 @@ async function saveWatchConfig(store: OKFStore, repos: WatchedRepo[]): Promise<v
 }
 
 async function fetchOpenPRs(watched: WatchedRepo): Promise<Array<{ number: number; title: string; user?: { login: string }; created_at: string; html_url: string }>> {
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  if (!token) throw new Error("No GitHub token (set GITHUB_TOKEN)");
+  const { resolveGitHubToken } = await import("@lgtm/core/auth/github-oauth.js");
+  const token = resolveGitHubToken();
+  if (!token) throw new Error("No GitHub token — run `gh auth login` or set GITHUB_TOKEN");
 
   let url = `https://api.github.com/repos/${watched.owner}/${watched.repo}/pulls?state=open&per_page=10`;
 

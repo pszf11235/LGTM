@@ -26,9 +26,14 @@ export function registerDashboardCommand(program: Command, ctx: LGTMContext) {
     .description("Display attention items")
     .option("--all", "Include dismissed items")
     .action(async (opts: { all?: boolean }) => {
-      const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+      const { resolveGitHubToken, describeMissingGitHubToken } = await import(
+        "@lgtm/core/auth/github-oauth.js"
+      );
+      const token = resolveGitHubToken();
       if (!token) {
-        console.log(chalk.red("\n  GitHub token required. Set GITHUB_TOKEN env var.\n"));
+        console.log("");
+        for (const line of describeMissingGitHubToken()) console.log(chalk.dim(`  ${line}`));
+        console.log("");
         return;
       }
 
