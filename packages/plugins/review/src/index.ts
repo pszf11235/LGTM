@@ -82,6 +82,18 @@ export const plugin: LGTMPlugin = {
     registerDashboardCommand(program, ctx);
     registerAutoCommand(program, ctx);
 
+    // The orchestrator spawns one of these per agent and speaks JSON to it over
+    // stdin and stdout. It is hidden because it is a process boundary, not a
+    // user-facing command, and it exists as a subcommand because a compiled
+    // binary has no source file on disk to spawn instead.
+    program
+      .command("internal-worker", { hidden: true })
+      .description("Internal: run one review in this process (JSON on stdin and stdout)")
+      .action(async () => {
+        const { runWorker } = await import("./workers/review-agent.js");
+        process.exit(await runWorker());
+      });
+
     // Placeholder commands (future tasks)
     program
       .command("history")

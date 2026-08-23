@@ -11,6 +11,7 @@
     "./store/paths.js": "./src/store/paths.ts",
     "./store/agents.js": "./src/store/agents.ts",
     "./config/loader.js": "./src/config/loader.ts",
+    "./cli/self.js": "./src/cli/self.ts",
     "./auth/github-oauth.js": "./src/auth/github-oauth.ts",
     "./utils/git.js": "./src/utils/git.ts",
     "./llm/provider.js": "./src/llm/provider.ts",

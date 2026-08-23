@@ -184,14 +184,21 @@ interface SpawnOutcome {
 /**
  * Run a command with a hard timeout.
  *
- * The timeout is the reason this is not `Bun.spawnSync`: a CLI waiting on an
- * interactive prompt would otherwise hang the whole watcher.
+ * The timeout races the output read rather than gating it. Killing the child is
+ * not enough to unblock `Response(proc.stdout).text()`: every one of these CLIs
+ * spawns subprocesses of its own, those inherit the stdout pipe, and the pipe
+ * stays open while any of them lives. So reading to completion after a kill can
+ * block forever, which would hang the whole watcher on one stuck provider.
+ *
+ * Whatever output arrived before the deadline is returned. A grandchild may
+ * outlive us, but it can no longer hold the cycle hostage.
  */
 async function run(
   cmd: string[],
   opts: { cwd?: string; env?: Record<string, string>; timeoutSeconds: number; stdin?: string }
 ): Promise<SpawnOutcome> {
-  const proc = Bun.spawn(cmd, {
+  const proc = Bun.spawn({
+    cmd,
     cwd: opts.cwd,
     env: opts.env ? { ...process.env, ...opts.env } : process.env,
     stdin: opts.stdin === undefined ? "ignore" : new TextEncoder().encode(opts.stdin),
@@ -199,19 +206,41 @@ async function run(
     stderr: "pipe",
   });
 
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    proc.kill();
-  }, opts.timeoutSeconds * 1000);
+  // Buffer incrementally so a timeout still yields whatever was written.
+  let stdout = "";
+  let stderr = "";
+
+  const drain = async (stream: ReadableStream<Uint8Array>, onChunk: (s: string) => void) => {
+    const decoder = new TextDecoder();
+    for await (const chunk of stream) {
+      onChunk(decoder.decode(chunk, { stream: true }));
+    }
+  };
+
+  const reading = Promise.all([
+    drain(proc.stdout as ReadableStream<Uint8Array>, (s) => { stdout += s; }),
+    drain(proc.stderr as ReadableStream<Uint8Array>, (s) => { stderr += s; }),
+    proc.exited,
+  ]);
+
+  // Swallow late failures. Once we time out nobody is awaiting this, and an
+  // unhandled rejection would take the process down.
+  reading.catch(() => {});
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), opts.timeoutSeconds * 1000);
+  });
 
   try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const exitCode = await proc.exited;
-    return { stdout, stderr, exitCode, timedOut };
+    const outcome = await Promise.race([reading.then(() => "done" as const), deadline]);
+
+    if (outcome === "timeout") {
+      proc.kill("SIGKILL");
+      return { stdout, stderr, exitCode: null, timedOut: true };
+    }
+
+    return { stdout, stderr, exitCode: proc.exitCode, timedOut: false };
   } finally {
     clearTimeout(timer);
   }

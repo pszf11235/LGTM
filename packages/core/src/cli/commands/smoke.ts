@@ -250,7 +250,64 @@ index abc1234..def5678 100644
     return `Found ${result.findings.length} violation(s): ${result.findings.map((f: any) => f.ruleId || f.rule).join(", ")}`;
   }, "The core auto-review engine: applies rules to diffs and generates findings. Works offline with regex rules, or with LLM for complex checks."));
 
-  // ─── Test 11: Binary Build (if dist/lgtm exists) ───────────────────────
+  // ─── Test 11: Review Worker Process Boundary ───────────────────────────
+  results.push(await runTest("Review Worker (subprocess)", isVerbose, isDemo, async () => {
+    const { selfCommand, childEnv, isCompiledBinary } = await import("../self.js");
+
+    // The orchestrator runs each review agent in its own process by re-invoking
+    // this program. That resolution differs between source and the compiled
+    // binary, and a mistake there breaks reviews only in the shipped artefact.
+    // So this spawns a real worker and requires a real JSON result back.
+    const job = {
+      mode: "review",
+      agent: {
+        name: "smoke",
+        provider: "auto",
+        model: null,
+        severity: "high",
+        timeout: 10,
+        commentDelay: [0, 0],
+        enabled: true,
+        prompt: "smoke test",
+        sourcePath: "<smoke>",
+      },
+      diff: "--- a/x\n+++ b/x\n",
+    };
+
+    const proc = Bun.spawnSync({
+      cmd: selfCommand(["review", "internal-worker"]),
+      stdin: new TextEncoder().encode(JSON.stringify(job)),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: childEnv(),
+    });
+
+    const stdout = proc.stdout.toString().trim();
+    if (!stdout) {
+      const err = proc.stderr.toString().trim().split("\n").slice(-2).join(" ");
+      throw new Error(`worker wrote nothing to stdout${err ? `: ${err}` : ""}`);
+    }
+
+    // stdout must be the result and nothing else, or the orchestrator cannot
+    // parse it. Any stray banner or log line would fail here.
+    let parsed: { findings?: unknown; error?: string | null };
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      throw new Error(`worker stdout was not pure JSON: ${stdout.slice(0, 120)}`);
+    }
+
+    if (!Array.isArray(parsed.findings)) {
+      throw new Error("worker result has no findings array");
+    }
+
+    // With no provider installed the worker correctly reports that. Either
+    // outcome proves the process boundary works; only a crash is a failure.
+    const verdict = parsed.error ? `reported "${parsed.error.slice(0, 40)}..."` : "returned findings";
+    return `${isCompiledBinary() ? "compiled binary" : "source"} → worker ${verdict}`;
+  }, "Each review agent runs in its own process, so two reviewers run in parallel and a hung CLI can be killed. This checks the process boundary itself."));
+
+  // ─── Test 12: Binary Build (if dist/lgtm exists) ───────────────────────
   const binaryPath = path.join(ctx.repoRoot, "dist", "lgtm");
   if (fs.existsSync(binaryPath)) {
     results.push(await runTest("Binary Executable", isVerbose, isDemo, async () => {
