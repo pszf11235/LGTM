@@ -216,6 +216,17 @@ export async function checkPR(
     });
   }
 
+  // Recording the SHA is what marks this commit reviewed, so it must not happen
+  // when every agent failed. It used to, which meant one rate-limited provider
+  // or one worker timeout retired the PR permanently: decidePR then answered
+  // "no new commits" forever and there is no retry path. The round file with the
+  // error was already written above, so nothing is lost by returning here, and
+  // the next cycle picks the PR up again because no SHA was stored.
+  if (result.failed) {
+    const reasons = result.runs.map((r) => r.error).filter(Boolean).join("; ");
+    return { action: "failed", reason: reasons || "every agent failed" };
+  }
+
   saveMeta(lgtmDir, {
     ref,
     title: pr.title,
@@ -234,11 +245,6 @@ export async function checkPR(
   });
 
   const findings = result.runs.reduce((n, r) => n + r.findings.length, 0);
-
-  if (result.failed) {
-    const reasons = result.runs.map((r) => r.error).filter(Boolean).join("; ");
-    return { action: "failed", reason: reasons || "every agent failed" };
-  }
 
   return decision.kind === "re-review"
     ? { action: "re-reviewed", round: decision.round, findings, resolved, unresolved }
