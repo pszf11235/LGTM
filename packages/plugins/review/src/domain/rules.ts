@@ -84,7 +84,10 @@ export function createRulesEngine(store: OKFStore) {
     examples?: { bad: string[]; good: string[] };
     createdFrom?: string;
   }): Promise<Rule> {
-    const id = `r-${Date.now().toString(36)}`;
+    // `rule import` creates rules in a tight loop, so a millisecond timestamp
+    // alone collided and left every rule after the first unaddressable: `rule
+    // disable <id>` reported success and flipped exactly one of them.
+    const id = `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const rule: Rule = {
       id,
       description: opts.description,
