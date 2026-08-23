@@ -20,6 +20,8 @@ export interface GitHubPR {
   title: string;
   body: string;
   state: string;
+  /** The PR author's login, or "unknown". */
+  author: string;
   head: { ref: string; sha: string };
   base: { ref: string };
   changedFiles: number;
@@ -97,6 +99,8 @@ export function createGitHubAdapter(owner: string, repo: string) {
       title: data.title,
       body: data.body ?? "",
       state: data.state,
+      // Recorded on every review so findings say who wrote the PR.
+      author: data.user?.login ?? "unknown",
       head: { ref: data.head.ref, sha: data.head.sha },
       base: { ref: data.base.ref },
       changedFiles: data.changed_files,

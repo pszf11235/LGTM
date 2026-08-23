@@ -129,7 +129,7 @@ async function main() {
     });
 
   // `lgtm plugins` → list all plugins with status
-  program
+  const pluginsCmd = program
     .command("plugins")
     .description("List installed plugins and their status")
     .action(() => {
@@ -157,9 +157,13 @@ async function main() {
       console.log();
     });
 
-  // `lgtm plugins enable/disable <name>`
-  program
-    .command("plugins:enable <name>")
+  // `lgtm plugins enable|disable <name>`
+  //
+  // Registered as subcommands of `plugins`, not as "plugins:enable". The colon
+  // form made the name literal, so the command the help text advertised did not
+  // exist and `lgtm plugins enable review` failed.
+  pluginsCmd
+    .command("enable <name>")
     .description("Enable a plugin")
     .action(async (name: string) => {
       await persistPluginState(ctx.repoRoot, name, true);
@@ -167,8 +171,8 @@ async function main() {
       console.log(chalk.gray(`  Saved to .lgtmrc.yaml. Restart lgtm to apply.`));
     });
 
-  program
-    .command("plugins:disable <name>")
+  pluginsCmd
+    .command("disable <name>")
     .description("Disable a plugin")
     .action(async (name: string) => {
       await persistPluginState(ctx.repoRoot, name, false);

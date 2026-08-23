@@ -15,7 +15,7 @@ import { registerRuleCommand } from "./commands/rule.js";
 import { registerScanCommand } from "./commands/scan.js";
 import { registerWatchCommand } from "./commands/watch.js";
 import { registerDashboardCommand } from "./commands/dashboard.js";
-import { registerAutoCommand } from "./commands/auto.js";
+import { registerReviewPrCommand } from "./commands/review-pr.js";
 import {
   registerListCommand,
   registerPostCommand,
@@ -102,7 +102,7 @@ export const plugin: LGTMPlugin = {
     registerScanCommand(program, ctx);
     registerWatchCommand(program, ctx);
     registerDashboardCommand(program, ctx);
-    registerAutoCommand(program, ctx);
+    registerReviewPrCommand(program, ctx);
 
     // The human gate: findings sit locally until one of these runs.
     registerListCommand(program, ctx);
