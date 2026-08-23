@@ -31,6 +31,18 @@ export interface LGTMPlugin {
   registerCommands(program: Command, ctx: LGTMContext): void;
 
   /**
+   * Register commands at the top level, outside this plugin's namespace
+   * (optional).
+   *
+   * For the one or two commands a user runs constantly, where the namespace is
+   * just friction: `lgtm watch` rather than `lgtm review watch auto`. Use
+   * sparingly, since the top level is shared by every plugin.
+   *
+   * @param program - The root Commander program
+   */
+  registerTopLevelCommands?(program: Command, ctx: LGTMContext): void;
+
+  /**
    * TUI pages this plugin provides (optional).
    * Each page becomes a tab in the TUI shell.
    */

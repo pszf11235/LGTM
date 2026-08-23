@@ -76,6 +76,22 @@ export const plugin: LGTMPlugin = {
     },
   ],
 
+  /**
+   * `lgtm watch` — the main loop, given a top-level name because it is the
+   * command people leave running, and `lgtm review watch auto` is a mouthful.
+   */
+  registerTopLevelCommands(program: Command, ctx: LGTMContext): void {
+    program
+      .command("watch")
+      .description("Poll watched repos and review new PRs locally (posts nothing)")
+      .option("--interval <minutes>", "Poll interval in minutes, 0 for a single run", "15")
+      .option("--once", "Run a single cycle and exit")
+      .action(async (opts: { interval?: string; once?: boolean }) => {
+        const { runWatch } = await import("./commands/watch.js");
+        await runWatch(ctx, opts);
+      });
+  },
+
   registerCommands(program: Command, ctx: LGTMContext): void {
     // Real commands (implemented)
     registerAddCommand(program, ctx);

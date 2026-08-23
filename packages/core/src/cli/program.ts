@@ -103,6 +103,13 @@ export function registerPlugin(
   if (typeof plugin.registerCommands === "function") {
     plugin.registerCommands(sub, ctx);
   }
+
+  // A plugin may also claim a top-level name for the command people will run
+  // most often, so the main loop is `lgtm watch` rather than
+  // `lgtm review watch auto`.
+  if (typeof plugin.registerTopLevelCommands === "function") {
+    plugin.registerTopLevelCommands(program, ctx);
+  }
 }
 
 /**

@@ -16,6 +16,9 @@
  * Invocation lives in the review plugin. This module only answers "is it there".
  */
 
+import fs from "fs";
+import path from "path";
+
 /** Providers that can run a review, in priority order for `auto`. */
 export const PROVIDER_IDS = [
   "kiro-cli",
@@ -53,18 +56,43 @@ export const OLLAMA_BASE_URL = process.env.OLLAMA_HOST ?? "http://localhost:1143
 /**
  * Is a binary on PATH? Returns its path, or null.
  *
- * stderr is discarded. Without that, `which: no claude in (...)` leaks into the
- * middle of our own output on machines that do not have it.
+ * PATH is walked here rather than shelling out to `which`, for three reasons.
+ * It spawns nothing, so detecting five providers costs no processes instead of
+ * five. It does not depend on `which` existing, which minimal container images
+ * often omit and Windows never had. And it reads `process.env.PATH` at call
+ * time: `Bun.spawnSync` does not see a PATH reassigned after startup, so a
+ * spawned `which` disagreed with the PATH this process actually had.
+ *
+ * The old version also had to suppress stderr, because `which: no claude in
+ * (...)` leaked into the middle of our output. Nothing to suppress now.
  */
 export function which(cmd: string): string | null {
-  try {
-    const proc = Bun.spawnSync(["which", cmd], { stdio: ["ignore", "pipe", "ignore"] });
-    if (proc.exitCode !== 0) return null;
-    const out = proc.stdout.toString().trim();
-    return out || null;
-  } catch {
-    return null;
+  const pathVar = process.env.PATH ?? "";
+  if (!pathVar) return null;
+
+  // Windows needs the extension appended; POSIX takes the name as given.
+  const candidates =
+    process.platform === "win32"
+      ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").map((ext) => cmd + ext.toLowerCase())
+      : [cmd];
+
+  for (const dir of pathVar.split(path.delimiter)) {
+    if (!dir) continue;
+
+    for (const candidate of candidates) {
+      const full = path.join(dir, candidate);
+      try {
+        // X_OK rather than existsSync: a non-executable file of the right name
+        // is not something we can run.
+        fs.accessSync(full, fs.constants.X_OK);
+        if (fs.statSync(full).isFile()) return full;
+      } catch {
+        // Not here, or not executable.
+      }
+    }
   }
+
+  return null;
 }
 
 async function reachable(url: string, timeoutMs = 1500): Promise<boolean> {
