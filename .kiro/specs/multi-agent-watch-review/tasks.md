@@ -1,5 +1,11 @@
 # Multi-Agent Watch Review — Implementation Tasks
 
+> **Status: shipped** in [#122](https://github.com/pszf11235/LGTM/pull/122).
+> 
+> One OS process per review agent, so a hung provider degrades one review instead
+> of the watcher. See `packages/plugins/review/src/domain/orchestrator.ts` and the
+> subprocess tests in `watch-cycle.test.ts`.
+
 ## Task 1: Agent config loader (OKF)
 - [ ] Create `.lgtm/agents/` directory convention
 - [ ] Create `packages/plugins/review/src/domain/agent-config.ts`

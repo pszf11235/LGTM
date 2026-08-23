@@ -1,5 +1,14 @@
 # MVP Review Pipeline — Implementation Tasks
 
+> **Status: shipped** in [#141](https://github.com/pszf11235/LGTM/pull/141) and [#144](https://github.com/pszf11235/LGTM/pull/144).
+> 
+> This spec is the current review pipeline: provider dispatch, one process per
+> agent, the on-disk review store, PENDING-only posting, and the central store
+> with a zero-question `init`. The unticked boxes below are the plan as written,
+> kept as the design record rather than maintained as a live checklist. What
+> landed is in `git log 3423cd9..main`, and `removals.md` lists what was deleted
+> rather than built.
+
 Priorities: **P0** = required for the demo to work, **P1** = strongly wanted, **P2** = only if time remains.
 
 Ordered so that each task leaves the tool in a working state.

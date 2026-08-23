@@ -1,5 +1,11 @@
 # Tasks: LGTM Platform + Review Plugin
 
+> **Status: superseded.**
+> 
+> The original umbrella spec, written before the shape of the tool was clear. Much
+> of it was deliberately dropped: see `mvp-review-pipeline/removals.md`. Read
+> `mvp-review-pipeline` for what actually ships.
+
 ## Implementation Plan
 
 20 tasks across 7 phases. MVP marked 🏆. Each task = one feature branch + one PR.

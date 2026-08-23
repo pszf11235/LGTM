@@ -1,5 +1,10 @@
 # Implementation Plan: Codebase Quality Improvements
 
+> **Status: shipped** in [#125](https://github.com/pszf11235/LGTM/pull/125).
+> 
+> The removals pass. Superseded in part by `mvp-review-pipeline`, which deleted
+> more than this spec planned to.
+
 ## Overview
 
 This plan implements 26 requirements across three phases: architecture/code quality refactoring (Phase 1), testing infrastructure (Phase 2), and TUI UX improvements (Phase 3). The project uses TypeScript strict, Bun runtime, Ink for terminal UI, and bun:test for testing. Each phase builds on the previous — Phase 2 validates Phase 1 changes, and Phase 3 leverages Phase 1 infrastructure.

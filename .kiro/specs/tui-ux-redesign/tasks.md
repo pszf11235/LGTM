@@ -1,5 +1,10 @@
 # TUI UX Redesign — Implementation Tasks
 
+> **Status: shipped** in [#119](https://github.com/pszf11235/LGTM/pull/119) and [#120](https://github.com/pszf11235/LGTM/pull/120).
+> 
+> Keyboard model, scrollable pages and the Repos page. The Review and AI pages
+> were later rewired to the review store and to the real provider detection.
+
 ## Task 1: Shared hooks (useScrollableList, useFlash)
 - [ ] Create `packages/core/src/tui/hooks/useScrollableList.ts`
   - Takes items array + terminal height
