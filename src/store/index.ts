@@ -33,3 +33,11 @@ export {
   getWatchedRepoKeys,
   type WatchEntry,
 } from "./watch-list.js";
+export {
+  DEFAULT_TEMPLATE,
+  loadTemplate,
+  renderTemplate,
+  ensureTemplatesDir,
+  initDefaultTemplate,
+  type TemplateContext,
+} from "./templates.js";

@@ -1,13 +1,15 @@
 /**
- * Tests for the notifier. All offline: injects the clock and spawn function,
- * so no real notifications or process spawns.
+ * Tests for the notifier. All offline: injects the clock, spawn function,
+ * and PR-state reader, so no real notifications, process spawns, or store
+ * reads.
  *
  * Run with: bun test src/daemon/notify.test.ts
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
+import type { PRRef, PRState } from "@/core";
 import { createEventBus } from "./events";
-import { createNotifier, setUiPort, type SpawnFn } from "./notify";
+import { createNotifier, setUiPort, type SpawnFn, type PRStateReader } from "./notify";
 import type { BinaryResolver } from "./binaries";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
@@ -52,6 +54,30 @@ function createSpySpawn(
   return { fn, calls };
 }
 
+/** Answers "unknown PR" to every ref. Fine for any test that never emits pr-changed. */
+const stubGetPRState: PRStateReader = async () => null;
+
+/**
+ * A PR-state store the tests can drive directly, standing in for `meta.md`.
+ * `getPRState` answers whatever the test last set for that ref, same as
+ * `loadMeta` would answer for the state cycle.ts's write actually landed on.
+ */
+function createStateStore(): {
+  getPRState: PRStateReader;
+  setState: (ref: PRRef, state: PRState | null) => void;
+} {
+  const states = new Map<string, PRState>();
+  const key = (ref: PRRef) => `${ref.owner}/${ref.repo}/${ref.number}`;
+
+  return {
+    getPRState: async (ref) => states.get(key(ref)) ?? null,
+    setState: (ref, state) => {
+      if (state === null) states.delete(key(ref));
+      else states.set(key(ref), state);
+    },
+  };
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("createNotifier", () => {
@@ -77,7 +103,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({ type: "error", cause: "dead-token" });
 
@@ -95,7 +121,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({ type: "error", cause: "dead-token" });
       bus.emit({ type: "error", cause: "dead-token" });
@@ -116,7 +142,7 @@ describe("createNotifier", () => {
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
       setUiPort(4747);
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({
         type: "findings-ready",
@@ -141,7 +167,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       const ref = { owner: "acme", repo: "api", number: 42 };
 
@@ -172,7 +198,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({
         type: "findings-ready",
@@ -190,18 +216,18 @@ describe("createNotifier", () => {
   });
 
   describe("pr-changed notifications", () => {
-    test("sends notification for new PR in triage", async () => {
+    test("sends notification for a PR that just landed in triage", async () => {
       const bus = createEventBus();
       const { fn: spawn, calls } = createSpySpawn([{ exitCode: 0 }]);
+      const store = createStateStore();
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: store.getPRState });
 
-      bus.emit({
-        type: "pr-changed",
-        ref: { owner: "acme", repo: "api", number: 42 },
-      });
+      const ref = { owner: "acme", repo: "api", number: 42 };
+      store.setState(ref, "triage");
+      bus.emit({ type: "pr-changed", ref });
 
       await new Promise((r) => setTimeout(r, 10));
 
@@ -210,26 +236,147 @@ describe("createNotifier", () => {
       expect(calls.at(0)!.cmd).toContain("acme/api#42");
     });
 
-    test("pr-changed: each notification fires independently", async () => {
+    test("does not notify when the write left the PR somewhere other than triage", async () => {
       const bus = createEventBus();
       const { fn: spawn, calls } = createSpySpawn([
         { exitCode: 0 },
         { exitCode: 0 },
+        { exitCode: 0 },
       ]);
+      const store = createStateStore();
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: store.getPRState });
 
       const ref = { owner: "acme", repo: "api", number: 42 };
 
-      // No dedup: same PR fires twice.
+      // A plain metadata refresh: the PR was already reviewed, and nothing
+      // about its lifecycle state changed.
+      store.setState(ref, "reviewed");
+      bus.emit({ type: "pr-changed", ref });
+
+      // Also not triage: queued, reviewing.
+      store.setState(ref, "queued");
+      bus.emit({ type: "pr-changed", ref });
+      store.setState(ref, "reviewing");
+      bus.emit({ type: "pr-changed", ref });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(calls).toHaveLength(0);
+    });
+
+    test("dedup: a PR sitting in triage notifies once, not on every pr-changed", async () => {
+      const bus = createEventBus();
+      const { fn: spawn, calls } = createSpySpawn([{ exitCode: 0 }]);
+      const store = createStateStore();
+
+      binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
+
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: store.getPRState });
+
+      const ref = { owner: "acme", repo: "api", number: 42 };
+      store.setState(ref, "triage");
+
+      // A PR sitting in triage still fires pr-changed on unrelated
+      // refreshes (new commits while waiting, a draft flag flip). The
+      // state doesn't move, so neither should the notification count.
+      bus.emit({ type: "pr-changed", ref });
       bus.emit({ type: "pr-changed", ref });
       bus.emit({ type: "pr-changed", ref });
 
       await new Promise((r) => setTimeout(r, 10));
 
+      expect(calls).toHaveLength(1);
+    });
+
+    test("notifies again once a PR genuinely leaves and re-enters triage", async () => {
+      const bus = createEventBus();
+      const { fn: spawn, calls } = createSpySpawn([{ exitCode: 0 }, { exitCode: 0 }]);
+      const store = createStateStore();
+
+      binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
+
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: store.getPRState });
+
+      const ref = { owner: "acme", repo: "api", number: 42 };
+
+      store.setState(ref, "triage");
+      bus.emit({ type: "pr-changed", ref });
+
+      // Queued, then held back to draft: cycle.ts's withDraftAndClassRules
+      // pulls a queued PR that reverts to draft back into triage.
+      store.setState(ref, "queued");
+      bus.emit({ type: "pr-changed", ref });
+
+      store.setState(ref, "triage");
+      bus.emit({ type: "pr-changed", ref });
+
+      await new Promise((r) => setTimeout(r, 10));
+
       expect(calls).toHaveLength(2);
+    });
+
+    test("different PRs notify independently", async () => {
+      const bus = createEventBus();
+      const { fn: spawn, calls } = createSpySpawn([{ exitCode: 0 }, { exitCode: 0 }]);
+      const store = createStateStore();
+
+      binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
+
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: store.getPRState });
+
+      const refA = { owner: "acme", repo: "api", number: 42 };
+      const refB = { owner: "acme", repo: "api", number: 43 };
+      store.setState(refA, "triage");
+      store.setState(refB, "triage");
+
+      bus.emit({ type: "pr-changed", ref: refA });
+      bus.emit({ type: "pr-changed", ref: refB });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(calls).toHaveLength(2);
+    });
+
+    // Regression for the defect found while wiring M4: notify.ts fired "New
+    // PR in triage" for every pr-changed event with no dedup, and cycle.ts
+    // emits pr-changed on every meta.md write within a Round (state
+    // "reviewing", then "reviewed" or "failed"), on top of the write that
+    // queues the PR in the first place. A single reviewed PR produced
+    // several notifications for a PR that entered triage exactly once.
+    test("regression: a triaged PR that gets reviewed produces exactly one notification", async () => {
+      const bus = createEventBus();
+      const { fn: spawn, calls } = createSpySpawn([{ exitCode: 0 }]);
+      const store = createStateStore();
+
+      binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
+
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: store.getPRState });
+
+      const ref = { owner: "acme", repo: "api", number: 42 };
+
+      // handleOpenPR: firstSighting, action "triage".
+      store.setState(ref, "triage");
+      bus.emit({ type: "pr-changed", ref });
+
+      // A human says "review anyway", or the PR is promoted to auto-class
+      // while waiting: handleOpenPR, action "queue".
+      store.setState(ref, "queued");
+      bus.emit({ type: "pr-changed", ref });
+
+      // dispatchReview / runRound: state "reviewing", then "reviewed".
+      store.setState(ref, "reviewing");
+      bus.emit({ type: "pr-changed", ref });
+
+      store.setState(ref, "reviewed");
+      bus.emit({ type: "pr-changed", ref });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(calls).toHaveLength(1);
+      expect(calls.at(0)!.cmd).toContain("New PR in triage");
     });
   });
 
@@ -240,7 +387,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({ type: "quota-changed", mode: "ok" });
       await new Promise((r) => setTimeout(r, 5));
@@ -264,7 +411,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({ type: "quota-changed", mode: "throttled" });
       await new Promise((r) => setTimeout(r, 5));
@@ -287,7 +434,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({ type: "error", cause: "test" });
 
@@ -302,7 +449,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", null);
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({ type: "error", cause: "test" });
 
@@ -322,7 +469,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({ type: "error", cause: "test" });
 
@@ -340,7 +487,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({ type: "error", cause: "my-error" });
 
@@ -359,7 +506,14 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      const cleanup = createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      const cleanup = createNotifier({
+        binaries,
+        bus,
+        spawn,
+        now: clockFn,
+        logger,
+        getPRState: stubGetPRState,
+      });
 
       // Emit an event that would fail.
       bus.emit({ type: "error", cause: "test" });
@@ -380,7 +534,14 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
 
-      const cleanup = createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      const cleanup = createNotifier({
+        binaries,
+        bus,
+        spawn,
+        now: clockFn,
+        logger,
+        getPRState: stubGetPRState,
+      });
 
       cleanup();
 
@@ -401,7 +562,7 @@ describe("createNotifier", () => {
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
       setUiPort(4747);
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({
         type: "findings-ready",
@@ -424,7 +585,7 @@ describe("createNotifier", () => {
       binaries.setPath("terminal-notifier", "/usr/local/bin/terminal-notifier");
       // UI port not set
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({
         type: "findings-ready",
@@ -443,7 +604,7 @@ describe("createNotifier", () => {
 
       binaries.setPath("terminal-notifier", null);
 
-      createNotifier({ binaries, bus, spawn, now: clockFn, logger });
+      createNotifier({ binaries, bus, spawn, now: clockFn, logger, getPRState: stubGetPRState });
 
       bus.emit({
         type: "error",

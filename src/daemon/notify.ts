@@ -4,15 +4,18 @@
  * Dedup rules:
  * - Errors: once per distinct cause, not once per cycle
  * - Findings ungated for 4 hours: one reminder
- * - Everything else: once per distinct event (PR, quota transition)
+ * - A PR entering triage: once per stay, again only after it leaves and
+ *   re-enters (see the note on `getPRState` below)
+ * - Quota pause: once per transition into `throttled`
  *
  * Transport probe order: terminal-notifier (resolves through binaries.ts,
  * supports -open deep links) → osascript display notification → silence with
  * a log line. Fire-and-forget: spawn failures never propagate into the pipeline.
  *
- * Inject the clock and spawn function for offline testing.
+ * Inject the clock, spawn function, and PR-state reader for offline testing.
  */
 
+import type { PRRef, PRState } from "@/core";
 import type { BinaryResolver } from "./binaries";
 import type { EventBus, DaemonEvent } from "./events";
 
@@ -25,6 +28,24 @@ export type SpawnFn = (
 /** Clock function signature for injection in tests. */
 export type ClockFn = () => number; // milliseconds since epoch
 
+/**
+ * Reads a PR's current lifecycle state from the store. Null when the PR is
+ * unknown (no meta.md, or the read itself failed).
+ *
+ * `pr-changed` carries only a `ref` (see events.ts): the bus stays a cache
+ * invalidation hint, not a payload. cycle.ts emits it on every meta.md write
+ * that isn't a no-op, and that includes a brand-new triage arrival, a plain
+ * refresh of a PR already sitting in triage, a queue, the
+ * reviewing-then-reviewed (or -failed) pair inside a Round, a reconciled
+ * draft-review id, and a close.
+ * Telling "just arrived in triage" apart from the rest needs to know the
+ * state the write actually landed on, and the event alone cannot say that.
+ *
+ * Production wires this to `@/store/reviews`' `loadMeta` bound to the
+ * daemon's `lgtmDir`.
+ */
+export type PRStateReader = (ref: PRRef) => Promise<PRState | null>;
+
 export interface NotifierOptions {
   /** The binary resolver, from daemon startup. */
   binaries: BinaryResolver;
@@ -36,6 +57,14 @@ export interface NotifierOptions {
   now?: ClockFn;
   /** Custom logger for testing. Defaults to console. */
   logger?: { log: (msg: string) => void };
+  /**
+   * How the notifier tells a genuine arrival in triage apart from the many
+   * other writes that also fire `pr-changed`. See `PRStateReader`. Required,
+   * rather than defaulted to a guess, because a wrong guess is exactly R8's
+   * bug: a notification for every meta.md write instead of one per PR that
+   * actually reaches triage.
+   */
+  getPRState: PRStateReader;
 }
 
 /** Deep link into the web UI, filled with the port at runtime. Will be set by the API. */
@@ -50,6 +79,12 @@ interface NotificationState {
   notifiedErrors: Set<string>;
   /** PRs we've sent findings-ready for, with timestamp. Maps "owner/repo/number" -> ms. */
   findingsNotified: Map<string, number>;
+  /**
+   * PRs currently believed to be sitting in triage, already notified for
+   * this stay. Removed as soon as a `pr-changed` event finds the PR
+   * somewhere other than triage, so a later genuine re-entry notifies again.
+   */
+  triageNotified: Set<string>;
   /** True if we've notified about a quota pause in this session. */
   quotaThrottled: boolean;
 }
@@ -62,10 +97,11 @@ interface NotificationState {
  * propagate. Tests inject a spawn function to avoid actually spawning.
  */
 export function createNotifier(options: NotifierOptions): () => void {
-  const { binaries, bus, spawn: spawnFn, now = () => Date.now(), logger = console } = options;
+  const { binaries, bus, spawn: spawnFn, now = () => Date.now(), logger = console, getPRState } = options;
   const state: NotificationState = {
     notifiedErrors: new Set(),
     findingsNotified: new Map(),
+    triageNotified: new Set(),
     quotaThrottled: false,
   };
 
@@ -144,13 +180,27 @@ export function createNotifier(options: NotifierOptions): () => void {
           );
         }
       } else if (event.type === "pr-changed") {
-        // Once per PR entering triage (no dedup beyond that).
-        const clickUrl = makeDeepLink(event.ref.owner, event.ref.repo, event.ref.number);
-        await sendNotification(
-          "New PR in triage",
-          `${event.ref.owner}/${event.ref.repo}#${event.ref.number}`,
-          clickUrl
-        );
+        // pr-changed fires on every meta.md write, not only a triage
+        // arrival (see PRStateReader's doc comment). Read what the write
+        // actually landed on and notify only when that is "triage" and we
+        // have not already notified for this stay.
+        const key = prKey(event.ref.owner, event.ref.repo, event.ref.number);
+        const prState = await getPRState(event.ref);
+
+        if (prState !== "triage") {
+          // Left triage, or never was in it. Clearing the dedup here is
+          // what lets a PR that genuinely leaves and re-enters triage
+          // notify again.
+          state.triageNotified.delete(key);
+        } else if (!state.triageNotified.has(key)) {
+          state.triageNotified.add(key);
+          const clickUrl = makeDeepLink(event.ref.owner, event.ref.repo, event.ref.number);
+          await sendNotification(
+            "New PR in triage",
+            `${event.ref.owner}/${event.ref.repo}#${event.ref.number}`,
+            clickUrl
+          );
+        }
       } else if (event.type === "quota-changed") {
         // Once when entering throttled state.
         if (event.mode === "throttled" && !state.quotaThrottled) {

@@ -55,6 +55,7 @@ import { createGitHubAdapter, type EtagStore } from "@/forge/github/adapter";
 import { resolveGitHubToken } from "@/forge/github/auth";
 import { loadConfig as loadStoreConfig, type Config } from "@/store/config";
 import { getStorePath } from "@/store/paths";
+import { loadMeta } from "@/store/reviews";
 import { createBinaryResolver, type BinaryResolver, type BinaryStatus } from "./binaries";
 import {
   createDispatch,
@@ -415,6 +416,10 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     spawn: options.notifySpawn,
     now: msNow,
     logger: { log },
+    // pr-changed carries only a ref, and the cycle emits it on every meta
+    // write. The notifier reads the state to tell a PR genuinely arriving in
+    // triage from one whose metadata merely changed.
+    getPRState: async (ref) => (await loadMeta(lgtmDir, ref))?.state ?? null,
   });
 
   // 6. The quota gate. Its two callbacks are the whole reason this module
