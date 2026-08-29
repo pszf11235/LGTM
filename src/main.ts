@@ -4,13 +4,15 @@
  *
  * `lgtm` is one compiled binary playing three roles (design.md,
  * "Architecture"): this file is the short-lived CLI half, which talks to the
- * long-lived daemon over its local HTTP API. Every subcommand below is a
- * stub until its owning module lands; only --version does real work, since a
- * compiled binary that cannot report its own version fails M0's exit
- * criteria before anything else in the build can be trusted.
+ * long-lived daemon over its local HTTP API. `status`, `open`, and `watch`
+ * delegate to src/cli's HTTP clients; `up`, `install`, and `uninstall` are
+ * still stubs until the daemon lifecycle lands.
  */
 import { Command } from "commander";
 import packageJson from "../package.json" with { type: "json" };
+import { runOpen } from "./cli/open";
+import { runStatus } from "./cli/status";
+import { runWatchAdd, runWatchList, runWatchRemove } from "./cli/watch";
 import { uiEntry } from "./daemon";
 
 function notImplemented(command: string): never {
@@ -51,18 +53,38 @@ program
 program
   .command("status")
   .description("Report daemon liveness, last cycle, queue, and quota")
-  .action(() => notImplemented("status"));
+  .action(async () => {
+    process.exit(await runStatus());
+  });
 
 program
   .command("open")
   .description("Open the web UI in the default browser, authenticated")
-  .action(() => notImplemented("open"));
+  .action(async () => {
+    process.exit(await runOpen());
+  });
 
 const watch = program.command("watch").description("Manage the watched repository list");
 
 watch
   .command("add <owner/repo>")
   .description("Add a repository to the watch list")
-  .action(() => notImplemented("watch add"));
+  .action(async (ownerRepo: string) => {
+    process.exit(await runWatchAdd(ownerRepo));
+  });
+
+watch
+  .command("rm <owner/repo>")
+  .description("Remove a repository from the watch list")
+  .action(async (ownerRepo: string) => {
+    process.exit(await runWatchRemove(ownerRepo));
+  });
+
+watch
+  .command("ls")
+  .description("List watched repositories")
+  .action(async () => {
+    process.exit(await runWatchList());
+  });
 
 program.parse();
