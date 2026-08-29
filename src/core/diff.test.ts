@@ -26,41 +26,45 @@ function loadFixture(name: string): string {
 
 describe("parseDiff — simple single-file diff", () => {
   const diff = parseDiff(loadFixture("simple.diff"));
+  // The fixture is a known single-hunk, single-file diff, so files[0] and
+  // hunks[0] are always present.
+  const file = diff.files[0]!;
+  const hunk = file.hunks[0]!;
 
   test("parses one file", () => {
     expect(diff.files).toHaveLength(1);
   });
 
   test("extracts correct file path", () => {
-    expect(diff.files[0].path).toBe("src/auth/login.ts");
+    expect(file.path).toBe("src/auth/login.ts");
   });
 
   test("file status is modified", () => {
-    expect(diff.files[0].status).toBe("modified");
+    expect(file.status).toBe("modified");
   });
 
   test("has one hunk", () => {
-    expect(diff.files[0].hunks).toHaveLength(1);
+    expect(file.hunks).toHaveLength(1);
   });
 
   test("hunk has context from @@ line", () => {
-    expect(diff.files[0].hunks[0].context).toBe("export function login");
+    expect(hunk.context).toBe("export function login");
   });
 
   test("hunk contains added lines", () => {
-    const added = diff.files[0].hunks[0].lines.filter((l) => l.type === "added");
+    const added = hunk.lines.filter((l) => l.type === "added");
     expect(added.length).toBeGreaterThan(0);
   });
 
   test("hunk contains removed lines", () => {
-    const removed = diff.files[0].hunks[0].lines.filter(
+    const removed = hunk.lines.filter(
       (l) => l.type === "removed"
     );
     expect(removed.length).toBeGreaterThan(0);
   });
 
   test("added lines have newLine numbers", () => {
-    const added = diff.files[0].hunks[0].lines.filter((l) => l.type === "added");
+    const added = hunk.lines.filter((l) => l.type === "added");
     for (const line of added) {
       expect(line.newLine).not.toBeNull();
       expect(line.oldLine).toBeNull();
@@ -68,7 +72,7 @@ describe("parseDiff — simple single-file diff", () => {
   });
 
   test("removed lines have oldLine numbers", () => {
-    const removed = diff.files[0].hunks[0].lines.filter(
+    const removed = hunk.lines.filter(
       (l) => l.type === "removed"
     );
     for (const line of removed) {
@@ -78,7 +82,7 @@ describe("parseDiff — simple single-file diff", () => {
   });
 
   test("context lines have both line numbers", () => {
-    const context = diff.files[0].hunks[0].lines.filter(
+    const context = hunk.lines.filter(
       (l) => l.type === "context"
     );
     for (const line of context) {
@@ -90,70 +94,76 @@ describe("parseDiff — simple single-file diff", () => {
 
 describe("parseDiff — multi-file diff", () => {
   const diff = parseDiff(loadFixture("multi-file.diff"));
+  // The fixture always has exactly these three files, in this order.
+  const file0 = diff.files[0]!;
+  const file1 = diff.files[1]!;
+  const file2 = diff.files[2]!;
 
   test("parses three files", () => {
     expect(diff.files).toHaveLength(3);
   });
 
   test("first file is new (added)", () => {
-    expect(diff.files[0].path).toBe("src/routes/auth.ts");
-    expect(diff.files[0].status).toBe("added");
+    expect(file0.path).toBe("src/routes/auth.ts");
+    expect(file0.status).toBe("added");
   });
 
   test("second file is deleted", () => {
-    expect(diff.files[1].path).toBe("src/utils/helpers.ts");
-    expect(diff.files[1].status).toBe("deleted");
+    expect(file1.path).toBe("src/utils/helpers.ts");
+    expect(file1.status).toBe("deleted");
   });
 
   test("third file is modified", () => {
-    expect(diff.files[2].path).toBe("README.md");
-    expect(diff.files[2].status).toBe("modified");
+    expect(file2.path).toBe("README.md");
+    expect(file2.status).toBe("modified");
   });
 
   test("new file has all added lines", () => {
-    const lines = diff.files[0].hunks[0].lines;
+    const lines = file0.hunks[0]!.lines;
     expect(lines.every((l) => l.type === "added")).toBe(true);
   });
 
   test("deleted file has all removed lines", () => {
-    const lines = diff.files[1].hunks[0].lines;
+    const lines = file1.hunks[0]!.lines;
     expect(lines.every((l) => l.type === "removed")).toBe(true);
   });
 });
 
 describe("parseDiff — renamed file", () => {
   const diff = parseDiff(loadFixture("rename.diff"));
+  const file = diff.files[0]!;
 
   test("detects rename status", () => {
-    expect(diff.files[0].status).toBe("renamed");
+    expect(file.status).toBe("renamed");
   });
 
   test("new path is correct", () => {
-    expect(diff.files[0].path).toBe("src/new-name.ts");
+    expect(file.path).toBe("src/new-name.ts");
   });
 
   test("old path is preserved", () => {
-    expect(diff.files[0].oldPath).toBe("src/old-name.ts");
+    expect(file.oldPath).toBe("src/old-name.ts");
   });
 
   test("has diff content (not empty)", () => {
-    expect(diff.files[0].hunks.length).toBeGreaterThan(0);
+    expect(file.hunks.length).toBeGreaterThan(0);
   });
 });
 
 describe("parseDiff — binary file", () => {
   const diff = parseDiff(loadFixture("binary.diff"));
+  const file = diff.files[0]!;
 
   test("detects binary status", () => {
-    expect(diff.files[0].status).toBe("binary");
+    expect(file.status).toBe("binary");
   });
 
   test("binary file has no hunks", () => {
-    expect(diff.files[0].hunks).toHaveLength(0);
+    expect(file.hunks).toHaveLength(0);
   });
 
   test("path is correct", () => {
-    expect(diff.files[0].path).toBe("assets/logo.png");
+    expect(file.path).toBe("assets/logo.png");
   });
 });
 
@@ -215,7 +225,7 @@ describe("getCommentableLines", () => {
     const lines = commentable.get("src/auth/login.ts")!;
 
     // Verify context lines are included
-    const hunkLines = diff.files[0].hunks[0].lines;
+    const hunkLines = diff.files[0]!.hunks[0]!.lines;
     const contextLines = hunkLines.filter((l) => l.type === "context");
     for (const line of contextLines) {
       expect(lines.has(line.newLine!)).toBe(true);
@@ -234,7 +244,7 @@ describe("getCommentableLines", () => {
     const lines = commentable.get("src/auth/login.ts")!;
 
     // Verify removed lines are not in the set (they have no newLine, only oldLine)
-    const hunkLines = diff.files[0].hunks[0].lines;
+    const hunkLines = diff.files[0]!.hunks[0]!.lines;
     const removedLines = hunkLines.filter((l) => l.type === "removed");
     // All removed lines should have newLine === null
     for (const line of removedLines) {
@@ -245,6 +255,7 @@ describe("getCommentableLines", () => {
 
 describe("sliceHunk — basic slicing", () => {
   const diff = parseDiff(loadFixture("simple.diff"));
+  const hunk = diff.files[0]!.hunks[0]!;
 
   test("returns null for file not in diff", () => {
     const result = sliceHunk(diff, "src/unknown.ts", 1);
@@ -258,18 +269,16 @@ describe("sliceHunk — basic slicing", () => {
 
   test("returns hunk with header", () => {
     // Get a commentable line from the diff
-    const hunkLines = diff.files[0].hunks[0].lines;
-    const commentableLine = hunkLines.find((l) => l.type === "added" || l.type === "context");
+    const commentableLine = hunk.lines.find((l) => l.type === "added" || l.type === "context");
     if (!commentableLine?.newLine) return;
 
     const result = sliceHunk(diff, "src/auth/login.ts", commentableLine.newLine);
     expect(result).not.toBeNull();
-    expect(result!.header).toBe(diff.files[0].hunks[0].header);
+    expect(result!.header).toBe(hunk.header);
   });
 
   test("returns slice with lines", () => {
-    const hunkLines = diff.files[0].hunks[0].lines;
-    const commentableLine = hunkLines.find((l) => l.type === "added" || l.type === "context");
+    const commentableLine = hunk.lines.find((l) => l.type === "added" || l.type === "context");
     if (!commentableLine?.newLine) return;
 
     const result = sliceHunk(diff, "src/auth/login.ts", commentableLine.newLine);
@@ -286,22 +295,21 @@ describe("sliceHunk — basic slicing", () => {
 
 describe("sliceHunk — context window clamping", () => {
   const diff = parseDiff(loadFixture("simple.diff"));
+  const hunkLines = diff.files[0]!.hunks[0]!.lines;
 
   test("clamps context at hunk start", () => {
     // Get the first commentable line
-    const hunkLines = diff.files[0].hunks[0].lines;
     const firstCommentable = hunkLines.find((l) => l.type === "added" || l.type === "context");
     if (!firstCommentable?.newLine) return;
 
     const result = sliceHunk(diff, "src/auth/login.ts", firstCommentable.newLine, 10);
     expect(result).not.toBeNull();
     // Should not go negative
-    expect(result!.lines[0].newLine).toBeGreaterThanOrEqual(firstCommentable.newLine - 10);
+    expect(result!.lines[0]!.newLine).toBeGreaterThanOrEqual(firstCommentable.newLine - 10);
   });
 
   test("clamps context at hunk end", () => {
     // Get the last commentable line
-    const hunkLines = diff.files[0].hunks[0].lines;
     const lastCommentable = [...hunkLines].reverse().find((l) => l.type === "added" || l.type === "context");
     if (!lastCommentable?.newLine) return;
 
@@ -312,9 +320,8 @@ describe("sliceHunk — context window clamping", () => {
   });
 
   test("respects context parameter", () => {
-    const hunkLines = diff.files[0].hunks[0].lines;
     const midLine = hunkLines[Math.floor(hunkLines.length / 2)];
-    if ((midLine.type !== "added" && midLine.type !== "context") || !midLine.newLine) return;
+    if (!midLine || (midLine.type !== "added" && midLine.type !== "context") || !midLine.newLine) return;
 
     const resultSmall = sliceHunk(diff, "src/auth/login.ts", midLine.newLine, 1);
     const resultLarge = sliceHunk(diff, "src/auth/login.ts", midLine.newLine, 5);
@@ -329,18 +336,18 @@ describe("sliceHunk — multi-file diff", () => {
   const diff = parseDiff(loadFixture("multi-file.diff"));
 
   test("slices from first (added) file", () => {
-    const hunkLines = diff.files[0].hunks[0].lines;
-    const firstLine = hunkLines[0];
-    if (firstLine.newLine === null) return;
+    const hunk = diff.files[0]!.hunks[0]!;
+    const firstLine = hunk.lines[0];
+    if (!firstLine || firstLine.newLine === null) return;
 
     const result = sliceHunk(diff, "src/routes/auth.ts", firstLine.newLine);
     expect(result).not.toBeNull();
-    expect(result!.header).toBe(diff.files[0].hunks[0].header);
+    expect(result!.header).toBe(hunk.header);
   });
 
   test("returns null for deleted file lines", () => {
-    const hunkLines = diff.files[1].hunks[0].lines;
-    const removedLine = hunkLines[0];
+    const hunkLines = diff.files[1]!.hunks[0]!.lines;
+    const removedLine = hunkLines[0]!;
     // Deleted file lines are removed, so no newLine
     expect(removedLine.newLine).toBeNull();
     expect(removedLine.oldLine).not.toBeNull();
@@ -350,7 +357,7 @@ describe("sliceHunk — multi-file diff", () => {
   });
 
   test("slices from modified file", () => {
-    const hunkLines = diff.files[2].hunks[0].lines;
+    const hunkLines = diff.files[2]!.hunks[0]!.lines;
     const commentableLine = hunkLines.find((l) => l.type === "added" || l.type === "context");
     if (!commentableLine?.newLine) return;
 
@@ -361,9 +368,9 @@ describe("sliceHunk — multi-file diff", () => {
 
 describe("sliceHunk — line at boundaries", () => {
   const diff = parseDiff(loadFixture("simple.diff"));
+  const hunkLines = diff.files[0]!.hunks[0]!.lines;
 
   test("line at start of hunk", () => {
-    const hunkLines = diff.files[0].hunks[0].lines;
     const startLine = hunkLines.find((l) => l.type === "added" || l.type === "context");
     if (!startLine?.newLine) return;
 
@@ -373,7 +380,6 @@ describe("sliceHunk — line at boundaries", () => {
   });
 
   test("line at end of hunk", () => {
-    const hunkLines = diff.files[0].hunks[0].lines;
     const endLine = [...hunkLines].reverse().find((l) => l.type === "added" || l.type === "context");
     if (!endLine?.newLine) return;
 
@@ -403,7 +409,7 @@ describe("hunk line counts are bounded by the header", () => {
     ].join("\n");
 
     const rhs = parseDiff(raw)
-      .files[0].hunks.flatMap((h) => h.lines)
+      .files[0]!.hunks.flatMap((h) => h.lines)
       .filter((l) => l.newLine != null);
 
     expect(rhs.map((l) => l.newLine)).toEqual([1, 2, 3, 4]);
@@ -423,10 +429,10 @@ describe("hunk line counts are bounded by the header", () => {
     ].join("\n");
 
     const rhs = parseDiff(raw)
-      .files[0].hunks.flatMap((h) => h.lines)
+      .files[0]!.hunks.flatMap((h) => h.lines)
       .filter((l) => l.newLine != null);
 
     expect(rhs.map((l) => l.newLine)).toEqual([1, 2, 3, 4]);
-    expect(rhs[1].content).toBe("");
+    expect(rhs[1]!.content).toBe("");
   });
 });

@@ -28,24 +28,24 @@ afterEach(() => {
 });
 
 async function seedReview(owner: string, repo: string, number: number) {
-  await saveMeta(store, {
-    owner,
-    repo,
-    number,
-    url: `https://github.com/${owner}/${repo}/pull/${number}`,
-    title: "t",
-    author: "a",
-    state: "reviewed",
-    classification: "own",
-    draft: false,
-    headSha: "s",
-    lastReviewedSha: "s",
-    failedAttempts: 0,
-    rounds: 1,
-    pendingReviewId: null,
-    closedAt: null,
-    updatedAt: new Date().toISOString(),
-  });
+  await saveMeta(
+    store,
+    { owner, repo, number },
+    {
+      url: `https://github.com/${owner}/${repo}/pull/${number}`,
+      title: "t",
+      author: "a",
+      state: "reviewed",
+      classification: "own",
+      draft: false,
+      headSha: "s",
+      lastReviewedSha: "s",
+      failedAttempts: 0,
+      rounds: 1,
+      pendingReviewId: null,
+      closedAt: null,
+    },
+  );
 }
 
 // ─── Parsing ────────────────────────────────────────────────────────────────

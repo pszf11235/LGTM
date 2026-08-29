@@ -42,6 +42,7 @@ function parseYAML(yamlStr: string): Record<string, unknown> {
 
   while (i < lines.length) {
     const line = lines[i];
+    if (line === undefined) break;
 
     // Skip empty lines and comments
     if (!line.trim() || line.trim().startsWith("#")) {
@@ -91,6 +92,7 @@ function parseMultiline(lines: string[], startIdx: number): [unknown, number] {
 
   while (i < lines.length) {
     const line = lines[i];
+    if (line === undefined) break;
 
     if (!line.trim() || line.trim().startsWith("#")) {
       i++;
@@ -196,6 +198,7 @@ function stringifyYAML(data: Record<string, unknown>): string {
           const keys = Object.keys(obj);
           for (let i = 0; i < keys.length; i++) {
             const k = keys[i];
+            if (k === undefined) continue;
             const v = obj[k];
             if (i === 0) {
               lines.push(`  - ${k}: ${stringifyValue(v)}`);
@@ -251,8 +254,8 @@ export function parseFrontmatter(raw: string): OKFDocument | null {
     return { data: {}, content: raw.trim() };
   }
 
-  const yamlStr = match[1];
-  const content = raw.substring(match[0].length).trim();
+  const yamlStr = match[1] ?? "";
+  const content = raw.substring(match[0]?.length ?? 0).trim();
 
   const data = parseYAML(yamlStr);
 

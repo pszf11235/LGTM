@@ -79,7 +79,10 @@ export async function resolvePrRef(lgtmDir: string, input: string): Promise<PRRe
 
   const reviewed = (await listReviewedPRs(lgtmDir)).filter((r) => r.number === parsed.number);
 
-  if (reviewed.length === 1) return reviewed[0];
+  if (reviewed.length === 1) {
+    const only = reviewed[0];
+    if (only) return only;
+  }
 
   if (reviewed.length > 1) {
     return {
@@ -92,8 +95,9 @@ export async function resolvePrRef(lgtmDir: string, input: string): Promise<PRRe
   // exactly one, otherwise we would be picking for the user.
   const watched = await loadWatchList(lgtmDir);
 
-  if (watched.length === 1) {
-    return { owner: watched[0].owner, repo: watched[0].repo, number: parsed.number };
+  const onlyWatched = watched[0];
+  if (watched.length === 1 && onlyWatched) {
+    return { owner: onlyWatched.owner, repo: onlyWatched.repo, number: parsed.number };
   }
 
   if (watched.length > 1) {

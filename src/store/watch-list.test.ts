@@ -80,8 +80,8 @@ describe("WatchList", () => {
 
     const entries = await loadWatchList();
     expect(entries).toHaveLength(1);
-    expect(entries[0].owner).toBe("acme");
-    expect(entries[0].repo).toBe("api");
+    expect(entries[0]!.owner).toBe("acme");
+    expect(entries[0]!.repo).toBe("api");
   });
 
   test("addToWatchList is idempotent", async () => {
@@ -103,7 +103,7 @@ describe("WatchList", () => {
     const entries = await loadWatchList();
     expect(entries).toHaveLength(1);
 
-    const addedAt = new Date(entries[0].addedAt);
+    const addedAt = new Date(entries[0]!.addedAt);
     expect(addedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
     expect(addedAt.getTime()).toBeLessThanOrEqual(after.getTime());
   });
@@ -137,7 +137,7 @@ describe("WatchList", () => {
     const after = new Date();
 
     const entries = await loadWatchList();
-    const lastPolledAt = new Date(entries[0].lastPolledAt || "");
+    const lastPolledAt = new Date(entries[0]!.lastPolledAt || "");
 
     expect(lastPolledAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
     expect(lastPolledAt.getTime()).toBeLessThanOrEqual(after.getTime());
@@ -154,7 +154,7 @@ describe("WatchList", () => {
     await updateETag("acme", "api", "def456");
 
     const entries = await loadWatchList();
-    expect(entries[0].etag).toBe("def456");
+    expect(entries[0]!.etag).toBe("def456");
   });
 
   test("updateETag is no-op for missing repo", async () => {
@@ -191,8 +191,8 @@ describe("WatchList", () => {
 
     const entries = await loadWatchList();
     expect(entries).toHaveLength(1);
-    expect(entries[0].owner).toBe("acme");
-    expect(entries[0].repo).toBe("api");
+    expect(entries[0]!.owner).toBe("acme");
+    expect(entries[0]!.repo).toBe("api");
   });
 
   test("saveWatchList preserves all fields on re-save", async () => {
@@ -210,9 +210,9 @@ describe("WatchList", () => {
     await updateETag("acme", "api", "xyz789");
     const loaded = await loadWatchList();
 
-    expect(loaded[0].addedAt).toBe("2026-08-29T10:00:00Z");
-    expect(loaded[0].lastPolledAt).toBe("2026-08-29T11:00:00Z");
-    expect(loaded[0].etag).toBe("xyz789");
+    expect(loaded[0]!.addedAt).toBe("2026-08-29T10:00:00Z");
+    expect(loaded[0]!.lastPolledAt).toBe("2026-08-29T11:00:00Z");
+    expect(loaded[0]!.etag).toBe("xyz789");
   });
 
   test("missing optional fields default gracefully", async () => {
@@ -230,11 +230,11 @@ describe("WatchList", () => {
 
     const entries = await loadWatchList();
     expect(entries).toHaveLength(1);
-    expect(entries[0].owner).toBe("acme");
-    expect(entries[0].repo).toBe("api");
-    expect(entries[0].lastPolledAt).toBeUndefined();
-    expect(entries[0].etag).toBeUndefined();
+    expect(entries[0]!.owner).toBe("acme");
+    expect(entries[0]!.repo).toBe("api");
+    expect(entries[0]!.lastPolledAt).toBeUndefined();
+    expect(entries[0]!.etag).toBeUndefined();
     // addedAt should default to now
-    expect(entries[0].addedAt).toBeTruthy();
+    expect(entries[0]!.addedAt).toBeTruthy();
   });
 });

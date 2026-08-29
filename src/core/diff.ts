@@ -102,8 +102,11 @@ export function parseDiff(raw: string): ParsedDiff {
   let i = 0;
 
   while (i < lines.length) {
+    const line = lines[i];
+    if (line === undefined) break;
+
     // Look for file header: "diff --git a/path b/path"
-    if (lines[i].startsWith("diff --git ")) {
+    if (line.startsWith("diff --git ")) {
       const file = parseFile(lines, i);
       if (file) {
         files.push(file.file);
@@ -127,19 +130,24 @@ function parseFile(
   startIdx: number
 ): { file: DiffFile; nextIndex: number } | null {
   const diffLine = lines[startIdx];
+  if (diffLine === undefined) return null;
+
   const pathMatch = diffLine.match(/^diff --git a\/(.+?) b\/(.+)$/);
   if (!pathMatch) return null;
 
   const oldPath = pathMatch[1];
   const newPath = pathMatch[2];
+  if (oldPath === undefined || newPath === undefined) return null;
 
   let i = startIdx + 1;
   let status: DiffFile["status"] = "modified";
   let finalOldPath: string | undefined;
 
   // Parse metadata lines (index, new file mode, deleted file mode, rename, binary)
-  while (i < lines.length && !lines[i].startsWith("diff --git ")) {
+  while (i < lines.length) {
     const line = lines[i];
+    if (line === undefined) break;
+    if (line.startsWith("diff --git ")) break;
 
     if (line.startsWith("new file mode")) {
       status = "added";
@@ -179,12 +187,16 @@ function parseFile(
   const hunks: DiffHunk[] = [];
 
   // Skip --- and +++ lines
-  if (i < lines.length && lines[i].startsWith("--- ")) i++;
-  if (i < lines.length && lines[i].startsWith("+++ ")) i++;
+  if (i < lines.length && lines[i]?.startsWith("--- ")) i++;
+  if (i < lines.length && lines[i]?.startsWith("+++ ")) i++;
 
   // Parse hunk headers and content
-  while (i < lines.length && !lines[i].startsWith("diff --git ")) {
-    if (lines[i].startsWith("@@ ")) {
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line === undefined) break;
+    if (line.startsWith("diff --git ")) break;
+
+    if (line.startsWith("@@ ")) {
       const hunk = parseHunk(lines, i);
       if (hunk) {
         hunks.push(hunk.hunk);
@@ -216,10 +228,13 @@ function parseHunk(
   startIdx: number
 ): { hunk: DiffHunk; nextIndex: number } | null {
   const headerLine = lines[startIdx];
+  if (headerLine === undefined) return null;
+
   const match = headerLine.match(
     /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/
   );
   if (!match) return null;
+  if (match[1] === undefined || match[3] === undefined) return null;
 
   const oldStart = parseInt(match[1], 10);
   const oldCount = match[2] !== undefined ? parseInt(match[2], 10) : 1;
@@ -245,6 +260,7 @@ function parseHunk(
     if (oldTaken >= oldCount && newTaken >= newCount) break;
 
     const line = lines[i];
+    if (line === undefined) break;
 
     // Stop at next hunk, next file, or end of diff
     if (
@@ -387,6 +403,7 @@ export function sliceHunk(
 
     // Verify the line is commentable (added or context)
     const targetLine = hunk.lines[lineIndex];
+    if (targetLine === undefined) continue;
     if (targetLine.type === "removed") return null;
 
     // Calculate slice boundaries within the hunk
