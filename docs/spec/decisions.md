@@ -1,7 +1,7 @@
 # LGTM v1 decision log
 
 Date: 2026-08-29
-The record of the requirements session behind [requirements.md](requirements.md). The spec states outcomes; this file keeps the reasoning, so none of it gets re-litigated from scratch. Format per entry: what was decided, then why.
+The record of the requirements session behind [requirements.md](requirements.md). The spec states outcomes; this file keeps the reasoning, so none of it gets re-litigated from scratch. Format per entry: what was decided, then why. The five decisions that are hard to reverse and the result of real trade-offs also have formal records in [docs/adr/](../adr/); the project glossary lives in [CONTEXT.md](../../CONTEXT.md).
 
 ## Delivery mechanism
 

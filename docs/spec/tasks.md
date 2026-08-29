@@ -10,7 +10,7 @@ Order matters. Each milestone leaves the branch green (typecheck + tests) and en
 - [ ] Spike: run the Claude CLI's bundled review command in print mode against a full PR URL from a directory outside any checkout, on the pinned CLI version (>= 2.1.233), and confirm the findings survive the parser. The provider design depends on this result
 - [ ] Branch `v2` from `main`
 - [ ] First commit: remove everything except `LICENSE` and `.gitignore`. This includes all of `.kiro/`, the old packages, webapp, and Taskfile; new `.gitignore` entries keep the untracked clutter (built binaries, demo videos, `.bun-build` artifacts) out from then on
-- [ ] Second commit: `docs/spec/` (these three files), a stub `README.md` stating what is being built and pointing at the spec
+- [ ] Second commit: `docs/spec/`, `CONTEXT.md`, `docs/adr/`, and a stub `README.md` stating what is being built and pointing at the spec
 - [ ] Scaffold: `bun init --react=shadcn`, restructure into `src/` (core, forge, provider, store, daemon, api, ui), wire `build.ts` with `Bun.build()` + Tailwind plugin + compile, CI workflow: typecheck, test, build binary, `--version` smoke run
 
 Exit: `bun run build.ts` produces a styled hello-world binary serving the SPA shell on 127.0.0.1.
