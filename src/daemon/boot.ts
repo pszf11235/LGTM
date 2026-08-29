@@ -131,6 +131,10 @@ export interface BindContext {
   quota: QuotaGate;
   binaries: BinaryResolver;
   forge: ForgeAdapter;
+  /** The most recent poll cycle, for `/api/status`'s per-repo outcome (R7.4). */
+  lastCycle: () => PollCycleResult | null;
+  /** Whether a GitHub token resolved. Never the token itself. */
+  githubToken: () => string | null;
 }
 
 /**
@@ -532,6 +536,8 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     quota,
     binaries,
     forge,
+    lastCycle: () => lastCycle,
+    githubToken: () => (githubTokenPresent ? "present" : null),
   };
   const bound: { server: BoundServer | null } = { server: null };
   let selection: SelectPortResult;

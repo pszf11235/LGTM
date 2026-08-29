@@ -6,8 +6,8 @@
  * "Architecture"): this file is the short-lived CLI half, which talks to the
  * long-lived daemon over its local HTTP API. `status`, `open`, and `watch`
  * delegate to src/cli's HTTP clients; `install` and `uninstall` manage the
- * launchd LaunchAgent directly (design.md, "Daemon lifecycle"). `up` is
- * still a stub until the daemon lifecycle lands.
+ * launchd LaunchAgent directly (design.md, "Daemon lifecycle"). `up` runs the
+ * daemon itself in the foreground.
  */
 import { Command } from "commander";
 import packageJson from "../package.json" with { type: "json" };
@@ -15,7 +15,8 @@ import { runInstall, runUninstall } from "./cli/install";
 import { runOpen } from "./cli/open";
 import { runStatus } from "./cli/status";
 import { runWatchAdd, runWatchList, runWatchRemove } from "./cli/watch";
-import { uiEntry } from "./daemon";
+import { createDaemon, uiEntry } from "./daemon";
+import { apiBind } from "./daemon/serve";
 
 function notImplemented(command: string): never {
   console.error(`lgtm ${command}: not implemented yet`);
@@ -34,12 +35,39 @@ program
 program
   .command("up")
   .description("Run the daemon in the foreground")
-  .action(() => {
-    // Referencing the embedded UI here (without starting a server) keeps the
-    // html -> Tailwind bundle path reachable from this entrypoint, so
-    // build.ts's compile step exercises it. See src/daemon/index.ts.
+  .action(async () => {
+    // Referencing the embedded UI keeps the html -> Tailwind bundle path
+    // reachable from this entrypoint, so build.ts's compile step exercises it.
     void uiEntry;
-    notImplemented("up");
+
+    const boot = await createDaemon({
+      bind: apiBind(),
+      log: (line) => console.log(line),
+    });
+
+    if (boot.status === "refused") {
+      console.error(
+        `lgtm up: pid ${boot.existing.pid} is already serving this store on port ${boot.existing.port}`
+      );
+      process.exit(1);
+    }
+
+    const daemon = boot.daemon;
+    console.log(`lgtm: watching on http://127.0.0.1:${daemon.port} (pid ${process.pid})`);
+    console.log("Run `lgtm open` in another terminal to reach the UI.");
+
+    let stopping = false;
+    const shutdown = async (signal: string) => {
+      // Idempotent, because a second Ctrl+C while the first is still draining
+      // must not race the same teardown twice.
+      if (stopping) return;
+      stopping = true;
+      console.log(`\nlgtm: ${signal}, shutting down`);
+      await daemon.stop();
+      process.exit(0);
+    };
+    process.on("SIGINT", () => void shutdown("SIGINT"));
+    process.on("SIGTERM", () => void shutdown("SIGTERM"));
   });
 
 program
