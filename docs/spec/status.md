@@ -1,0 +1,42 @@
+# LGTM v1 build status
+
+Companion to [design.md](design.md), [requirements.md](requirements.md), and [tasks.md](tasks.md). Written from what the code and its tests actually do, not from tasks.md's checkboxes, which are still all unchecked even though most of the milestones below have landed. Treat this document, not that one, as the record of what's actually built.
+
+This branch has more than one agent working on it at once. The specifics below are a snapshot, not a promise about tomorrow's commit.
+
+## Where things stand
+
+As of this writing, `bun test` reports 991 passing tests across 36 files, 2459 assertions, in under 10 seconds. `bunx tsc --noEmit` is clean under `strict` plus `noUncheckedIndexedAccess`. `bun run build.ts` produces a `dist/lgtm` binary that runs and answers `--version`. Run the suite yourself for the current numbers; they move every time a task lands.
+
+## Done
+
+- **M0, clean slate.** The Bun scaffold, `build.ts`'s `Bun.build()` compile step with the Tailwind plugin, and CI (`.github/workflows/ci.yml`: typecheck, test, build, then a `--version` smoke run of the compiled binary).
+- **M1, domain port.** `okf.ts`'s frontmatter round trip and its `structuredClone` guard, `pr-ref.ts`, the diff parser plus hunk slicing for finding cards, the new store layout (`meta.md`, per-round files, the `r<N>:<agent>:<id>` finding key), and `watch.md` / `config.md` read and write with their documented defaults.
+- **M2, forge and provider.** The GitHub `ForgeAdapter` with ETag support on the list and review-reconciliation calls, the draft-review module (no `event` key, throws unless the response is `PENDING`, refuses an empty comment list, and exposes no function that could publish), the GitHub token resolution chain, the Claude provider's spawn/timeout/salvage loop and prompt assembly, the login-shell PATH probe with its manual-pin override, and the fake `claude` shim at `test/fixtures/fake-claude.ts` (see [TESTING.md](../../TESTING.md)).
+- **M3, daemon, as modules.** The scheduler, poll cycle and classifier, review queue, quota gate, backfill, diff snapshotting, and notifier are each built and tested standalone. `createDaemon` (`src/daemon/boot.ts`) assembles all of them into one running daemon and has its own boot-sequence tests covering the lock, the binary probe order, and the rendezvous file. What stops this milestone from being reachable through the compiled binary is in [Not wired yet](#not-wired-yet).
+- **M4, API read path.** Every read route in design.md's HTTP API table (`health`, `status`, `events`, `prs`, `prs/.../findings`, `watchlist`, `config`) is defined and mounted in the live route table (`src/api/routes.ts`), with a test matrix that walks the table and asserts bearer, Host, and Origin checks on every entry. The two mutating routes this milestone also needs, `decision` and the findings `PATCH`, are mounted and tested too. `lgtm status`, `lgtm open`, and `lgtm watch add|rm|ls` are real implementations against that API, not stubs.
+- **M6, partially.** `lgtm install` and `lgtm uninstall` write and bootstrap a real launchd plist and have their own tests (`src/cli/install.ts`, `src/cli/install.test.ts`). The release workflow (`.github/workflows/release.yml`) builds the darwin-arm64 binary and a checksum on a version tag. The seven-item regression checklist from design.md's testing section is encoded as tests, one `describe` block per item, in `src/regression.test.ts` (see [TESTING.md](../../TESTING.md)).
+
+## Not wired yet
+
+Everything in this section exists as tested code. None of it is reachable by running the compiled binary today.
+
+- **`lgtm up` does not start the daemon.** `src/main.ts` still calls `notImplemented("up")` and exits. `createDaemon` does everything design.md's "Daemon lifecycle" describes, and its tests exercise the full boot sequence, but nothing in `main.ts` calls it. Until this lands, LGTM cannot watch a real repository, and `lgtm install`'s launchd plist has nothing running to keep alive.
+- **The web UI you'd reach is still the M0 placeholder.** `src/ui/App.tsx` renders a "Scaffold is up. Views land next." card. It imports nothing from `src/ui/views/`. The Inbox, PR detail, Repos, Settings, and BackfillPane components are real, built against real data types, and pass smoke-level render tests (`src/ui/ui.test.ts`, `src/ui/repos.test.ts`, using `renderToStaticMarkup` since the test runner has no DOM), but no route from the served SPA reaches any of them.
+- **The real API router never reaches the HTTP server `createDaemon` binds.** Its default `fetch` handler answers `/api/health` only, on purpose, so the port-scan handshake has a signature to probe against (`healthOnlyHandler` in `src/daemon/boot.ts`). The full router in `src/api/server.ts` / `src/api/routes.ts` is designed to be passed in through the `fetch` option; nothing does that yet.
+- **`POST .../validate` and `POST .../post` aren't mounted.** `src/api/post.ts` implements both, `runValidate`, `runPost`, their route handlers, and a `postRoutes()` helper meant to extend the table, all with their own tests. `src/api/routes.ts` marks the spot with a comment reading "M5 lands here", but `postRoutes()` is never merged into `apiRoutes()`, so design.md's two remaining HTTP API rows don't exist on the mounted server.
+- **The gate's pieces are further along than the app that would show them.** The inbox's skip, review, unskip, and review-anyway actions, and the finding card's discard and restore actions, are wired for real against live backend routes, each behind a hook that guards against double-clicks (`src/ui/views/Inbox.tsx`, `src/ui/components/FindingCard.tsx`). A post confirm pane exists as a real component with its own controller (`src/ui/views/PostPane.tsx`, `src/ui/actions.ts`). None of it is reachable by running the binary today, because `App.tsx` doesn't render any of these views regardless (above), and the post pane's own backend, `validate` and `post`, isn't mounted on the server either (above).
+- **Hand-edits to the store don't reach a running daemon.** `src/daemon/store-watch.ts` implements the debounced `fs.watch` to SSE bridge design.md promises, with its own tests, but its file comment says plainly that wiring it into `boot.ts` is someone else's job. Nothing has done that yet.
+
+## Known gaps, by design or by an open seam
+
+These are not bugs waiting for a fix. Each is a deliberate trade-off or a limit the code already works around; they're recorded here so nobody re-discovers them the hard way.
+
+- **No verification pass over posted findings.** Ruled out for v1 by requirements.md R3.6 and the non-goals list, not an oversight. A fresh round on new commits gets prior findings as "already raised, do not repeat" context, but nothing re-checks whether an old finding still holds once it's been posted.
+- **A mid-review head move loses that round's diff snapshot.** `ForgeAdapter.getDiff` only returns a PR's *current* head diff; there's no way to ask GitHub for the diff at an arbitrary earlier SHA. A review takes minutes (the M0 spike measured 5m44s for a two-file PR), so `src/daemon/snapshot.ts` checks the live head immediately before and immediately after fetching, and writes nothing if it moved either time. The finding card falls back to a GitHub link when that happens; it's a known, handled state, not a crash, but an active PR can lose its inline diff hunks on the card mid-review.
+- **`watch.md` takes two read-modify-write passes per repo per cycle.** `recordPoll` in `src/daemon/cycle.ts` calls `updateLastPolledAt`, then, only if the ETag changed, `updateETag`; each is its own full load and save of the file (`src/store/watch-list.ts`). Harmless at the size of a personal watch list, but it's two write windows instead of one, and a crash between them would leave a stale ETag next to a fresh poll timestamp.
+- **The close pass reads one file per known-closed PR, every cycle, forever.** `closeMissingPR` in `src/daemon/cycle.ts` calls `loadMeta` for every locally-known PR no longer in the repo's open list, checks `closedAt`, and returns once it finds the PR already marked closed. There's no memory of "already handled this one", so a repo's entire history of merged PRs gets re-read on every poll indefinitely. Fine at personal scale; a real cost if the store ever holds thousands of closed PRs for one repo.
+
+## Reading this alongside tasks.md
+
+tasks.md's checkboxes are all unchecked. That's the file falling behind the work, not a sign the work didn't happen; this document is the one to trust.

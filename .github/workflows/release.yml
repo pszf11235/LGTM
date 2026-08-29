@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Test
+        run: bun test
+
+      - name: Build
+        run: bun run build.ts
+
+      # dist/lgtm is renamed to its published filename *before* any of the
+      # steps below, so every check from here on runs against the exact
+      # bytes that get uploaded. A checksum (or smoke test) taken from
+      # dist/lgtm and then attached to a differently-named upload would
+      # verify the wrong file.
+      - name: Name the release artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          name="lgtm-darwin-arm64"
+          mv dist/lgtm "dist/${name}"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
+      # build.ts compiles for the runner's own OS/arch (see build.ts) rather
+      # than an explicit cross-compile target, so this only produces
+      # darwin-arm64 because macos-latest is an Apple Silicon runner. Fail
+      # loudly instead of silently shipping the wrong architecture if
+      # GitHub ever changes that default.
+      - name: Confirm the binary is darwin-arm64
+        working-directory: dist
+        run: file "${{ steps.artifact.outputs.name }}" | grep -q "arm64"
+
+      - name: Smoke test the exact artifact being published
+        working-directory: dist
+        run: "./${{ steps.artifact.outputs.name }} --version"
+
+      - name: Checksum the exact artifact being published
+        working-directory: dist
+        run: shasum -a 256 "${{ steps.artifact.outputs.name }}" > "${{ steps.artifact.outputs.name }}.sha256"
+
+      - name: Verify the checksum against the artifact
+        working-directory: dist
+        run: shasum -a 256 -c "${{ steps.artifact.outputs.name }}.sha256"
+
+      - name: Publish the GitHub Release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            "${{ steps.artifact.outputs.name }}" \
+            "${{ steps.artifact.outputs.name }}.sha256" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

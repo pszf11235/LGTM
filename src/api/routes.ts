@@ -30,6 +30,7 @@
  */
 
 import fs from "fs/promises";
+import { postRoutes } from "./post";
 
 import { formatFindingKey, parseFindingKey } from "@/core";
 import type { Finding, ForgeAdapter, PRMeta, PRRef, PRState, Severity } from "@/core";
@@ -1196,13 +1197,10 @@ export function apiRoutes(): RouteDef[] {
       handler: patchFinding,
     },
 
-    // ── M5 lands here ──────────────────────────────────────────────────────
-    // design.md's two remaining rows, `POST .../validate` (dry-run line
-    // validation) and `POST .../post` ({body?, recreate?, dryRun?}), are
-    // rows in this array like every other route: `bearer: true`,
-    // `mutating: true`, handlers taking the Forge from `ctx.deps.forge`.
-    // Adding them here is what puts them under the auth choke point and
-    // inside the matrix test. There is no other way in, on purpose.
+    // The two forge-writing rows live in src/api/post.ts and are spliced in
+    // here, which is what puts them under the auth choke point and inside the
+    // matrix test. There is no other way in, on purpose.
+    ...postRoutes(),
 
     {
       method: "GET",

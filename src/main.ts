@@ -5,11 +5,13 @@
  * `lgtm` is one compiled binary playing three roles (design.md,
  * "Architecture"): this file is the short-lived CLI half, which talks to the
  * long-lived daemon over its local HTTP API. `status`, `open`, and `watch`
- * delegate to src/cli's HTTP clients; `up`, `install`, and `uninstall` are
- * still stubs until the daemon lifecycle lands.
+ * delegate to src/cli's HTTP clients; `install` and `uninstall` manage the
+ * launchd LaunchAgent directly (design.md, "Daemon lifecycle"). `up` is
+ * still a stub until the daemon lifecycle lands.
  */
 import { Command } from "commander";
 import packageJson from "../package.json" with { type: "json" };
+import { runInstall, runUninstall } from "./cli/install";
 import { runOpen } from "./cli/open";
 import { runStatus } from "./cli/status";
 import { runWatchAdd, runWatchList, runWatchRemove } from "./cli/watch";
@@ -43,12 +45,16 @@ program
 program
   .command("install")
   .description("Install the launchd LaunchAgent so the daemon survives reboots and crashes")
-  .action(() => notImplemented("install"));
+  .action(async () => {
+    process.exit(await runInstall());
+  });
 
 program
   .command("uninstall")
   .description("Remove the launchd LaunchAgent")
-  .action(() => notImplemented("uninstall"));
+  .action(async () => {
+    process.exit(await runUninstall());
+  });
 
 program
   .command("status")

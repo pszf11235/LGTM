@@ -8,12 +8,21 @@
  * !== "closed"` alone would let that PR leak back into the skipped list
  * forever. `closedAt` is the one field every closed PR actually sets.
  *
- * Read-only for this task: skip / review / unskip render as disabled
- * buttons. Another task wires the mutation and removes `disabled`; nothing
- * here should need to move when it does.
+ * The decision buttons go through `@/ui/actions`. None of them updates a row
+ * by hand afterwards: the decision endpoint emits `pr-changed`, and the SSE
+ * subscription behind `usePRList` refetches, so the row moves between
+ * sections from the store's own answer rather than from an optimistic guess
+ * this file would have to keep in step. What a button does own is its
+ * in-flight state and its failure message, which is why one PR failing never
+ * blanks the list.
+ *
+ * The rows are exported for the same reason BackfillPane exports its mapping
+ * helpers: `renderToStaticMarkup` never runs effects, so a row rendered
+ * through `Inbox` is always the loading placeholder and its buttons can
+ * never be asserted on.
  */
 import { GitPullRequest } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Classification, PRRef } from "@/core";
 import {
   REAUTH_MESSAGE,
@@ -21,8 +30,10 @@ import {
   totalFindings,
   type CheckState,
   type FindingCounts,
+  type PRDecisionAction,
   type PRListItem,
 } from "@/ui/api";
+import { getDefaultGateActions, type GateActions } from "@/ui/actions";
 import { useConnectionStatus, useStatus, usePRList, type ConnectionStatus } from "@/ui/hooks";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +41,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export interface InboxProps {
   /** Jump to a PR's finding cards. Absent means the caller has not wired navigation yet. */
   onOpenPR?: (ref: PRRef) => void;
+  /** Injected by tests. The views share one instance otherwise. */
+  actions?: GateActions;
 }
 
 function prRefOf(item: PRListItem): PRRef {
@@ -110,26 +123,102 @@ function PRMetaLine({ pr }: { pr: PRListItem }) {
   );
 }
 
-function TriageRow({ pr }: { pr: PRListItem }) {
+interface DecisionHandle {
+  /** The action currently in flight, if any. */
+  pending: PRDecisionAction | null;
+  error: string | null;
+  run: (ref: PRRef, action: PRDecisionAction) => void;
+}
+
+/**
+ * One row's decision state. The `pending` guard, plus the disabled buttons
+ * it drives, is what stops a second click sending a second decision while
+ * the first is still open.
+ */
+function useDecision(actions?: GateActions): DecisionHandle {
+  const [pending, setPending] = useState<PRDecisionAction | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  return {
+    pending,
+    error,
+    run(ref, action) {
+      if (pending !== null) return;
+      setPending(action);
+      setError(null);
+
+      void (actions ?? getDefaultGateActions()).decide(ref, action).then(
+        (result) => {
+          setPending(null);
+          setError(result.status === "error" ? result.error.message : null);
+        },
+        (err: unknown) => {
+          // `decide` reports failure in its result and does not reject, so
+          // this is a bug one layer down. Showing it beats a click that
+          // silently does nothing.
+          setPending(null);
+          setError(err instanceof Error ? err.message : String(err));
+        },
+      );
+    },
+  };
+}
+
+export function TriageRow({ pr, actions }: { pr: PRListItem; actions?: GateActions }) {
+  const decision = useDecision(actions);
+  const ref = prRefOf(pr);
+  const busy = decision.pending !== null;
+
   return (
-    <div className="flex items-center justify-between gap-4 border-b py-3 last:border-b-0">
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex items-center gap-2">
-          <a href={pr.url} target="_blank" rel="noreferrer" className="truncate text-sm font-medium hover:underline">
-            {pr.title}
-          </a>
-          <ClassificationTag classification={pr.classification} />
+    <div className="border-b py-3 last:border-b-0" data-testid="triage-row">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-center gap-2">
+            <a href={pr.url} target="_blank" rel="noreferrer" className="truncate text-sm font-medium hover:underline">
+              {pr.title}
+            </a>
+            <ClassificationTag classification={pr.classification} />
+          </div>
+          <PRMetaLine pr={pr} />
         </div>
-        <PRMetaLine pr={pr} />
+        <div className="flex shrink-0 gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="skip-pr"
+            disabled={busy}
+            onClick={() => decision.run(ref, "skip")}
+          >
+            {decision.pending === "skip" ? "Skipping…" : "Skip"}
+          </Button>
+          {/* Both buttons exist only on a draft, where they differ: `review`
+              records the approval and lets the PR queue itself when it
+              leaves draft state, `review-anyway` is R2.3's override and
+              queues it now. On a ready PR the two are the same call. */}
+          <Button
+            size="sm"
+            data-testid="review-pr"
+            disabled={busy}
+            title={pr.draft ? "Queue it as soon as it leaves draft" : undefined}
+            onClick={() => decision.run(ref, "review")}
+          >
+            {decision.pending === "review" ? "Queueing…" : "Review"}
+          </Button>
+          {pr.draft && (
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="review-anyway-pr"
+              disabled={busy}
+              title="Queue this draft now"
+              onClick={() => decision.run(ref, "review-anyway")}
+            >
+              {decision.pending === "review-anyway" ? "Queueing…" : "Review anyway"}
+            </Button>
+          )}
+        </div>
       </div>
-      <div className="flex shrink-0 gap-2">
-        <Button variant="outline" size="sm" disabled title="Coming soon">
-          Skip
-        </Button>
-        <Button size="sm" disabled title="Coming soon">
-          Review
-        </Button>
-      </div>
+      {decision.error && <p className="mt-1 text-xs text-destructive">{decision.error}</p>}
     </div>
   );
 }
@@ -154,20 +243,35 @@ function FindingsRow({ pr, onOpenPR }: { pr: PRListItem; onOpenPR?: (ref: PRRef)
   );
 }
 
-function SkippedRow({ pr }: { pr: PRListItem }) {
+export function SkippedRow({ pr, actions }: { pr: PRListItem; actions?: GateActions }) {
+  const decision = useDecision(actions);
+  const ref = prRefOf(pr);
+
+  // Unskip returns the PR to triage, not to the queue: it says "let me look
+  // at this again", and the decision that follows is its own deliberate act.
   return (
-    <div className="flex items-center justify-between gap-4 border-b py-2 last:border-b-0">
-      <a
-        href={pr.url}
-        target="_blank"
-        rel="noreferrer"
-        className="min-w-0 flex-1 truncate text-sm text-muted-foreground hover:underline"
-      >
-        {pr.title}
-      </a>
-      <Button variant="outline" size="sm" disabled title="Coming soon" className="shrink-0">
-        Unskip
-      </Button>
+    <div className="border-b py-2 last:border-b-0" data-testid="skipped-row">
+      <div className="flex items-center justify-between gap-4">
+        <a
+          href={pr.url}
+          target="_blank"
+          rel="noreferrer"
+          className="min-w-0 flex-1 truncate text-sm text-muted-foreground hover:underline"
+        >
+          {pr.title}
+        </a>
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="unskip-pr"
+          className="shrink-0"
+          disabled={decision.pending !== null}
+          onClick={() => decision.run(ref, "unskip")}
+        >
+          {decision.pending === "unskip" ? "Unskipping…" : "Unskip"}
+        </Button>
+      </div>
+      {decision.error && <p className="mt-1 text-xs text-destructive">{decision.error}</p>}
     </div>
   );
 }
@@ -188,7 +292,7 @@ function Section({ title, count, children }: { title: string; count: number; chi
   );
 }
 
-function SkippedSection({ prs }: { prs: PRListItem[] }) {
+export function SkippedSection({ prs, actions }: { prs: PRListItem[]; actions?: GateActions }) {
   if (prs.length === 0) return null;
 
   // A native <details> disclosure needs no extra state and stays collapsed
@@ -201,7 +305,7 @@ function SkippedSection({ prs }: { prs: PRListItem[] }) {
       </summary>
       <div className="px-6 pb-4">
         {prs.map((pr) => (
-          <SkippedRow key={`${pr.owner}/${pr.repo}#${pr.number}`} pr={pr} />
+          <SkippedRow key={`${pr.owner}/${pr.repo}#${pr.number}`} pr={pr} actions={actions} />
         ))}
       </div>
     </details>
@@ -253,7 +357,7 @@ function EmptyHealthPanel({ connection }: { connection: ConnectionStatus }) {
 
 // ─── Inbox ──────────────────────────────────────────────────────────────────
 
-export function Inbox({ onOpenPR }: InboxProps) {
+export function Inbox({ onOpenPR, actions }: InboxProps) {
   const prList = usePRList();
   const connection = useConnectionStatus();
 
@@ -301,7 +405,7 @@ export function Inbox({ onOpenPR }: InboxProps) {
           {triage.length > 0 && (
             <Section title="Triage" count={triage.length}>
               {triage.map((pr) => (
-                <TriageRow key={`${pr.owner}/${pr.repo}#${pr.number}`} pr={pr} />
+                <TriageRow key={`${pr.owner}/${pr.repo}#${pr.number}`} pr={pr} actions={actions} />
               ))}
             </Section>
           )}
@@ -316,7 +420,7 @@ export function Inbox({ onOpenPR }: InboxProps) {
         </>
       )}
 
-      <SkippedSection prs={skipped} />
+      <SkippedSection prs={skipped} actions={actions} />
     </div>
   );
 }

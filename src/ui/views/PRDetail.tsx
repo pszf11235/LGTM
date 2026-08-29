@@ -7,6 +7,7 @@ import type { Classification, PRRef } from "@/core";
 import { REAUTH_MESSAGE, type FindingWithContext } from "@/ui/api";
 import { usePRDetail } from "@/ui/hooks";
 import { FindingCard } from "@/ui/components/FindingCard";
+import { PostPane } from "@/ui/views/PostPane";
 
 export interface PRDetailProps {
   prRef: PRRef;
@@ -110,12 +111,24 @@ export function PRDetail({ prRef, onBack }: PRDetailProps) {
               <h2 className="mb-3 font-mono text-sm font-medium text-foreground">{file}</h2>
               <div className="space-y-3">
                 {fileFindings.map((finding) => (
-                  <FindingCard key={finding.key} owner={meta.owner} repo={meta.repo} finding={finding} />
+                  <FindingCard
+                    key={finding.key}
+                    owner={meta.owner}
+                    repo={meta.repo}
+                    number={meta.number}
+                    finding={finding}
+                  />
                 ))}
               </div>
             </section>
           ))}
         </div>
+      )}
+
+      {findings.length > 0 && (
+        <footer className="border-t pt-6">
+          <PostPane prRef={{ owner: meta.owner, repo: meta.repo, number: meta.number }} />
+        </footer>
       )}
     </div>
   );
