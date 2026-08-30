@@ -75,6 +75,7 @@ This is a ground-up rebuild on the `v2` branch. The typecheck is clean, the test
 - [docs/spec/design.md](docs/spec/design.md), how it's built
 - [docs/spec/tasks.md](docs/spec/tasks.md), the milestone plan (its checkboxes lag reality; [status.md](docs/spec/status.md) is the current record)
 - [docs/spec/decisions.md](docs/spec/decisions.md), why, in the words of the session that decided it
+- [docs/spec/models.md](docs/spec/models.md), which model tier each kind of task needs, and what the build showed about that
 - [docs/adr/](docs/adr/), the five decisions that were hard to reverse
 - [CONTEXT.md](CONTEXT.md), the project glossary
 - [TESTING.md](TESTING.md), running the suite and driving the review loop offline
