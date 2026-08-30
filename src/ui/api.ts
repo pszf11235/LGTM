@@ -480,10 +480,31 @@ function toPRDetailMeta(raw: unknown): PRDetailMeta {
   };
 }
 
+/**
+ * Flatten the findings route's answer.
+ *
+ * The daemon groups findings under `rounds`, carries the PR's own fields in
+ * `pr` and its reference in `ref`. Reading a flat `findings` array and a
+ * `meta` object found neither, so the detail view showed "no findings on this
+ * PR yet" while the list beside it showed the severity counts for the same PR,
+ * read from a different route that happened to parse.
+ *
+ * Rounds arrive oldest first and every finding already carries its own round,
+ * so flattening preserves the order the view groups by file.
+ */
 function toPRFindingsResponse(raw: unknown): PRFindingsResponse {
   const rec = asRecord(raw);
-  const findings = Array.isArray(rec.findings) ? rec.findings.map(toFinding) : [];
-  return { meta: toPRDetailMeta(rec.meta), findings };
+  const rounds = Array.isArray(rec.rounds) ? rec.rounds : [];
+  const nested = rounds.flatMap((round) => {
+    const list = asRecord(round).findings;
+    return Array.isArray(list) ? list : [];
+  });
+  const flat = Array.isArray(rec.findings) ? rec.findings : [];
+  const findings = (nested.length > 0 ? nested : flat).map(toFinding);
+
+  // `ref` holds owner/repo/number; `pr` holds everything else about it.
+  const meta = { ...asRecord(rec.ref), ...asRecord(rec.pr ?? rec.meta) };
+  return { meta: toPRDetailMeta(meta), findings };
 }
 
 function toStatusResponse(raw: unknown): StatusResponse {

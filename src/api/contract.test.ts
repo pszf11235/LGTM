@@ -283,3 +283,64 @@ describe("the rest of the client surface", () => {
     expect(result.entries).toHaveLength(1);
   });
 });
+
+describe("GET .../findings, daemon to browser", () => {
+  test("findings grouped under rounds reach the detail view", async () => {
+    const ref = { owner: "acme", repo: "api", number: 99 };
+    await saveMeta(lgtmDir, ref, {
+      state: "reviewed",
+      headSha: "sha1",
+      author: "ada",
+      title: "Add a rate limiter",
+      url: "https://github.com/acme/api/pull/99",
+    });
+    await saveRound(lgtmDir, {
+      ref,
+      round: 1,
+      agent: "reviewer",
+      provider: "claude-cli",
+      status: "ok",
+      headSha: "sha1",
+      startedAt: "2026-08-30T00:00:00.000Z",
+      durationMs: 1000,
+      findings: [
+        { severity: "critical", file: "a.ts", line: 3, comment: "one" },
+        { severity: "high", file: "b.ts", line: 9, comment: "two" },
+      ],
+    });
+
+    const res = await clientOverHandler().getFindings(ref);
+
+    // The detail view read a flat `findings` key and a `meta` object; the
+    // daemon sends neither, so this was always empty while the list beside it
+    // showed two findings for the same PR.
+    expect(res.findings).toHaveLength(2);
+    expect(res.findings.map((f) => f.severity)).toEqual(["critical", "high"]);
+    expect(res.meta.owner).toBe("acme");
+    expect(res.meta.number).toBe(99);
+    expect(res.meta.title).toBe("Add a rate limiter");
+  });
+
+  test("findings from several rounds all arrive", async () => {
+    const ref = { owner: "acme", repo: "api", number: 100 };
+    await saveMeta(lgtmDir, ref, { state: "reviewed", headSha: "s2", author: "ada" });
+    for (const round of [1, 2]) {
+      await saveRound(lgtmDir, {
+        ref,
+        round,
+        agent: "reviewer",
+        provider: "claude-cli",
+        status: "ok",
+        headSha: "s2",
+        startedAt: "2026-08-30T00:00:00.000Z",
+        durationMs: 1,
+        findings: [{ severity: "high", file: `r${round}.ts`, line: 1, comment: `round ${round}` }],
+      });
+    }
+
+    const res = await clientOverHandler().getFindings(ref);
+
+    expect(res.findings).toHaveLength(2);
+    expect(res.findings.map((f) => f.key)).toEqual(["r1:reviewer:f1", "r2:reviewer:f1"]);
+  });
+});
