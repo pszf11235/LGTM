@@ -37,6 +37,7 @@ import {
 } from "./api";
 import {
   createEventStream,
+  createTicker,
   type ConnectionStatus,
   type EventSourceLike,
   type InvalidationHint,
@@ -44,12 +45,20 @@ import {
 import { FindingCard, type FindingCardProps } from "./components/FindingCard";
 import {
   CLOSED_FILTERS,
+  DEFAULT_ROUND_TIMEOUT_MS,
+  elapsedMs,
   filterToQuery,
+  formatDuration,
+  quotaReason,
+  reviewProgressFor,
   Reviews,
+  shortSha,
   STATUS_FILTERS,
+  timeoutUrgency,
   type ClosedFilter,
   type StatusFilter,
 } from "./views/Reviews";
+import type { PRListItem, StatusResponse } from "./api";
 import { PRDetail, RoundSession, type RoundSessionProps } from "./views/PRDetail";
 
 // ─── Stubs ──────────────────────────────────────────────────────────────────
@@ -350,6 +359,107 @@ describe("createApiClient", () => {
   });
 });
 
+// ─── api.ts: status(), the queue detail ─────────────────────────────────────
+//
+// This is the parser this task was asked to fix. It used to reduce the whole
+// `queue` object to a single `queueLength` number and drop everything else,
+// which is exactly what made a running review indistinguishable from a
+// queued one.
+// These pin the full shape down against a hand-built payload; the same shape
+// coming out of the real route handler is covered in contract.test.ts.
+
+function statusPayload(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    uptimeMs: 1000,
+    startedAt: "2026-08-30T00:00:00.000Z",
+    scheduler: { intervalMinutes: 15 },
+    queue: {
+      queued: 1,
+      inFlight: 2,
+      pausedByGate: false,
+      queuedEntries: [{ key: "acme/api#9", headSha: "sha-queued", queuedAt: "2026-08-30T00:01:00.000Z" }],
+      inFlightRounds: [{ key: "acme/api#7", headSha: "sha-flight", startedAt: "2026-08-30T00:00:30.000Z" }],
+    },
+    quota: { mode: "throttled", maxPercent: 82 },
+    counts: {},
+    ...overrides,
+  };
+}
+
+async function statusOf(payload: unknown) {
+  const client = createApiClient({
+    fetchImpl: async () => json(payload),
+    storage: memoryStorage(),
+    location: stubLocation("#t=tok"),
+    history: stubHistory(),
+  });
+  return client.status();
+}
+
+describe("createApiClient: status(), the queue detail", () => {
+  test("carries the in-flight rounds through, keyed and timed", async () => {
+    const status = await statusOf(statusPayload());
+
+    expect(status.queue.inFlightRounds).toEqual([
+      { key: "acme/api#7", headSha: "sha-flight", startedAt: "2026-08-30T00:00:30.000Z" },
+    ]);
+  });
+
+  test("carries the queued entries through, in the daemon's own FIFO order", async () => {
+    const status = await statusOf(statusPayload());
+
+    expect(status.queue.queuedEntries).toEqual([
+      { key: "acme/api#9", headSha: "sha-queued", queuedAt: "2026-08-30T00:01:00.000Z" },
+    ]);
+  });
+
+  test("pausedByGate arrives as an explicit boolean, not inferred from an empty queue", async () => {
+    const status = await statusOf(
+      statusPayload({
+        queue: { queued: 1, inFlight: 0, pausedByGate: true, queuedEntries: [], inFlightRounds: [] },
+      }),
+    );
+    expect(status.queue.pausedByGate).toBe(true);
+  });
+
+  test("the quota mode and percentage both survive, to explain a paused queue", async () => {
+    const status = await statusOf(statusPayload());
+    expect(status.quotaMode).toBe("throttled");
+    expect(status.quotaPercent).toBe(82);
+  });
+
+  test("quotaPercent is null before any usage reading exists, not coerced to zero", async () => {
+    const status = await statusOf(statusPayload({ quota: { mode: "ok", maxPercent: null } }));
+    expect(status.quotaPercent).toBeNull();
+  });
+
+  test("the flat queueLength convenience field still works, for views that only read that", async () => {
+    const status = await statusOf(statusPayload());
+    expect(status.queueLength).toBe(3); // 1 queued + 2 in flight
+  });
+
+  test("a status with no queue at all degrades to an empty, fully-shaped queue rather than throwing", async () => {
+    const status = await statusOf(statusPayload({ queue: null }));
+    expect(status.queue).toEqual({ queued: 0, inFlight: 0, pausedByGate: false, queuedEntries: [], inFlightRounds: [] });
+    expect(status.queueLength).toBe(0);
+  });
+
+  test("a queue entry missing a field degrades that field, not the whole row", async () => {
+    const status = await statusOf(
+      statusPayload({
+        queue: {
+          queued: 0,
+          inFlight: 1,
+          pausedByGate: false,
+          queuedEntries: [],
+          inFlightRounds: [{ key: "acme/api#7" /* headSha, startedAt absent */ }],
+        },
+      }),
+    );
+    expect(status.queue.inFlightRounds).toEqual([{ key: "acme/api#7", headSha: "", startedAt: "" }]);
+  });
+});
+
 // ─── api.ts: getFindings' round parser ──────────────────────────────────────
 //
 // The daemon nests findings under `rounds[].findings[]`, not under a flat
@@ -577,6 +687,241 @@ describe("Reviews.filterToQuery", () => {
   test("in-review means queued or reviewing, not failed — failed is its own filter", () => {
     const filter = filterToQuery("in-review", "exclude");
     expect(filter.state).toEqual(["queued", "reviewing"]);
+  });
+});
+
+// ─── Reviews: live review progress ──────────────────────────────────────────
+//
+// `reviewProgressFor` is the one place a PR row is matched to the status
+// payload's queue detail. That is the whole point of this task, and the one
+// most likely to silently show the wrong PR's progress on the wrong row if
+// the matching key is ever built two different ways. Every test below
+// matches by `key`, never by array position or headSha, on purpose.
+
+function basePR(overrides: Partial<PRListItem> = {}): PRListItem {
+  return {
+    key: "acme/api#7",
+    owner: "acme",
+    repo: "api",
+    number: 7,
+    url: "https://github.com/acme/api/pull/7",
+    title: "Add a rate limiter",
+    author: "ada",
+    state: "reviewing",
+    classification: "own",
+    draft: false,
+    headSha: "deadbeef",
+    createdAt: null,
+    closedAt: null,
+    pendingReviewId: null,
+    failedAttempts: 0,
+    additions: null,
+    deletions: null,
+    changedFiles: null,
+    mergeable: null,
+    checkStatus: null,
+    findingCounts: emptyFindingCounts(),
+    ...overrides,
+  };
+}
+
+function baseStatus(overrides: Partial<StatusResponse> = {}): StatusResponse {
+  return {
+    uptimeMs: 0,
+    startedAt: null,
+    intervalMinutes: 15,
+    lastCycle: null,
+    nextPollAt: null,
+    queueLength: 0,
+    queue: { queued: 0, inFlight: 0, pausedByGate: false, queuedEntries: [], inFlightRounds: [] },
+    triageCount: 0,
+    awaitingGate: 0,
+    quotaMode: "ok",
+    quotaPercent: null,
+    claudePath: null,
+    ghPath: null,
+    ...overrides,
+  };
+}
+
+describe("shortSha", () => {
+  test("takes the first 7 characters, GitHub's own short-ref length", () => {
+    expect(shortSha("deadbeef1234567")).toBe("deadbee");
+  });
+
+  test("an empty SHA renders as a dash, not as an empty string", () => {
+    expect(shortSha("")).toBe("—");
+  });
+});
+
+describe("elapsedMs", () => {
+  test("the difference between now and startedAt", () => {
+    expect(elapsedMs("2026-08-30T00:00:00.000Z", new Date("2026-08-30T00:02:00.000Z").getTime())).toBe(120_000);
+  });
+
+  test("a malformed timestamp reads as zero elapsed, not NaN or a thrown error", () => {
+    expect(elapsedMs("not a date", 1_000_000)).toBe(0);
+  });
+
+  test("clock skew that puts startedAt after now clamps to zero, never negative", () => {
+    expect(elapsedMs("2026-08-30T00:05:00.000Z", new Date("2026-08-30T00:00:00.000Z").getTime())).toBe(0);
+  });
+});
+
+describe("formatDuration", () => {
+  test("under a minute prints seconds only", () => {
+    expect(formatDuration(45_000)).toBe("45s");
+  });
+
+  test("a minute or more prints minutes and seconds", () => {
+    expect(formatDuration(134_000)).toBe("2m 14s");
+  });
+
+  test("exactly the default timeout", () => {
+    expect(formatDuration(DEFAULT_ROUND_TIMEOUT_MS)).toBe("10m 0s");
+  });
+});
+
+describe("timeoutUrgency", () => {
+  test("well under the timeout is normal", () => {
+    expect(timeoutUrgency(60_000, 600_000)).toBe("normal");
+  });
+
+  test("80% of the timeout is where near starts", () => {
+    expect(timeoutUrgency(480_000, 600_000)).toBe("near");
+    expect(timeoutUrgency(479_000, 600_000)).toBe("normal");
+  });
+
+  test("at or past the timeout is over", () => {
+    expect(timeoutUrgency(600_000, 600_000)).toBe("over");
+    expect(timeoutUrgency(700_000, 600_000)).toBe("over");
+  });
+});
+
+describe("quotaReason", () => {
+  test("throttled with a reading names the percentage", () => {
+    expect(quotaReason("throttled", 82)).toBe("throttled at 82%");
+  });
+
+  test("throttled with no reading yet still says so, without inventing a number", () => {
+    expect(quotaReason("throttled", null)).toBe("throttled");
+  });
+
+  test("fallback explains itself as the daily-cap gate, not as a generic pause", () => {
+    expect(quotaReason("fallback", null)).toBe("usage unreadable, gating on the daily cap");
+  });
+});
+
+describe("reviewProgressFor", () => {
+  const now = new Date("2026-08-30T00:10:00.000Z").getTime();
+
+  test("a reviewing PR matched by key reports elapsed time against the timeout", () => {
+    const status = baseStatus({
+      queue: {
+        queued: 0,
+        inFlight: 1,
+        pausedByGate: false,
+        queuedEntries: [],
+        inFlightRounds: [{ key: "acme/api#7", headSha: "sha-current", startedAt: "2026-08-30T00:08:00.000Z" }],
+      },
+    });
+
+    const progress = reviewProgressFor(basePR({ state: "reviewing" }), status, now);
+
+    expect(progress).toEqual({
+      kind: "reviewing",
+      headSha: "sha-current",
+      elapsedMs: 120_000,
+      timeoutMs: DEFAULT_ROUND_TIMEOUT_MS,
+      urgency: "normal",
+    });
+  });
+
+  test("matches by key, not by array position or by headSha, since either would show the wrong PR's progress", () => {
+    const status = baseStatus({
+      queue: {
+        queued: 0,
+        inFlight: 2,
+        pausedByGate: false,
+        queuedEntries: [],
+        inFlightRounds: [
+          { key: "acme/other#1", headSha: "deadbeef", startedAt: "2026-08-30T00:09:59.000Z" }, // same headSha as the PR below, wrong PR
+          { key: "acme/api#7", headSha: "sha-mine", startedAt: "2026-08-30T00:07:00.000Z" },
+        ],
+      },
+    });
+
+    const progress = reviewProgressFor(basePR({ state: "reviewing", headSha: "deadbeef" }), status, now);
+
+    expect(progress).toMatchObject({ kind: "reviewing", headSha: "sha-mine", elapsedMs: 180_000 });
+  });
+
+  test("a reviewing PR with no matching in-flight round is unmatched, not a guess", () => {
+    const status = baseStatus();
+    expect(reviewProgressFor(basePR({ state: "reviewing" }), status, now)).toEqual({ kind: "unmatched" });
+  });
+
+  test("a queued PR reports its 1-based position and the queue's total", () => {
+    const status = baseStatus({
+      queue: {
+        queued: 3,
+        inFlight: 0,
+        pausedByGate: false,
+        queuedEntries: [
+          { key: "acme/api#1", headSha: "s1", queuedAt: "2026-08-30T00:00:00.000Z" },
+          { key: "acme/api#7", headSha: "s7", queuedAt: "2026-08-30T00:01:00.000Z" },
+          { key: "acme/api#9", headSha: "s9", queuedAt: "2026-08-30T00:02:00.000Z" },
+        ],
+        inFlightRounds: [],
+      },
+    });
+
+    const progress = reviewProgressFor(basePR({ state: "queued" }), status, now);
+
+    expect(progress).toEqual({ kind: "queued", headSha: "s7", position: 2, total: 3 });
+  });
+
+  test("pausedByGate turns every queued row into a gate explanation, with the quota mode and percent carried along", () => {
+    const status = baseStatus({
+      quotaMode: "throttled",
+      quotaPercent: 91,
+      queue: {
+        queued: 1,
+        inFlight: 0,
+        pausedByGate: true,
+        queuedEntries: [{ key: "acme/api#7", headSha: "s7", queuedAt: "2026-08-30T00:01:00.000Z" }],
+        inFlightRounds: [],
+      },
+    });
+
+    const progress = reviewProgressFor(basePR({ state: "queued" }), status, now);
+
+    expect(progress).toEqual({
+      kind: "paused",
+      headSha: "s7",
+      position: 1,
+      total: 1,
+      quotaMode: "throttled",
+      quotaPercent: 91,
+    });
+  });
+
+  test("a queued PR with no matching entry is unmatched", () => {
+    expect(reviewProgressFor(basePR({ state: "queued" }), baseStatus(), now)).toEqual({ kind: "unmatched" });
+  });
+
+  test("a PR that is neither queued nor reviewing is always unmatched, whatever the queue holds", () => {
+    const status = baseStatus({
+      queue: {
+        queued: 0,
+        inFlight: 1,
+        pausedByGate: false,
+        queuedEntries: [],
+        inFlightRounds: [{ key: "acme/api#7", headSha: "s7", startedAt: "2026-08-30T00:00:00.000Z" }],
+      },
+    });
+
+    expect(reviewProgressFor(basePR({ state: "failed" }), status, now)).toEqual({ kind: "unmatched" });
   });
 });
 
@@ -812,6 +1157,57 @@ describe("createEventStream", () => {
       }),
     ).not.toThrow();
     expect(statuses).toEqual(["closed"]);
+  });
+});
+
+// ─── hooks.ts: createTicker ─────────────────────────────────────────────────
+
+describe("createTicker", () => {
+  test("schedules onTick with the given interval, through the injected timer", () => {
+    const scheduled: Array<{ fn: () => void; ms: number }> = [];
+    createTicker(
+      () => {},
+      1000,
+      (fn, ms) => {
+        scheduled.push({ fn, ms });
+        return () => {};
+      },
+    );
+
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0]?.ms).toBe(1000);
+  });
+
+  test("firing the injected timer calls onTick, as many times as it fires", () => {
+    let fire: (() => void) | null = null;
+    let ticks = 0;
+    createTicker(
+      () => {
+        ticks += 1;
+      },
+      1000,
+      (fn) => {
+        fire = fn;
+        return () => {};
+      },
+    );
+
+    fire!();
+    fire!();
+    fire!();
+
+    expect(ticks).toBe(3);
+  });
+
+  test("stop() calls the timer's own canceller, exactly once", () => {
+    let cancelled = 0;
+    const ticker = createTicker(() => {}, 500, () => () => {
+      cancelled += 1;
+    });
+
+    ticker.stop();
+
+    expect(cancelled).toBe(1);
   });
 });
 
