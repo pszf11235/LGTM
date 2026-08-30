@@ -44,7 +44,7 @@ Single-writer rule: only the daemon writes the store. The SPA and the CLI mutate
                                   #   binary pins (claude_path, gh_path); a pin skips the probe
   watch.md                        # frontmatter list: {owner, repo, addedAt, lastPolledAt, etag}
   agents/
-    reviewer.md                   # frontmatter: provider, timeout_minutes, severity_floor, enabled
+    reviewer.md                   # frontmatter: provider, model, timeout_minutes, severity_floor, enabled
                                   # body: the review prompt, appended to the CLI's built-in /review
   templates/
     review-body.md                # post body template with placeholders
@@ -56,7 +56,9 @@ Single-writer rule: only the daemon writes the store. The SPA and the CLI mutate
     r<N>-<agent>.md               # one file per round per agent, frontmatter below
     r<N>-<agent>.raw.txt          # only when parsing failed
   logs/
-    daemon.log                    # rotating, plain text
+    daemon.log                    # plain text; only exists if `lgtm install` created it,
+                                  #   as launchd's stdout/stderr redirect. `lgtm up` in
+                                  #   the foreground doesn't write it
 ```
 
 `meta.md` frontmatter:
@@ -79,6 +81,12 @@ pendingReviewId: 987654  # set while a draft exists on GitHub; cleared when getR
                          #   reports it is no longer pending
 closedAt: null
 updatedAt: 2026-08-29T10:00:00Z
+createdAt: 2026-08-20T09:00:00Z   # triage metadata (R2.5), all six nullable: fetched only
+additions: 214                    #   for PRs entering triage or backfill, and GitHub
+deletions: 38                     #   computes mergeable asynchronously, so a null here
+changedFiles: 6                   #   renders as "computing" or a dash, never as zero
+mergeable: true
+checkStatus: success               # success | failure | pending | none, from the Checks API
 ```
 
 `r<N>-<agent>.md` frontmatter holds the canonical findings array; the markdown body is a generated human-readable rendering of the same data:
@@ -126,7 +134,7 @@ At boot, and whenever `daemon.json` names a dead pid, the daemon rewrites `daemo
 
 Classification reads the PR list item: `user.login` (own), `requested_reviewers` (requested), `assignees` (assigned), `@login` in title or body (mentioned). The authenticated login comes from `GET /user`, fetched once and cached.
 
-Triage metadata (additions, deletions, changed files, mergeable state) needs the per-PR detail endpoint, so the daemon fetches it only for PRs entering triage or the backfill list, not on every cycle. CI status is one `GET /commits/{sha}/check-runs` per triage PR; this reads the Checks API only, so CI reporting through the legacy commit Status API renders as "no checks" in v1. GitHub computes `mergeable` asynchronously; a null value renders as "computing", not as a failure.
+Triage metadata (additions, deletions, changed files, mergeable state) needs the per-PR detail endpoint. `refreshTriageMetadata` fetches it for PRs entering triage or the backfill list, and also refreshes it whenever a known PR's head SHA changes, or when the stored check status is still `pending`, so a PR sitting in triage doesn't keep showing a stale size or a check run that has since resolved. CI status is one `GET /commits/{sha}/check-runs` per refresh; this reads the Checks API only, so CI reporting through the legacy commit Status API renders as "no checks" in v1. GitHub computes `mergeable` asynchronously; a null value renders as "computing", not as a failure.
 
 Scheduler: one cycle at daemon start, then a 15-minute timer with small jitter. Timers do not fire during sleep, so the daemon subscribes to wake notifications and runs a catch-up cycle on wake. An in-flight guard prevents overlapping cycles (a real bug in the old watcher).
 
@@ -219,7 +227,7 @@ Bun.serve, bound explicitly to 127.0.0.1, default port 4747, scan to 4757 on con
 | `/api/health` | GET | `{app:"lgtm", version, pid}`, unauthenticated |
 | `/api/status` | GET | The tray contract: daemon uptime, last cycle time and outcome per repo, queue length, quota state and mode, provider and token detection, counts awaiting gate and triage |
 | `/api/events` | GET | SSE stream; accepts `?token=` since EventSource cannot set headers |
-| `/api/prs` | GET | PR list with state, classification, triage metadata; filters by state |
+| `/api/prs` | GET | PR list with state, classification, triage metadata; filters by `state` (one or more), `closed` (`exclude`\|`include`\|`only`), `watched` (`only`\|`all`), and `withFindings` |
 | `/api/prs/:owner/:repo/:number/decision` | POST | `{action: "review" \| "skip" \| "unskip" \| "review-anyway"}` |
 | `/api/prs/:owner/:repo/:number/findings` | GET | Rounds and findings, hunks sliced from the stored `diff-<sha>.patch` of each finding's round, GitHub link as fallback when the snapshot is missing |
 | `/api/prs/:owner/:repo/:number/findings/:key` | PATCH | `{state: "discarded" \| "open"}`, key in the canonical `r2:reviewer:f1` form |
@@ -238,12 +246,12 @@ Stack: React 19, shadcn/ui (new-york), Tailwind v4. Scaffolded from `bun init --
 
 Views:
 
-- **Inbox**: triage PRs (skip / review buttons, metadata line), PRs with ungated findings (finding count by severity, jump to detail), and a collapsed skipped section with unskip buttons. The empty state doubles as a health check showing watcher liveness and next poll time.
+- **Reviews**: every PR the store knows about, filtered by two independent controls rather than the single Inbox this section used to describe. A status filter bar maps onto the daemon's `state` query param, except for "ready to gate", which asks for `withFindings` instead, since a PR can carry ungated findings from an earlier round while a fresh round is in flight. A separate completed toggle filters on `closedAt`, not on `state`, because a PR that closes while skipped keeps `state: "skipped"`. The reason for splitting Inbox into Reviews: the old Inbox dropped a PR the moment it had nothing left to gate, so a reviewed PR with zero findings and a PR that was never reviewed both rendered as nothing (`src/ui/views/Reviews.tsx`'s docstring has the full account).
 - **PR detail**: header (title, author, classification badge, head SHA, GitHub link), finding cards grouped by file. Card: severity chip, `file:line`, comment, suggestion block, sliced diff hunk (about 10 lines, server-rendered from the ported diff parser), discard button, GitHub deep link. Footer: "Post draft (n findings)" opening the confirm pane (editable body, held-back list), then per-finding results and "Open pending review on GitHub".
 - **Repos**: watch list with last-poll time, add field (`owner/repo`), remove. Adding opens the backfill pane: open PRs with metadata, auto-class rows pre-checked, one confirm.
 - **Settings**: provider and gh detection with resolved paths and manual pins, token status, quota thresholds, interval, daemon info.
 
-Keyboard: `j`/`k` between cards, `d` discard, `enter` confirm. Nothing else in v1.
+Keyboard: `j`/`k` between cards, `d` discard, `enter` confirm, as designed. Not yet built: no view binds a keydown listener, so none of these fire today.
 
 ## Notifications
 
@@ -261,7 +269,7 @@ Transport probe order: `terminal-notifier` (resolved like other binaries; suppor
 
 ## Build and distribution
 
-- Bun >= 1.3.13 required. The CSS `@layer` bug that mangles Tailwind v4 output was a 1.3.0 regression fixed in 1.3.13 (April 2026), so a plain 1.3.x floor would admit exactly the broken versions; this machine's 1.2.18 must be upgraded.
+- Bun >= 1.3.13 required. The CSS `@layer` bug that mangles Tailwind v4 output was a 1.3.0 regression fixed in 1.3.13 (April 2026), so a plain 1.3.x floor would admit exactly the broken versions. The dev machine runs 1.4.0; CI pins 1.4.0 too (`.github/workflows/ci.yml`, `release.yml`).
 - Dev loop: `bun --hot src/main.ts`, Bun.serve with `routes` and the HTML import; Tailwind via `bun-plugin-tailwind` configured in `bunfig.toml` `[serve.static]`.
 - Production: `bun run build.ts`, which calls the `Bun.build()` JS API with `compile: { outfile: "dist/lgtm" }` and the Tailwind plugin. Never the `bun build --compile` CLI. It ignores bundler plugins and produces an unstyled binary (open Bun bug).
 - Distribution v1: a GitHub release with the darwin-arm64 binary and a checksum. Plain binaries downloaded via curl carry no Gatekeeper burden. No brew tap, no signing, until after the dogfood period.
@@ -287,6 +295,7 @@ Everything else in the old tree is reference material, not a porting target.
 - The no-publish invariant keeps its explicit tests: request builder emits no `event` key; the GitHub adapter exposes no submitting function.
 - The offline harness from the old TESTING.md ports over. A fake `claude` shim on PATH lets the full watch, review, gate, and dry-run-post loop run without network or quota.
 - The old removals audit and the final pre-submission review together yield a seven-item regression checklist; each item gets a test in the module it belongs to: a watch add through the API lands in `watch.md` and is polled on the next cycle, the interval default matches its documentation, missing binaries print nothing to stderr during detection, PR listing respects pagination, dry-run writes nothing, cache keys are repo-qualified, an all-failed round does not mark the PR reviewed.
+- `test/e2e/` closes the gap module tests can't see: the joins between modules, not the modules themselves. It boots a real daemon against a fake GitHub on a real loopback socket and the fake Claude shim, and drives nine journeys (watching, auto-class, triage, the gate, double-posting, submitted-draft reconciliation, a garbage-output round, the auth choke point, and the quota gate) through the store, the API, and the fake's own request log. See [test/e2e/README.md](../../test/e2e/README.md).
 
 ## Deferred decisions
 
