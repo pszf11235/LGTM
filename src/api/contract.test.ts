@@ -321,6 +321,95 @@ describe("GET .../findings, daemon to browser", () => {
     expect(res.meta.title).toBe("Add a rate limiter");
   });
 
+  test("a round's session fields and its ready-made resume command arrive", async () => {
+    const ref = { owner: "acme", repo: "api", number: 101 };
+    await saveMeta(lgtmDir, ref, { state: "reviewed", headSha: "sha1", author: "ada" });
+    await saveRound(lgtmDir, {
+      ref,
+      round: 1,
+      agent: "reviewer",
+      provider: "claude-cli",
+      status: "ok",
+      headSha: "sha1",
+      startedAt: "2026-08-30T00:00:00.000Z",
+      durationMs: 1000,
+      findings: [{ severity: "high", file: "a.ts", line: 3, comment: "one" }],
+      sessionId: "sess-abc123",
+      sessionCwd: "/Users/ada/repos/api",
+      costUsd: 0.42,
+      turns: 7,
+    });
+
+    const res = await clientOverHandler().getFindings(ref);
+
+    expect(res.rounds).toHaveLength(1);
+    const round = res.rounds[0]!;
+    expect(round.sessionId).toBe("sess-abc123");
+    expect(round.sessionCwd).toBe("/Users/ada/repos/api");
+    expect(round.costUsd).toBe(0.42);
+    expect(round.turns).toBe(7);
+    // Built server-side, from the same sessionId and sessionCwd, so the
+    // client never has to reassemble it.
+    expect(round.resumeCommand).toBe("cd /Users/ada/repos/api && claude --resume sess-abc123");
+  });
+
+  test("resumeCommand omits the cd when the round carries no working directory", async () => {
+    const ref = { owner: "acme", repo: "api", number: 102 };
+    await saveMeta(lgtmDir, ref, { state: "reviewed", headSha: "sha1", author: "ada" });
+    await saveRound(lgtmDir, {
+      ref,
+      round: 1,
+      agent: "reviewer",
+      provider: "claude-cli",
+      status: "ok",
+      headSha: "sha1",
+      startedAt: "2026-08-30T00:00:00.000Z",
+      durationMs: 1000,
+      findings: [{ severity: "low", file: "a.ts", line: 1, comment: "one" }],
+      sessionId: "sess-xyz",
+      sessionCwd: null,
+    });
+
+    const res = await clientOverHandler().getFindings(ref);
+
+    expect(res.rounds[0]?.resumeCommand).toBe("claude --resume sess-xyz");
+  });
+
+  test("a round with no session id sends and parses a null resumeCommand, not a guessed one", async () => {
+    const ref = { owner: "acme", repo: "api", number: 103 };
+    await saveMeta(lgtmDir, ref, { state: "reviewed", headSha: "sha1", author: "ada" });
+    await saveRound(lgtmDir, {
+      ref,
+      round: 1,
+      agent: "reviewer",
+      provider: "claude-cli",
+      status: "ok",
+      headSha: "sha1",
+      startedAt: "2026-08-30T00:00:00.000Z",
+      durationMs: 1000,
+      findings: [{ severity: "low", file: "a.ts", line: 1, comment: "one" }],
+    });
+
+    // The raw wire shape, not the client's coercion, so a route that starts
+    // omitting the key entirely (rather than sending it as null) would still
+    // fail this rather than being smoothed over by the parser.
+    const handler = createApiHandler({ lgtmDir, token: TOKEN, port: PORT, version: "test" });
+    const raw = await handler(
+      buildRequest(`/api/prs/acme/api/103/findings`, { headers: { Authorization: `Bearer ${TOKEN}` } }),
+    );
+    const body = (await raw.json()) as { rounds: Array<Record<string, unknown>> };
+    expect(body.rounds[0]?.sessionId).toBeNull();
+    expect(body.rounds[0]?.resumeCommand).toBeNull();
+
+    const res = await clientOverHandler().getFindings(ref);
+    const round = res.rounds[0]!;
+    expect(round.sessionId).toBeNull();
+    expect(round.sessionCwd).toBeNull();
+    expect(round.costUsd).toBeNull();
+    expect(round.turns).toBeNull();
+    expect(round.resumeCommand).toBeNull();
+  });
+
   test("findings from several rounds all arrive", async () => {
     const ref = { owner: "acme", repo: "api", number: 100 };
     await saveMeta(lgtmDir, ref, { state: "reviewed", headSha: "s2", author: "ada" });

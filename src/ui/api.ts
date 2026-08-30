@@ -263,9 +263,38 @@ export interface PRDetailMeta {
   draft: boolean;
 }
 
+/**
+ * One round's own metadata, as the findings route reports it beside that
+ * round's `findings[]`: what ran, and the Provider session behind it.
+ *
+ * The four session fields are null for a round whose Provider reported none
+ * of them, and for every round file written before they existed. An older
+ * round still parses, it just has nothing to resume. `resumeCommand` is the
+ * server's own `claude --resume <id>` (with its `cd` when the session's
+ * working directory is known), never reassembled from `sessionId` and
+ * `sessionCwd` here: routes.ts owns that one definition.
+ */
+export interface RoundSummary {
+  round: number;
+  agent: string;
+  provider: string;
+  status: "ok" | "failed";
+  headSha: string;
+  startedAt: string;
+  durationMs: number;
+  hasSnapshot: boolean;
+  sessionId: string | null;
+  sessionCwd: string | null;
+  costUsd: number | null;
+  turns: number | null;
+  resumeCommand: string | null;
+}
+
 export interface PRFindingsResponse {
   meta: PRDetailMeta;
   findings: FindingWithContext[];
+  /** Oldest round first, same order the daemon sends `rounds` in. */
+  rounds: RoundSummary[];
 }
 
 export type PRDecisionAction = "review" | "skip" | "unskip" | "review-anyway";
@@ -464,6 +493,30 @@ function toFinding(raw: unknown): FindingWithContext {
   };
 }
 
+function roundStatus(value: unknown): "ok" | "failed" {
+  return value === "failed" ? "failed" : "ok";
+}
+
+/** One round's metadata, read the same lenient way as everything else here: a field this round predates comes back null, not thrown. */
+function toRoundSummary(raw: unknown): RoundSummary {
+  const rec = asRecord(raw);
+  return {
+    round: num(rec.round),
+    agent: str(rec.agent),
+    provider: str(rec.provider),
+    status: roundStatus(rec.status),
+    headSha: str(rec.headSha),
+    startedAt: str(rec.startedAt),
+    durationMs: num(rec.durationMs),
+    hasSnapshot: rec.hasSnapshot === true,
+    sessionId: nullableStr(rec.sessionId),
+    sessionCwd: nullableStr(rec.sessionCwd),
+    costUsd: nullableNum(rec.costUsd),
+    turns: nullableNum(rec.turns),
+    resumeCommand: nullableStr(rec.resumeCommand),
+  };
+}
+
 function toPRDetailMeta(raw: unknown): PRDetailMeta {
   const rec = asRecord(raw);
   return {
@@ -494,17 +547,18 @@ function toPRDetailMeta(raw: unknown): PRDetailMeta {
  */
 function toPRFindingsResponse(raw: unknown): PRFindingsResponse {
   const rec = asRecord(raw);
-  const rounds = Array.isArray(rec.rounds) ? rec.rounds : [];
-  const nested = rounds.flatMap((round) => {
+  const roundsRaw = Array.isArray(rec.rounds) ? rec.rounds : [];
+  const nested = roundsRaw.flatMap((round) => {
     const list = asRecord(round).findings;
     return Array.isArray(list) ? list : [];
   });
   const flat = Array.isArray(rec.findings) ? rec.findings : [];
   const findings = (nested.length > 0 ? nested : flat).map(toFinding);
+  const rounds = roundsRaw.map(toRoundSummary);
 
   // `ref` holds owner/repo/number; `pr` holds everything else about it.
   const meta = { ...asRecord(rec.ref), ...asRecord(rec.pr ?? rec.meta) };
-  return { meta: toPRDetailMeta(meta), findings };
+  return { meta: toPRDetailMeta(meta), findings, rounds };
 }
 
 function toStatusResponse(raw: unknown): StatusResponse {

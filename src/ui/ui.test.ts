@@ -50,7 +50,7 @@ import {
   type ClosedFilter,
   type StatusFilter,
 } from "./views/Reviews";
-import { PRDetail } from "./views/PRDetail";
+import { PRDetail, RoundSession, type RoundSessionProps } from "./views/PRDetail";
 
 // ─── Stubs ──────────────────────────────────────────────────────────────────
 
@@ -347,6 +347,115 @@ describe("createApiClient", () => {
     });
 
     expect(client.eventsUrl()).toBe("/api/events");
+  });
+});
+
+// ─── api.ts: getFindings' round parser ──────────────────────────────────────
+//
+// The daemon nests findings under `rounds[].findings[]`, not under a flat
+// `findings` key (see the contract tests in src/api/contract.test.ts for the
+// real route handler feeding the real parser). These stub the same shape by
+// hand to pin down the parser's own leniency: a round missing the session
+// fields entirely, not just carrying them as null, must still parse into a
+// PRDetail that renders.
+
+describe("createApiClient: getFindings, round parsing", () => {
+  test("reads a round's session fields and the server's own resumeCommand", async () => {
+    const client = createApiClient({
+      fetchImpl: async () =>
+        json({
+          ref: { owner: "acme", repo: "api", number: 42 },
+          pr: { title: "Add a rate limiter", author: "ada", headSha: "sha1" },
+          rounds: [
+            {
+              round: 1,
+              agent: "reviewer",
+              provider: "claude-cli",
+              status: "ok",
+              headSha: "sha1",
+              startedAt: "2026-08-30T00:00:00.000Z",
+              durationMs: 1000,
+              hasSnapshot: true,
+              sessionId: "sess-1",
+              sessionCwd: "/Users/ada/api",
+              costUsd: 0.42,
+              turns: 7,
+              resumeCommand: "cd /Users/ada/api && claude --resume sess-1",
+              findings: [
+                {
+                  key: "r1:reviewer:f1",
+                  round: 1,
+                  agent: "reviewer",
+                  headSha: "sha1",
+                  severity: "high",
+                  file: "a.ts",
+                  line: 3,
+                  comment: "one",
+                  state: "open",
+                },
+              ],
+            },
+          ],
+        }),
+      storage: memoryStorage(),
+      location: stubLocation("#t=tok"),
+      history: stubHistory(),
+    });
+
+    const res = await client.getFindings({ owner: "acme", repo: "api", number: 42 });
+
+    expect(res.rounds).toHaveLength(1);
+    expect(res.rounds[0]).toMatchObject({
+      round: 1,
+      agent: "reviewer",
+      sessionId: "sess-1",
+      sessionCwd: "/Users/ada/api",
+      costUsd: 0.42,
+      turns: 7,
+      resumeCommand: "cd /Users/ada/api && claude --resume sess-1",
+    });
+    expect(res.findings).toHaveLength(1);
+  });
+
+  test("a round with none of the five fields at all still parses, as nulls, not as a throw", async () => {
+    const client = createApiClient({
+      fetchImpl: async () =>
+        json({
+          ref: { owner: "acme", repo: "api", number: 7 },
+          pr: { author: "ada", headSha: "sha1" },
+          rounds: [
+            {
+              round: 1,
+              agent: "reviewer",
+              provider: "claude-cli",
+              status: "ok",
+              headSha: "sha1",
+              startedAt: "2026-08-30T00:00:00.000Z",
+              durationMs: 1000,
+              hasSnapshot: false,
+              findings: [],
+              // sessionId, sessionCwd, costUsd, turns, resumeCommand: absent
+              // entirely, as every round file written before they existed.
+            },
+          ],
+        }),
+      storage: memoryStorage(),
+      location: stubLocation("#t=tok"),
+      history: stubHistory(),
+    });
+
+    const res = await client.getFindings({ owner: "acme", repo: "api", number: 7 });
+
+    expect(res.rounds).toHaveLength(1);
+    expect(res.rounds[0]).toMatchObject({
+      round: 1,
+      agent: "reviewer",
+      sessionId: null,
+      sessionCwd: null,
+      costUsd: null,
+      turns: null,
+      resumeCommand: null,
+    });
   });
 });
 
@@ -778,5 +887,65 @@ describe("FindingCard (smoke)", () => {
       createElement(FindingCard, { owner: "acme", repo: "api", finding: baseFinding }),
     );
     expect(html).toMatch(/disabled[\s\S]*Discard/);
+  });
+});
+
+// ─── RoundSession (smoke) ────────────────────────────────────────────────────
+//
+// Rendered directly with a RoundSummary, the same way FindingCard is tested
+// above: PRDetail's own hook never resolves under renderToStaticMarkup (see
+// that describe block), so this is the only way to see the populated markup
+// rather than just the loading state.
+
+describe("RoundSession (smoke)", () => {
+  const baseRound: RoundSessionProps["round"] = {
+    round: 2,
+    agent: "reviewer",
+    provider: "claude-cli",
+    status: "ok",
+    headSha: "abc123",
+    startedAt: "2026-08-30T00:00:00.000Z",
+    durationMs: 45_000,
+    hasSnapshot: true,
+    sessionId: "sess-abc123",
+    sessionCwd: "/Users/ada/repos/api",
+    costUsd: 0.42,
+    turns: 7,
+    resumeCommand: "cd /Users/ada/repos/api && claude --resume sess-abc123",
+  };
+
+  test("renders the resume command as pasteable text, what it does, and the cost/turns as quiet metadata", () => {
+    const html = renderToStaticMarkup(createElement(RoundSession, { round: baseRound }));
+
+    // `&&` renders HTML-escaped (`&amp;&amp;`), so the two halves are checked
+    // separately rather than as one literal command string.
+    expect(html).toContain("cd /Users/ada/repos/api");
+    expect(html).toContain("claude --resume sess-abc123");
+    expect(html).toContain("Round 2");
+    expect(html).toContain("reviewer");
+    expect(html).toContain("Reopen the Claude session");
+    expect(html).toContain("$0.42");
+    expect(html).toContain("7 turns");
+    expect(html).toMatch(/Copy/);
+  });
+
+  test("a round with no session id renders nothing", () => {
+    const html = renderToStaticMarkup(
+      createElement(RoundSession, {
+        round: { ...baseRound, sessionId: null, sessionCwd: null, resumeCommand: null },
+      }),
+    );
+
+    expect(html).toBe("");
+  });
+
+  test("cost and turns are each optional and never invent the other", () => {
+    const html = renderToStaticMarkup(
+      createElement(RoundSession, { round: { ...baseRound, costUsd: null, turns: 1 } }),
+    );
+
+    expect(html).not.toContain("$0.42");
+    expect(html).toContain("1 turn");
+    expect(html).not.toContain("1 turns");
   });
 });
