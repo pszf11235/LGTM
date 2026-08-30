@@ -243,6 +243,42 @@ function FindingsRow({ pr, onOpenPR }: { pr: PRListItem; onOpenPR?: (ref: PRRef)
   );
 }
 
+/** What the daemon is doing with this PR right now, in the user's words. */
+function reviewStateLabel(pr: PRListItem): string {
+  if (pr.state === "reviewing") return "reviewing now";
+  if (pr.state === "queued") return "waiting for a slot";
+  return pr.failedAttempts >= 3 ? "failed, no retries left" : "failed, will retry";
+}
+
+function InReviewRow({ pr, onOpenPR }: { pr: PRListItem; onOpenPR?: (ref: PRRef) => void }) {
+  const stuck = pr.state === "failed" && pr.failedAttempts >= 3;
+  const hasFindings = totalFindings(pr.findingCounts) > 0;
+
+  return (
+    <div className="flex items-center justify-between gap-4 border-b py-3 last:border-b-0">
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium">{pr.title}</span>
+          <ClassificationTag classification={pr.classification} />
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-xs text-muted-foreground">@{pr.author}</span>
+          <span className={stuck ? "text-xs font-medium text-destructive" : "text-xs text-muted-foreground"}>
+            {reviewStateLabel(pr)}
+          </span>
+          {/* An earlier round's findings are still gateable while a new one runs. */}
+          {hasFindings && <SeverityCounts counts={pr.findingCounts} />}
+        </div>
+      </div>
+      {hasFindings && (
+        <Button size="sm" variant="secondary" onClick={() => onOpenPR?.(prRefOf(pr))} className="shrink-0">
+          View findings
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function SkippedRow({ pr, actions }: { pr: PRListItem; actions?: GateActions }) {
   const decision = useDecision(actions);
   const ref = prRefOf(pr);
@@ -388,8 +424,16 @@ export function Inbox({ onOpenPR, actions }: InboxProps) {
   const triage = active.filter((pr) => pr.state === "triage");
   const skipped = active.filter((pr) => pr.state === "skipped");
   const withFindings = active.filter((pr) => totalFindings(pr.findingCounts) > 0);
+  // A review takes minutes, and until it lands the PR has no findings and is
+  // no longer in triage. Without this bucket it would drop out of the inbox
+  // entirely while the work it is waiting on runs. `failed` sits here too:
+  // the cycle retries it, and a PR that has exhausted its attempts is stuck
+  // and worth seeing rather than silently absent.
+  const inReview = active.filter(
+    (pr) => pr.state === "queued" || pr.state === "reviewing" || pr.state === "failed"
+  );
 
-  const isEmpty = triage.length === 0 && withFindings.length === 0;
+  const isEmpty = triage.length === 0 && withFindings.length === 0 && inReview.length === 0;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
@@ -406,6 +450,14 @@ export function Inbox({ onOpenPR, actions }: InboxProps) {
             <Section title="Triage" count={triage.length}>
               {triage.map((pr) => (
                 <TriageRow key={`${pr.owner}/${pr.repo}#${pr.number}`} pr={pr} actions={actions} />
+              ))}
+            </Section>
+          )}
+
+          {inReview.length > 0 && (
+            <Section title="In review" count={inReview.length}>
+              {inReview.map((pr) => (
+                <InReviewRow key={`${pr.owner}/${pr.repo}#${pr.number}`} pr={pr} onOpenPR={onOpenPR} />
               ))}
             </Section>
           )}

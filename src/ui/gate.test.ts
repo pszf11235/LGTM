@@ -551,6 +551,7 @@ function prItem(over: Partial<PRListItem>): PRListItem {
     createdAt: null,
     closedAt: null,
     pendingReviewId: null,
+    failedAttempts: 0,
     additions: 10,
     deletions: 2,
     changedFiles: 1,

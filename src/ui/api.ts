@@ -204,6 +204,7 @@ export interface PRListItem {
   createdAt: string | null;
   closedAt: string | null;
   pendingReviewId: number | null;
+  failedAttempts: number;
   additions: number | null;
   deletions: number | null;
   changedFiles: number | null;
@@ -382,6 +383,7 @@ function toPRListItem(raw: unknown): PRListItem {
     createdAt: nullableStr(rec.createdAt),
     closedAt: nullableStr(rec.closedAt),
     pendingReviewId: nullableNum(rec.pendingReviewId),
+    failedAttempts: typeof rec.failedAttempts === "number" ? rec.failedAttempts : 0,
     additions: nullableNum(rec.additions),
     deletions: nullableNum(rec.deletions),
     changedFiles: nullableNum(rec.changedFiles),
