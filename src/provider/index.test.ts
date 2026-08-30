@@ -62,6 +62,35 @@ describe("runReview", () => {
     expect(outcome.error).toContain("codex-cli");
     expect(outcome.findings).toEqual([]);
   });
+
+  test("a round that never ran reports no session, explicitly", async () => {
+    // Nothing was spawned, so there is nothing to resume. Saying so in full
+    // keeps the round file from carrying a half-written resume command.
+    const agent = { ...defaultAgentConfig(), provider: "codex-cli" } as unknown as AgentConfig;
+
+    expect(await runReview({ agent, prUrl: "https://github.com/acme/api/pull/42" })).toMatchObject({
+      sessionId: null,
+      sessionCwd: null,
+      costUsd: null,
+      turns: null,
+    });
+  });
+
+  test("hands the session directory to the Provider it dispatches to", async () => {
+    // The daemon owns the directory; this seam is the only thing between it
+    // and the spawn, so a dropped field here would silently scatter sessions.
+    process.env.FAKE_CLAUDE_MODE = "json";
+
+    const outcome = await runReview({
+      agent: { ...defaultAgentConfig(), severityFloor: "low" },
+      prUrl: "https://github.com/acme/api/pull/42",
+      binPath: SHIM,
+      sessionCwd: import.meta.dir,
+    });
+
+    expect(outcome.sessionCwd).toBe(import.meta.dir);
+    expect(outcome.sessionId).toBe("f47ac10b-58cc-4372-a567-0e02b2c3d479");
+  });
 });
 
 describe("defaultAgentConfig", () => {

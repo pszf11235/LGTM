@@ -8,11 +8,34 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import fs from "node:fs/promises";
+import os from "node:os";
 import { join } from "node:path";
 import { buildPrompt, claudeArgs, claudeProvider, DEFAULT_MODEL, run } from "./claude";
 import { defaultAgentConfig, type AgentConfig, type ReviewInput } from "./index";
 
 const SHIM = join(import.meta.dir, "../../test/fixtures/fake-claude.ts");
+
+/** The session the shim reports on every envelope it emits. */
+const SHIM_SESSION = {
+  sessionId: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  costUsd: 0.77,
+  turns: 14,
+};
+
+/**
+ * An executable stand-in for the CLI, written to a scratch directory.
+ *
+ * Used where the shim cannot help: the tests below need a "binary" that
+ * reports the directory it was spawned in, or that prints an envelope whose
+ * result will not parse. Both are properties of the spawn, not of any review.
+ */
+async function fakeBinary(body: string): Promise<string> {
+  const dir = await fs.mkdtemp(join(os.tmpdir(), "lgtm-fake-cli-"));
+  const binPath = join(dir, "claude");
+  await fs.writeFile(binPath, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return binPath;
+}
 
 function agent(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return { ...defaultAgentConfig(), severityFloor: "low", ...overrides };
@@ -152,6 +175,17 @@ describe("claudeArgs", () => {
 // ─── The spawn helper ───────────────────────────────────────────────────────
 
 describe("run", () => {
+  test("spawns in the working directory it is given", async () => {
+    // The Claude CLI files each session under a slug of its working
+    // directory, so this is the option that decides whether a Round can be
+    // resumed at all.
+    const dir = await fs.mkdtemp(join(os.tmpdir(), "lgtm-run-cwd-"));
+
+    const outcome = await run(["sh", "-c", "pwd"], { cwd: dir, timeoutSeconds: 10 });
+
+    expect(await fs.realpath(outcome.stdout.trim())).toBe(await fs.realpath(dir));
+  });
+
   test("returns stdout, stderr, and the exit code", async () => {
     const outcome = await run(["sh", "-c", "echo out; echo err >&2; exit 3"], {
       timeoutSeconds: 10,
@@ -284,5 +318,83 @@ describe("claudeProvider.review", () => {
     expect(outcome.status).toBe("failed");
     expect(outcome.error).toBeTruthy();
     expect(outcome.findings).toEqual([]);
+  });
+});
+
+// ─── The session behind the round ───────────────────────────────────────────
+
+describe("claudeProvider.review: session capture", () => {
+  test("carries the session, the cost and the turn count off the envelope", async () => {
+    // The session id is the whole feature: `claude --resume <id>` reopens this
+    // exact conversation, so a human can argue with the reviewer that wrote a
+    // finding instead of starting a fresh review.
+    process.env.FAKE_CLAUDE_MODE = "json";
+
+    const outcome = await claudeProvider.review(input());
+
+    expect(outcome).toMatchObject(SHIM_SESSION);
+  });
+
+  test("captures the session from the prose shape too, not only from JSON", async () => {
+    // The session lives on the envelope, which is there whatever shape the
+    // review text inside it takes.
+    process.env.FAKE_CLAUDE_MODE = "prose";
+
+    expect(await claudeProvider.review(input())).toMatchObject(SHIM_SESSION);
+  });
+
+  test("a provider that reports no session still reviews normally", async () => {
+    const binPath = await fakeBinary(`echo '{"result":"{\\"findings\\":[]}"}'`);
+
+    const outcome = await claudeProvider.review(input({ binPath }));
+
+    expect(outcome.status).toBe("ok");
+    expect(outcome.findings).toEqual([]);
+    expect(outcome).toMatchObject({ sessionId: null, costUsd: null, turns: null });
+  });
+
+  test("a round whose output would not parse keeps its session id", async () => {
+    // This is the round most worth resuming by hand: the review happened, and
+    // only the reading of it failed. Losing the id here would throw away the
+    // one thing that could recover the work.
+    const binPath = await fakeBinary(`echo '{"session_id":"sess-42","result":"I could not review this."}'`);
+
+    const outcome = await claudeProvider.review(input({ binPath }));
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.error).toBe("could not parse provider output");
+    expect(outcome.sessionId).toBe("sess-42");
+  });
+
+  test("spawns in the session directory it is given, and reports it back", async () => {
+    // Both halves of the resume address: the id says which session, the
+    // directory says where the CLI filed it.
+    const dir = await fs.mkdtemp(join(os.tmpdir(), "lgtm-sessions-"));
+    const probe = join(await fs.mkdtemp(join(os.tmpdir(), "lgtm-probe-")), "cwd.txt");
+    const binPath = await fakeBinary(
+      `pwd > "${probe}"\necho '{"session_id":"sess-1","result":"{\\"findings\\":[]}"}'`
+    );
+
+    const outcome = await claudeProvider.review(input({ binPath, sessionCwd: dir }));
+
+    expect(outcome.status).toBe("ok");
+    expect(outcome.sessionId).toBe("sess-1");
+    // What the round file records, and where the CLI actually ran, have to be
+    // the same directory or the resume command it prints is a lie.
+    expect(outcome.sessionCwd).toBe(dir);
+    const ranIn = (await fs.readFile(probe, "utf-8")).trim();
+    expect(await fs.realpath(ranIn)).toBe(await fs.realpath(dir));
+  });
+
+  test("no session directory is no session directory, not an invented one", async () => {
+    process.env.FAKE_CLAUDE_MODE = "json";
+
+    expect((await claudeProvider.review(input())).sessionCwd).toBeNull();
+  });
+
+  test("a round that never got as far as spawning reports no session", async () => {
+    const outcome = await claudeProvider.review(input({ binPath: "/nonexistent/claude" }));
+
+    expect(outcome).toMatchObject({ sessionId: null, costUsd: null, turns: null });
   });
 });

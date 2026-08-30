@@ -8,7 +8,19 @@
  *
  * Invoked as: claude -p <prompt> --output-format json --model <m>
  * (other flags are accepted but ignored)
+ *
+ * The envelope carries the session fields the real CLI reports beside the
+ * review text: session_id, total_cost_usd and num_turns. They are fixed
+ * values, so a test can assert on them, and they are what lets the provider's
+ * session capture be exercised without spawning the real binary.
  */
+
+/** The session fields the real CLI reports alongside its result. */
+const SESSION = {
+  session_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  total_cost_usd: 0.77,
+  num_turns: 14,
+};
 
 function fail(message: string, exitCode = 1): never {
   console.error(message);
@@ -44,6 +56,7 @@ function emitJsonMode(): void {
     type: "result",
     subtype: "success",
     is_error: false,
+    ...SESSION,
     result: JSON.stringify({ findings }),
   };
 
@@ -60,6 +73,7 @@ function emitProseMode(): void {
     type: "result",
     subtype: "success",
     is_error: false,
+    ...SESSION,
     result: findings.join("\n"),
   };
 
@@ -75,6 +89,7 @@ function emitEmptyMode(): void {
     type: "result",
     subtype: "success",
     is_error: false,
+    ...SESSION,
     result: JSON.stringify({ findings: [] }),
   };
 
