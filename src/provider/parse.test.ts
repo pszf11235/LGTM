@@ -10,7 +10,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { Severity } from "@/core";
-import { extractFindings, meetsSeverity, validateFindings } from "./parse";
+import { extractFindings, extractSessionMeta, meetsSeverity, validateFindings } from "./parse";
 
 // ─── extractFindings ────────────────────────────────────────────────────────
 
@@ -183,6 +183,121 @@ describe("extractFindings", () => {
   test("an explicit empty result is an empty array, not null", () => {
     expect(extractFindings('{"findings": []}')).toEqual([]);
     expect(extractFindings("[]")).toEqual([]);
+  });
+});
+
+// ─── extractSessionMeta ─────────────────────────────────────────────────────
+
+describe("extractSessionMeta", () => {
+  const one = { file: "src/a.ts", line: 1, severity: "high", comment: "boom" };
+
+  /** The envelope as the CLI actually prints it, findings and session both. */
+  function envelope(over: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      duration_ms: 344_000,
+      session_id: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      total_cost_usd: 0.77,
+      num_turns: 14,
+      modelUsage: { "claude-sonnet-5": { inputTokens: 12, outputTokens: 34 } },
+      result: JSON.stringify({ findings: [one] }),
+      ...over,
+    });
+  }
+
+  test("reads the session, cost and turn count out of the envelope", () => {
+    expect(extractSessionMeta(envelope())).toEqual({
+      sessionId: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      costUsd: 0.77,
+      turns: 14,
+    });
+  });
+
+  test("the session id is metadata, never a finding", () => {
+    // Both halves read the same envelope and neither may see the other's
+    // fields. A cost figure in the findings array would post to a PR.
+    const raw = envelope();
+
+    expect(extractFindings(raw)).toEqual([one]);
+    expect(extractSessionMeta(raw).sessionId).toBe("f47ac10b-58cc-4372-a567-0e02b2c3d479");
+  });
+
+  test("a provider that reports no session parses normally and says nothing", () => {
+    // The whole point of keeping these apart: findings still come out, and the
+    // session reads as three honest nulls rather than a parse failure.
+    const raw = JSON.stringify({ findings: [one] });
+
+    expect(extractFindings(raw)).toEqual([one]);
+    expect(extractSessionMeta(raw)).toEqual({ sessionId: null, costUsd: null, turns: null });
+  });
+
+  test("reports whichever fields are there and nulls the rest", () => {
+    const raw = JSON.stringify({ session_id: "abc-123", result: "{}" });
+
+    expect(extractSessionMeta(raw)).toEqual({ sessionId: "abc-123", costUsd: null, turns: null });
+  });
+
+  test("finds the envelope behind a line of chatter", () => {
+    // Nothing promises the JSON is alone on stdout, and a Round whose session
+    // id is lost to a banner line cannot be resumed.
+    const raw = `Loading project settings...\n${envelope()}`;
+
+    expect(extractSessionMeta(raw).sessionId).toBe("f47ac10b-58cc-4372-a567-0e02b2c3d479");
+  });
+
+  test("unparseable output is a session-less round, not a throw", () => {
+    // The garbage case still has to return: this is exactly the round that
+    // becomes a .raw.txt dump, and it must not take the provider down first.
+    for (const raw of ["", "   ", "This is not valid JSON: {broken [", "- `a.ts:1` — boom"]) {
+      expect(extractSessionMeta(raw)).toEqual({ sessionId: null, costUsd: null, turns: null });
+    }
+  });
+
+  test("an empty session id reads as none rather than as an id", () => {
+    expect(extractSessionMeta(JSON.stringify({ session_id: "   ", num_turns: 2 }))).toEqual({
+      sessionId: null,
+      costUsd: null,
+      turns: 2,
+    });
+  });
+
+  test("rejects a cost or turn count that cannot be true", () => {
+    // A negative cost or a fractional turn count is a misread field, and a
+    // wrong number here would be reported to the user as fact.
+    expect(extractSessionMeta(envelope({ total_cost_usd: -3, num_turns: 1.5 }))).toMatchObject({
+      costUsd: null,
+      turns: null,
+    });
+    expect(extractSessionMeta(envelope({ total_cost_usd: "free", num_turns: "many" }))).toMatchObject({
+      costUsd: null,
+      turns: null,
+    });
+  });
+
+  test("accepts the numbers as strings, which JSON emitters sometimes do", () => {
+    expect(extractSessionMeta(envelope({ total_cost_usd: "0.77", num_turns: "14" }))).toMatchObject({
+      costUsd: 0.77,
+      turns: 14,
+    });
+  });
+
+  test("a free round reports zero rather than nothing", () => {
+    // Zero and null are different answers: one is a measured cost, the other
+    // is a provider that did not say.
+    expect(extractSessionMeta(envelope({ total_cost_usd: 0, num_turns: 0 }))).toMatchObject({
+      costUsd: 0,
+      turns: 0,
+    });
+  });
+
+  test("a bare findings array carries no session, and looking for one is harmless", () => {
+    expect(extractSessionMeta(JSON.stringify([one]))).toEqual({
+      sessionId: null,
+      costUsd: null,
+      turns: null,
+    });
   });
 });
 

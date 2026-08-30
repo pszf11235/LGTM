@@ -13,6 +13,10 @@
  * the output" and becomes a failed Round with a .raw.txt dump, while an empty
  * array means "reviewed, found nothing". Collapsing them would report a broken
  * CLI as a clean PR.
+ *
+ * The envelope also carries facts about the run itself, which this module
+ * reads separately from the findings and never mixes into them: see
+ * `extractSessionMeta`.
  */
 
 import type { Severity } from "@/core";
@@ -237,6 +241,107 @@ function parseProseFindings(text: string): unknown[] {
   }
 
   return findings;
+}
+
+// ─── Session metadata ───────────────────────────────────────────────────────
+
+/**
+ * What the CLI reports about the run that produced a Round, beside its
+ * findings.
+ *
+ * `sessionId` is the one that pays for itself. Print-mode sessions persist to
+ * ~/.claude/projects/<cwd-slug>/<session-id>.jsonl, and `claude --resume
+ * <session-id>` reopens one with its full context, so a human who disagrees
+ * with a finding can ask the reviewer that wrote it rather than starting over.
+ * The cost and turn count are here because a Round spends the user's own
+ * subscription, and a Round that cost real money should be able to say so.
+ *
+ * Every field is null when the Provider did not report it. A Provider that
+ * reports none of them is not a failure and not a parse error; it is a
+ * Provider with nothing to say about its own run.
+ */
+export interface SessionMeta {
+  sessionId: string | null;
+  costUsd: number | null;
+  turns: number | null;
+}
+
+const NO_SESSION: SessionMeta = { sessionId: null, costUsd: null, turns: null };
+
+/** The CLI's own spelling first; camelCase in case a future release drifts. */
+const SESSION_ID_KEYS = ["session_id", "sessionId"];
+const COST_KEYS = ["total_cost_usd", "totalCostUsd", "cost_usd"];
+const TURN_KEYS = ["num_turns", "numTurns"];
+
+/**
+ * Read the session facts out of whatever the Provider printed.
+ *
+ * Deliberately separate from `extractFindings` rather than folded into it.
+ * These are metadata about the run, never a Finding, and the strategy chain
+ * that finds Findings must not start looking at cost figures. Keeping them
+ * apart also means a Provider that reports no session still parses exactly as
+ * it did before: this function answers all-nulls and nothing upstream cares.
+ *
+ * The envelope is normally the whole output, so that is tried first. The scan
+ * for an embedded object is what covers a CLI that prints a line of chatter
+ * before its JSON, which is cheap insurance for a shape nobody promised.
+ */
+export function extractSessionMeta(raw: string): SessionMeta {
+  const text = raw.trim();
+  if (!text) return { ...NO_SESSION };
+
+  const direct = tryParseJson(text);
+  if (direct !== undefined) {
+    const meta = sessionFrom(direct);
+    if (meta) return meta;
+  }
+
+  for (const candidate of embeddedJson(text)) {
+    const parsed = tryParseJson(candidate);
+    if (parsed === undefined) continue;
+    const meta = sessionFrom(parsed);
+    if (meta) return meta;
+  }
+
+  return { ...NO_SESSION };
+}
+
+/**
+ * One object's session facts, or null when it carries none of them.
+ *
+ * Null rather than an all-null SessionMeta, so the scan above can keep
+ * looking past an object that happened to parse but says nothing.
+ */
+function sessionFrom(value: unknown): SessionMeta | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+
+  const sessionId = firstString(obj, SESSION_ID_KEYS);
+  const costUsd = firstNumber(obj, COST_KEYS, (n) => n >= 0);
+  const turns = firstNumber(obj, TURN_KEYS, (n) => Number.isInteger(n) && n >= 0);
+
+  if (sessionId === null && costUsd === null && turns === null) return null;
+  return { sessionId, costUsd, turns };
+}
+
+/** The first key that holds a usable number, accepting a numeric string too. */
+function firstNumber(
+  obj: Record<string, unknown>,
+  keys: string[],
+  accept: (value: number) => boolean
+): number | null {
+  for (const key of keys) {
+    const value = obj[key];
+
+    if (typeof value === "number" && Number.isFinite(value) && accept(value)) return value;
+
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && accept(parsed)) return parsed;
+    }
+  }
+
+  return null;
 }
 
 // ─── Validation ─────────────────────────────────────────────────────────────

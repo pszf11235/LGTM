@@ -24,7 +24,15 @@ import {
 } from "@/core";
 import { reviewsWhenReady } from "@/core/classify";
 import { defaultAgentConfig, type AgentConfig, type ReviewInput, type ReviewOutcome } from "@/provider";
-import { diffSnapshotPath, loadAllRounds, loadMeta, reviewDir, saveMeta, saveRound } from "@/store/reviews";
+import {
+  diffSnapshotPath,
+  loadAllRounds,
+  loadMeta,
+  reviewDir,
+  saveMeta,
+  saveRound,
+  sessionsDir,
+} from "@/store/reviews";
 import { addToWatchList, loadWatchList, updateETag } from "@/store/watch-list";
 import type { DaemonEvent } from "./events";
 import type { QueueEntry } from "./queue";
@@ -1183,6 +1191,103 @@ function dispatchDeps(over: Partial<DispatchDeps> = {}): DispatchDeps {
     ...over,
   };
 }
+
+describe("dispatchReview: the session behind the round", () => {
+  const session = {
+    sessionId: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    costUsd: 0.77,
+    turns: 14,
+  };
+
+  async function queued(): Promise<void> {
+    await saveMeta(store, ref(), { state: "queued", classification: "own", headSha: "sha1" });
+  }
+
+  test("spawns every Round from the one directory the store owns", async () => {
+    // Not a detail of the spawn. The CLI files its session under a slug of the
+    // working directory, so a Round started from wherever `lgtm up` happened
+    // to run leaves a session nobody can address.
+    await queued();
+    let seen: ReviewInput | null = null;
+
+    await dispatchReview(
+      entryFor(),
+      dispatchDeps({
+        review: async (given) => {
+          seen = given;
+          return outcome();
+        },
+      })
+    );
+
+    expect((seen as ReviewInput | null)?.sessionCwd).toBe(sessionsDir(store));
+    expect(await fs.exists(sessionsDir(store))).toBe(true);
+  });
+
+  test("records the session, the cost and the turns on the round file", async () => {
+    await queued();
+
+    await dispatchReview(
+      entryFor(),
+      dispatchDeps({ review: async () => outcome({ ...session, sessionCwd: sessionsDir(store) }) })
+    );
+
+    expect((await loadAllRounds(store, ref()))[0]).toMatchObject({
+      ...session,
+      sessionCwd: sessionsDir(store),
+    });
+  });
+
+  test("a failed Round records its session too", async () => {
+    // The review ran and only the reading of it failed, so the conversation
+    // is still there to be resumed and is worth more here than anywhere.
+    await queued();
+
+    await dispatchReview(
+      entryFor(),
+      dispatchDeps({
+        forge: { getPR: async () => detail(), getDiff: async () => "" },
+        review: async () =>
+          outcome({
+            ...session,
+            status: "failed",
+            findings: [],
+            error: "could not parse provider output",
+          }),
+      })
+    );
+
+    const round = (await loadAllRounds(store, ref()))[0];
+    expect(round).toMatchObject({ status: "failed", sessionId: session.sessionId });
+  });
+
+  test("a Provider that reports no session still records where the Round ran", async () => {
+    // The directory is ours to know either way, and a null session id is an
+    // honest answer rather than a failure.
+    await queued();
+
+    await dispatchReview(entryFor(), dispatchDeps({ review: async () => outcome() }));
+
+    expect((await loadAllRounds(store, ref()))[0]).toMatchObject({
+      sessionId: null,
+      costUsd: null,
+      turns: null,
+      sessionCwd: sessionsDir(store),
+    });
+  });
+
+  test("logs what the Round spent, when the Provider says", async () => {
+    await queued();
+    const lines: string[] = [];
+
+    await dispatchReview(
+      entryFor(),
+      dispatchDeps({ log: (line) => lines.push(line), review: async () => outcome(session) })
+    );
+
+    expect(lines.some((line) => line.includes("$0.77"))).toBe(true);
+  });
+});
 
 describe("dispatchReview", () => {
   test("writes the round, the snapshot, and the metadata", async () => {

@@ -161,6 +161,31 @@ export interface StatusCycleInfo {
 
 export type QuotaMode = "ok" | "throttled" | "fallback";
 
+/** One PR waiting for a slot, in the queue's own FIFO order. Index 0 is next. */
+export interface QueuedEntryInfo {
+  /** `owner/repo#number`, formatted by the daemon (routes.ts's `formatRef`). Match a PR row to this entry by this field, never by reassembling it from `owner`/`repo`/`number`. */
+  key: string;
+  headSha: string;
+  queuedAt: string;
+}
+
+/** One Round running right now, and the SHA it is actually reviewing. That can be newer than the PR's own `headSha`, per queue.ts's rule 3. */
+export interface InFlightRoundInfo {
+  key: string;
+  headSha: string;
+  startedAt: string;
+}
+
+/** The queue half of `GET /api/status` (design.md, "HTTP API"; src/daemon/queue.ts's `QueueSnapshot`). */
+export interface QueueStatus {
+  queued: number;
+  inFlight: number;
+  /** True when the last drain stopped because the quota gate said no. Every queued entry is held for that reason, not for lack of a slot. */
+  pausedByGate: boolean;
+  queuedEntries: QueuedEntryInfo[];
+  inFlightRounds: InFlightRoundInfo[];
+}
+
 export interface StatusResponse {
   uptimeMs: number;
   startedAt: string | null;
@@ -168,9 +193,13 @@ export interface StatusResponse {
   lastCycle: StatusCycleInfo | null;
   nextPollAt: string | null;
   queueLength: number;
+  /** The full queue detail behind `queueLength`, naming which PR is in which slot and since when. */
+  queue: QueueStatus;
   triageCount: number;
   awaitingGate: number;
   quotaMode: QuotaMode;
+  /** The highest usage percentage across every reported window, or null before the first reading (daemon/quota.ts's `QuotaState.maxPercent`). Explains a `pausedByGate` queue rather than leaving it looking like a stall. */
+  quotaPercent: number | null;
   claudePath: string | null;
   ghPath: string | null;
 }
@@ -191,6 +220,20 @@ export function totalFindings(counts: FindingCounts): number {
 
 /** One row of `GET /api/prs`: meta plus the triage metadata R2.5 asks the Reviews view to show. */
 export interface PRListItem {
+  /**
+   * `owner/repo#number`, exactly as the daemon formats it (routes.ts's
+   * `formatRef`, sent as `PRRow.key`). Use this to match a row against the
+   * status queue's `queuedEntries`/`inFlightRounds`. Never reassemble it
+   * from `owner`/`repo`/`number` client-side; see this file's module doc on
+   * why two spellings of the same identity is a recurring source of bugs
+   * here.
+   *
+   * Optional, not defaulted to a client-reconstructed value, for the same
+   * reason: a response that genuinely omits it must read as "no key to
+   * match on" (every queue lookup misses, degrading to the plain-text
+   * label), never as a guess assembled from the other fields.
+   */
+  key?: string;
   owner: string;
   repo: string;
   number: number;
@@ -263,9 +306,38 @@ export interface PRDetailMeta {
   draft: boolean;
 }
 
+/**
+ * One round's own metadata, as the findings route reports it beside that
+ * round's `findings[]`: what ran, and the Provider session behind it.
+ *
+ * The four session fields are null for a round whose Provider reported none
+ * of them, and for every round file written before they existed. An older
+ * round still parses, it just has nothing to resume. `resumeCommand` is the
+ * server's own `claude --resume <id>` (with its `cd` when the session's
+ * working directory is known), never reassembled from `sessionId` and
+ * `sessionCwd` here: routes.ts owns that one definition.
+ */
+export interface RoundSummary {
+  round: number;
+  agent: string;
+  provider: string;
+  status: "ok" | "failed";
+  headSha: string;
+  startedAt: string;
+  durationMs: number;
+  hasSnapshot: boolean;
+  sessionId: string | null;
+  sessionCwd: string | null;
+  costUsd: number | null;
+  turns: number | null;
+  resumeCommand: string | null;
+}
+
 export interface PRFindingsResponse {
   meta: PRDetailMeta;
   findings: FindingWithContext[];
+  /** Oldest round first, same order the daemon sends `rounds` in. */
+  rounds: RoundSummary[];
 }
 
 export type PRDecisionAction = "review" | "skip" | "unskip" | "review-anyway";
@@ -404,6 +476,7 @@ function toPRListItem(raw: unknown): PRListItem {
   const ref = asRecord(rec.ref);
   const findings = asRecord(rec.findings);
   return {
+    key: str(rec.key),
     owner: str(ref.owner ?? rec.owner),
     repo: str(ref.repo ?? rec.repo),
     number: num(ref.number ?? rec.number),
@@ -464,6 +537,51 @@ function toFinding(raw: unknown): FindingWithContext {
   };
 }
 
+function toQueuedEntry(raw: unknown): QueuedEntryInfo {
+  const rec = asRecord(raw);
+  return { key: str(rec.key), headSha: str(rec.headSha), queuedAt: str(rec.queuedAt) };
+}
+
+function toInFlightRound(raw: unknown): InFlightRoundInfo {
+  const rec = asRecord(raw);
+  return { key: str(rec.key), headSha: str(rec.headSha), startedAt: str(rec.startedAt) };
+}
+
+/** `rec` is already the `queue` object's own record, not the top-level status body. See the one call site in `toStatusResponse`. */
+function toQueueStatus(rec: Record<string, unknown>): QueueStatus {
+  return {
+    queued: num(rec.queued),
+    inFlight: num(rec.inFlight),
+    pausedByGate: rec.pausedByGate === true,
+    queuedEntries: Array.isArray(rec.queuedEntries) ? rec.queuedEntries.map(toQueuedEntry) : [],
+    inFlightRounds: Array.isArray(rec.inFlightRounds) ? rec.inFlightRounds.map(toInFlightRound) : [],
+  };
+}
+
+function roundStatus(value: unknown): "ok" | "failed" {
+  return value === "failed" ? "failed" : "ok";
+}
+
+/** One round's metadata, read the same lenient way as everything else here: a field this round predates comes back null, not thrown. */
+function toRoundSummary(raw: unknown): RoundSummary {
+  const rec = asRecord(raw);
+  return {
+    round: num(rec.round),
+    agent: str(rec.agent),
+    provider: str(rec.provider),
+    status: roundStatus(rec.status),
+    headSha: str(rec.headSha),
+    startedAt: str(rec.startedAt),
+    durationMs: num(rec.durationMs),
+    hasSnapshot: rec.hasSnapshot === true,
+    sessionId: nullableStr(rec.sessionId),
+    sessionCwd: nullableStr(rec.sessionCwd),
+    costUsd: nullableNum(rec.costUsd),
+    turns: nullableNum(rec.turns),
+    resumeCommand: nullableStr(rec.resumeCommand),
+  };
+}
+
 function toPRDetailMeta(raw: unknown): PRDetailMeta {
   const rec = asRecord(raw);
   return {
@@ -494,17 +612,18 @@ function toPRDetailMeta(raw: unknown): PRDetailMeta {
  */
 function toPRFindingsResponse(raw: unknown): PRFindingsResponse {
   const rec = asRecord(raw);
-  const rounds = Array.isArray(rec.rounds) ? rec.rounds : [];
-  const nested = rounds.flatMap((round) => {
+  const roundsRaw = Array.isArray(rec.rounds) ? rec.rounds : [];
+  const nested = roundsRaw.flatMap((round) => {
     const list = asRecord(round).findings;
     return Array.isArray(list) ? list : [];
   });
   const flat = Array.isArray(rec.findings) ? rec.findings : [];
   const findings = (nested.length > 0 ? nested : flat).map(toFinding);
+  const rounds = roundsRaw.map(toRoundSummary);
 
   // `ref` holds owner/repo/number; `pr` holds everything else about it.
   const meta = { ...asRecord(rec.ref), ...asRecord(rec.pr ?? rec.meta) };
-  return { meta: toPRDetailMeta(meta), findings };
+  return { meta: toPRDetailMeta(meta), findings, rounds };
 }
 
 function toStatusResponse(raw: unknown): StatusResponse {
@@ -524,6 +643,7 @@ function toStatusResponse(raw: unknown): StatusResponse {
     return hit ? nullableStr(hit.path) : null;
   };
   const mode = quota.mode;
+  const queueStatus = toQueueStatus(queue);
 
   return {
     uptimeMs: num(rec.uptimeMs),
@@ -533,10 +653,12 @@ function toStatusResponse(raw: unknown): StatusResponse {
       ? { at: str(scheduler.lastCycleAt), outcome: cycle.status === "error" ? "error" : "ok" }
       : null,
     nextPollAt: nullableStr(scheduler.nextCycleAt),
-    queueLength: num(queue.queued) + num(queue.inFlight),
+    queueLength: queueStatus.queued + queueStatus.inFlight,
+    queue: queueStatus,
     triageCount: num(counts.triage),
     awaitingGate: num(counts.awaitingGate),
     quotaMode: mode === "throttled" || mode === "fallback" ? mode : "ok",
+    quotaPercent: nullableNum(quota.maxPercent),
     claudePath: pathOf("claude"),
     ghPath: pathOf("gh"),
   };

@@ -86,6 +86,7 @@ import {
   type ReviewOutcome,
 } from "@/provider";
 import {
+  ensureSessionsDir,
   loadAllRounds,
   loadMeta,
   listReviewedPRs,
@@ -882,6 +883,28 @@ async function resolveAgent(deps: DispatchDeps): Promise<AgentConfig> {
   return typeof deps.agent === "function" ? await deps.agent() : deps.agent;
 }
 
+/**
+ * The directory a Round is spawned from.
+ *
+ * One directory the store owns, for every Round of every PR. The Claude CLI
+ * files each session under a slug of the working directory it ran in, so a
+ * Round spawned from wherever `lgtm up` was started leaves its session
+ * somewhere nobody can name, and the resume command on the round file would be
+ * a guess. A fixed directory makes it a fact.
+ *
+ * A store that cannot be created here does not fail the Round. The review
+ * still runs, from the daemon's own working directory, and simply records no
+ * session directory to resume from.
+ */
+async function sessionCwdFor(deps: DispatchDeps): Promise<string | undefined> {
+  try {
+    return await ensureSessionsDir(deps.lgtmDir);
+  } catch (error) {
+    deps.log?.(`review: could not create the sessions directory: ${messageOf(error)}`);
+    return undefined;
+  }
+}
+
 async function runRound(
   deps: DispatchDeps,
   entry: QueueEntry,
@@ -902,6 +925,8 @@ async function runRound(
   await saveMeta(deps.lgtmDir, ref, { state: "reviewing" });
   emit(deps, { type: "pr-changed", ref });
 
+  const sessionCwd = await sessionCwdFor(deps);
+
   const startedAt = now();
   const run = deps.review ?? runReview;
   const outcome = await run({
@@ -909,6 +934,7 @@ async function runRound(
     prUrl: meta.url || prUrl(ref),
     binPath: deps.binPath?.() ?? undefined,
     priorFindings: priorFindingsFrom(priorRounds),
+    sessionCwd,
   });
 
   // The round file lands before the snapshot on purpose: pruning inside
@@ -925,6 +951,14 @@ async function runRound(
     durationMs: outcome.durationMs,
     findings: outcome.findings,
     raw: outcome.status === "failed" ? failureTranscript(outcome) : undefined,
+    // What it takes to reopen the conversation this Round had. The Provider
+    // echoes back the directory it ran in; the directory we asked for is the
+    // fallback, so a Provider that reports nothing still leaves the round
+    // pointing at the right place.
+    sessionId: outcome.sessionId ?? null,
+    sessionCwd: outcome.sessionCwd ?? sessionCwd ?? null,
+    costUsd: outcome.costUsd ?? null,
+    turns: outcome.turns ?? null,
   });
 
   if (outcome.status === "ok") {
@@ -950,7 +984,10 @@ async function runRound(
 
     deps.log?.(
       `review: ${label} round ${roundNumber} ok, ${outcome.findings.length} finding(s)` +
-        (outcome.dropped > 0 ? `, ${outcome.dropped} dropped` : "")
+        (outcome.dropped > 0 ? `, ${outcome.dropped} dropped` : "") +
+        // A Round spends the user's own subscription, so the log says what it
+        // spent whenever the Provider was willing to tell us.
+        (typeof outcome.costUsd === "number" ? `, $${outcome.costUsd.toFixed(2)}` : "")
     );
 
     if (outcome.findings.length > 0) emit(deps, { type: "findings-ready", ref });

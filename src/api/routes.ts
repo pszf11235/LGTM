@@ -33,7 +33,7 @@ import fs from "fs/promises";
 import { postRoutes } from "./post";
 
 import { formatFindingKey, parseFindingKey } from "@/core";
-import type { CheckState, Finding, ForgeAdapter, PRMeta, PRRef, PRState, Severity } from "@/core";
+import type { CheckState, Finding, ForgeAdapter, PRMeta, PRRef, PRState, RoundFile, Severity } from "@/core";
 import { reviewsWhenReady } from "@/core/classify";
 import { parseDiff, sliceHunk } from "@/core/diff";
 import type { SlicedHunk } from "@/core/diff";
@@ -760,6 +760,21 @@ async function readSnapshot(
   return parsed;
 }
 
+/**
+ * `claude --resume <id>`, prefixed with a `cd` into the session's own
+ * working directory when one is known. The CLI files a session by the
+ * directory it ran in, so resuming from anywhere else finds nothing.
+ * Assembled once, here, so the browser has a string to copy rather than
+ * `sessionId` and `sessionCwd` to reassemble into a command of its own. Null
+ * when the round carries no session, which is every round file written
+ * before these fields existed.
+ */
+function resumeCommand(round: RoundFile): string | null {
+  if (!round.sessionId) return null;
+  const resume = `claude --resume ${round.sessionId}`;
+  return round.sessionCwd ? `cd ${round.sessionCwd} && ${resume}` : resume;
+}
+
 /** A permalink to the line as the round saw it, which a PR-files anchor cannot promise. */
 function findingUrl(ref: PRRef, sha: string, finding: Finding): string {
   if (!sha || !finding.file) return `${prUrl(ref)}/files`;
@@ -812,6 +827,13 @@ const findings: RouteHandler = async ({ params, deps }) => {
       startedAt: round.startedAt,
       durationMs: round.durationMs,
       hasSnapshot: diff !== null,
+      // The Provider run behind the round, straight off RoundFile: null for
+      // every round written before these fields existed, never an error.
+      sessionId: round.sessionId,
+      sessionCwd: round.sessionCwd,
+      costUsd: round.costUsd,
+      turns: round.turns,
+      resumeCommand: resumeCommand(round),
       findings: cards,
     });
   }

@@ -59,9 +59,11 @@ import {
   type PRDecisionAction,
   type PRListFilter,
   type PRListItem,
+  type QuotaMode,
+  type StatusResponse,
 } from "@/ui/api";
 import { getDefaultGateActions, type GateActions } from "@/ui/actions";
-import { useConnectionStatus, useStatus, usePRList, type ConnectionStatus } from "@/ui/hooks";
+import { useConnectionStatus, useStatus, usePRList, useTick, type ConnectionStatus } from "@/ui/hooks";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -264,6 +266,164 @@ function SeverityCounts({ counts }: { counts: FindingCounts }) {
   );
 }
 
+// ─── Live review progress ───────────────────────────────────────────────────
+//
+// The one thing the old "reviewing now" text could not say: whether a round
+// that started twenty seconds ago is indistinguishable from one about to hit
+// its timeout, and which of the concurrency slots a given PR is actually in.
+// `reviewProgressFor` answers both from the status payload's `queue`
+// (api.ts's `toStatusResponse`), matched to a PR row by the `key` the daemon
+// already formats. It is never reassembled from `owner`/`repo`/`number`
+// here, which is exactly the kind of two-spellings drift this file's module
+// doc warns about.
+
+/** First 7 characters of a SHA, GitHub's own short-ref convention. Empty input reads as a dash, not as a blank that looks like a rendering bug. */
+export function shortSha(sha: string): string {
+  return sha ? sha.slice(0, 7) : "—";
+}
+
+/** Milliseconds since `startedAt`, floored at zero so clock skew or a malformed timestamp never prints a negative duration. */
+export function elapsedMs(startedAt: string, now: number): number {
+  const started = new Date(startedAt).getTime();
+  if (!Number.isFinite(started)) return 0;
+  return Math.max(0, now - started);
+}
+
+/** Renders as "45s" or "2m 14s", matching `formatAge`'s conversational register. Never a raw millisecond count. */
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+export type TimeoutUrgency = "normal" | "near" | "over";
+
+/**
+ * Where a round sits against its ceiling. `near` starts at 80% of the
+ * timeout. The M0 spike measured 5m44s for a typical two-file PR (queue.ts's
+ * module doc), so a round already 8 minutes in against a 10-minute ceiling
+ * is unusual enough to flag before it actually times out, not only after.
+ */
+export function timeoutUrgency(elapsed: number, timeoutMs: number): TimeoutUrgency {
+  if (elapsed >= timeoutMs) return "over";
+  if (elapsed >= timeoutMs * 0.8) return "near";
+  return "normal";
+}
+
+/**
+ * The daemon's default per-round ceiling (requirements R3.3; @/provider's
+ * `DEFAULT_TIMEOUT_MINUTES`, not imported here to keep this browser bundle
+ * free of the Provider's own Node-side code). It is *not* part of the
+ * published `/api/status` contract. The configured value lives in a
+ * hand-edited `agents/<name>.md`, and today's status route does not carry
+ * it, so this is the best available reference point. It is exact for every
+ * install that has not overridden it, and still the right "this is
+ * unusually long" marker for the ones that have.
+ */
+export const DEFAULT_ROUND_TIMEOUT_MS = 10 * 60_000;
+
+export type ReviewProgress =
+  | { kind: "reviewing"; headSha: string; elapsedMs: number; timeoutMs: number; urgency: TimeoutUrgency }
+  | { kind: "queued"; headSha: string; position: number; total: number }
+  | { kind: "paused"; headSha: string; position: number; total: number; quotaMode: QuotaMode; quotaPercent: number | null }
+  // The PR row's own `state` says queued/reviewing, but the queue snapshot
+  // (a separate part of the same status payload, potentially a poll behind)
+  // has no matching entry. That is a brief race between two fetches, not a
+  // bug, and callers fall back to the old plain-text label for it.
+  | { kind: "unmatched" };
+
+export function reviewProgressFor(
+  pr: PRListItem,
+  status: StatusResponse,
+  now: number,
+  timeoutMs: number = DEFAULT_ROUND_TIMEOUT_MS,
+): ReviewProgress {
+  if (pr.state === "reviewing") {
+    const round = status.queue.inFlightRounds.find((r) => r.key === pr.key);
+    if (!round) return { kind: "unmatched" };
+    const elapsed = elapsedMs(round.startedAt, now);
+    return { kind: "reviewing", headSha: round.headSha, elapsedMs: elapsed, timeoutMs, urgency: timeoutUrgency(elapsed, timeoutMs) };
+  }
+
+  if (pr.state === "queued") {
+    const index = status.queue.queuedEntries.findIndex((e) => e.key === pr.key);
+    if (index === -1) return { kind: "unmatched" };
+    const entry = status.queue.queuedEntries[index]!;
+    const total = status.queue.queuedEntries.length;
+    if (status.queue.pausedByGate) {
+      return {
+        kind: "paused",
+        headSha: entry.headSha,
+        position: index + 1,
+        total,
+        quotaMode: status.quotaMode,
+        quotaPercent: status.quotaPercent,
+      };
+    }
+    return { kind: "queued", headSha: entry.headSha, position: index + 1, total };
+  }
+
+  return { kind: "unmatched" };
+}
+
+/** Why the gate is holding the queue, in the terms `pause_above_pct`/the daily-cap fallback actually use (daemon/quota.ts). */
+export function quotaReason(mode: QuotaMode, percent: number | null): string {
+  if (mode === "fallback") return "usage unreadable, gating on the daily cap";
+  if (mode === "throttled") return percent !== null ? `throttled at ${percent}%` : "throttled";
+  return "paused";
+}
+
+const URGENCY_TONE: Record<TimeoutUrgency, string> = {
+  normal: "text-muted-foreground",
+  near: "text-yellow-700 dark:text-yellow-400",
+  over: "text-destructive font-medium",
+};
+
+/**
+ * A static width, not an animated one. `prefers-reduced-motion` rules out
+ * transitions and pulsing. It does not rule out a number, or a bar snapped
+ * to a new width on every tick, actually changing value. That change is the
+ * elapsed time itself, the whole point of this row.
+ */
+function ReviewProgressLine({ progress }: { progress: ReviewProgress }) {
+  switch (progress.kind) {
+    case "reviewing": {
+      const tone = URGENCY_TONE[progress.urgency];
+      const pct = Math.min(100, Math.round((progress.elapsedMs / progress.timeoutMs) * 100));
+      const barTone = progress.urgency === "over" ? "bg-destructive" : progress.urgency === "near" ? "bg-yellow-500" : "bg-foreground/40";
+      return (
+        <span className="flex min-w-[12rem] flex-1 flex-col gap-1" data-testid="reviewing-progress">
+          <span className={`text-xs ${tone}`}>
+            reviewing @{shortSha(progress.headSha)} · {formatDuration(progress.elapsedMs)} of {formatDuration(progress.timeoutMs)}
+            {progress.urgency === "near" && ", approaching the timeout"}
+            {progress.urgency === "over" && ", past the timeout, still running"}
+          </span>
+          <span className="h-1 w-full max-w-40 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+            <span className={`block h-full rounded-full ${barTone}`} style={{ width: `${pct}%` }} />
+          </span>
+        </span>
+      );
+    }
+    case "queued":
+      return (
+        <span className="text-xs text-muted-foreground" data-testid="queued-progress">
+          queued @{shortSha(progress.headSha)} ·{" "}
+          {progress.position === 1 ? "next in line" : `${progress.position - 1} ahead in the queue`}
+        </span>
+      );
+    case "paused":
+      return (
+        <span className="text-xs font-medium text-yellow-700 dark:text-yellow-400" data-testid="paused-progress">
+          held by the quota gate ({quotaReason(progress.quotaMode, progress.quotaPercent)}) · queued @{shortSha(progress.headSha)}
+          {progress.total > 1 ? `, position ${progress.position} of ${progress.total}` : ""}
+        </span>
+      );
+    case "unmatched":
+      return null;
+  }
+}
+
 // ─── Rows ───────────────────────────────────────────────────────────────────
 
 /**
@@ -405,9 +565,21 @@ function reviewStateLabel(pr: PRListItem): string {
   return pr.failedAttempts >= 3 ? "failed, no retries left" : "failed, will retry";
 }
 
-function InReviewRow({ pr, onOpenPR }: { pr: PRListItem; onOpenPR?: (ref: PRRef) => void }) {
+function InReviewRow({
+  pr,
+  status,
+  now,
+  onOpenPR,
+}: {
+  pr: PRListItem;
+  /** Null while the status poll is still loading; that PR's row falls back to the plain-text label rather than waiting. */
+  status: StatusResponse | null;
+  now: number;
+  onOpenPR?: (ref: PRRef) => void;
+}) {
   const stuck = pr.state === "failed" && pr.failedAttempts >= 3;
   const hasFindings = totalFindings(pr.findingCounts) > 0;
+  const progress = status ? reviewProgressFor(pr, status, now) : { kind: "unmatched" as const };
 
   return (
     <div className="flex items-center justify-between gap-4 border-b py-3 last:border-b-0" data-testid="in-review-row">
@@ -419,9 +591,13 @@ function InReviewRow({ pr, onOpenPR }: { pr: PRListItem; onOpenPR?: (ref: PRRef)
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <PRIdentity pr={pr} />
           <span className="text-xs text-muted-foreground">@{pr.author}</span>
-          <span className={stuck ? "text-xs font-medium text-destructive" : "text-xs text-muted-foreground"}>
-            {reviewStateLabel(pr)}
-          </span>
+          {progress.kind === "unmatched" ? (
+            <span className={stuck ? "text-xs font-medium text-destructive" : "text-xs text-muted-foreground"}>
+              {reviewStateLabel(pr)}
+            </span>
+          ) : (
+            <ReviewProgressLine progress={progress} />
+          )}
           {/* An earlier round's findings are still gateable while a new one runs. */}
           {hasFindings && <SeverityCounts counts={pr.findingCounts} />}
         </div>
@@ -539,7 +715,19 @@ export function SkippedRow({ pr, actions }: { pr: PRListItem; actions?: GateActi
 
 
 /** Dispatch a row to the renderer its state calls for. */
-function ReviewRow({ pr, onOpenPR, actions }: { pr: PRListItem; onOpenPR?: (ref: PRRef) => void; actions?: GateActions }) {
+function ReviewRow({
+  pr,
+  onOpenPR,
+  actions,
+  status,
+  now,
+}: {
+  pr: PRListItem;
+  onOpenPR?: (ref: PRRef) => void;
+  actions?: GateActions;
+  status: StatusResponse | null;
+  now: number;
+}) {
   switch (pr.state) {
     case "triage":
       return <TriageRow pr={pr} actions={actions} />;
@@ -548,7 +736,7 @@ function ReviewRow({ pr, onOpenPR, actions }: { pr: PRListItem; onOpenPR?: (ref:
     case "queued":
     case "reviewing":
     case "failed":
-      return <InReviewRow pr={pr} onOpenPR={onOpenPR} />;
+      return <InReviewRow pr={pr} status={status} now={now} onOpenPR={onOpenPR} />;
     case "reviewed":
       return <ReviewedRow pr={pr} onOpenPR={onOpenPR} />;
     case "closed":
@@ -652,6 +840,17 @@ export function Reviews({ onOpenPR, actions }: ReviewsProps) {
   // forbid skipping one), and it stays a real server request either way,
   // never a client-side re-filter of `mainList`'s rows.
   const countsList = usePRList(filterToQuery("all", closedFilter));
+  // The queue/quota detail behind every in-flight and queued row below.
+  // Same duplication trade-off as `countsList`. `EmptyPanel` also calls
+  // `useStatus()`, on its own poll cycle, but only one of the two is ever
+  // mounted at a time (this list is either empty or it isn't).
+  const statusQuery = useStatus();
+  const liveRows = mainList.data ?? [];
+  const hasLiveRows = liveRows.some((pr) => pr.state === "reviewing" || pr.state === "queued");
+  // Ticks once a second, but only while something is actually in flight or
+  // queued. A fully reviewed/closed list has nothing whose elapsed time
+  // needs to advance, so nothing here re-renders for no reason.
+  const now = useTick(1000, hasLiveRows);
 
   if (mainList.error?.kind === "unauthenticated") {
     return (
@@ -661,7 +860,7 @@ export function Reviews({ onOpenPR, actions }: ReviewsProps) {
     );
   }
 
-  const rows = mainList.data ?? [];
+  const rows = liveRows;
   // The one client-side split left: pulling the collapsed skipped section
   // back out of an "all" response the server already filtered correctly.
   // Selecting "Skipped" directly bypasses this — that is the filter's own
@@ -695,7 +894,14 @@ export function Reviews({ onOpenPR, actions }: ReviewsProps) {
             <Card>
               <CardContent className="pt-6">
                 {visibleRows.map((pr) => (
-                  <ReviewRow key={`${pr.owner}/${pr.repo}#${pr.number}`} pr={pr} onOpenPR={onOpenPR} actions={actions} />
+                  <ReviewRow
+                    key={`${pr.owner}/${pr.repo}#${pr.number}`}
+                    pr={pr}
+                    onOpenPR={onOpenPR}
+                    actions={actions}
+                    status={statusQuery.data ?? null}
+                    now={now}
+                  />
                 ))}
               </CardContent>
             </Card>

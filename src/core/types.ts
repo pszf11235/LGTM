@@ -124,6 +124,34 @@ export interface RoundFile {
   startedAt: string;
   durationMs: number;
   findings: Finding[];
+
+  // ── The Provider run behind the round ─────────────────────────────────
+  //
+  // All four are null for a round whose Provider reported none of them, and
+  // for every round file written before these fields existed. Null is a real
+  // answer here ("nothing was reported"), never a parse failure.
+
+  /**
+   * The Provider session that produced this round. The Claude CLI persists
+   * each print-mode session to disk and reopens it with
+   * `claude --resume <sessionId>`, so this is what lets a human carry on the
+   * conversation that wrote a finding rather than starting a new review to
+   * argue with it.
+   */
+  sessionId: string | null;
+
+  /**
+   * The directory the Provider ran in. Half of the session's address: the CLI
+   * files sessions by working directory, so a resume from anywhere else finds
+   * nothing. Useless on its own, and `sessionId` is useless without it.
+   */
+  sessionCwd: string | null;
+
+  /** What this round spent of the user's subscription, as the Provider reported it. */
+  costUsd: number | null;
+
+  /** How many turns the Provider took. */
+  turns: number | null;
 }
 
 // ─── PR metadata ────────────────────────────────────────────────────────────

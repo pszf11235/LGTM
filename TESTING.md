@@ -40,9 +40,35 @@ process.env.FAKE_CLAUDE_MODE = "prose";
 const outcome = await run({ ...input, binPath: SHIM });
 ```
 
-`src/provider/claude.test.ts` and `src/provider/index.test.ts` run the real subprocess round trip against every mode. `src/daemon/quota.test.ts` spawns the shim in `usage` mode for the quota parser. The daemon-level cycle and boot tests inject a fake `review` function instead of spawning a process, so they don't touch the shim directly, but they do run the rest of the loop, classify, queue, gate, dry-run post, against fixture data with no I/O at all.
+`src/provider/claude.test.ts` and `src/provider/index.test.ts` run the real subprocess round trip against every mode. `src/daemon/quota.test.ts` spawns the shim in `usage` mode for the quota parser. `src/daemon/cycle.test.ts` and the boot tests inject a fake `review` function instead of spawning a process, so they exercise the rest of the loop, classify, queue, gate, dry-run post, against fixture data with no I/O at all. `test/e2e/` is the one place that spawns the shim through a whole booted daemon rather than injecting a fake anywhere in the chain; see [Driving the review loop through a real daemon](#driving-the-review-loop-through-a-real-daemon) below.
 
 To point a script or a manual run at the shim instead of the real CLI, set `claude_path` in `config.md` to the shim's absolute path (a manual pin skips the binary resolver's own PATH probe) and set `FAKE_CLAUDE_MODE` before starting whatever you're running. `test/fixtures/README.md` has the full flag and mode reference.
+
+## Driving the review loop through a real daemon
+
+Everything above tests one module, or the loop with a fake standing in
+somewhere in the chain. `test/e2e/` is different: it boots a real daemon,
+`createDaemon` assembling the same modules `lgtm up` does, in the same order,
+against a fake GitHub on a real loopback socket and the fake `claude` shim on
+PATH. No real network, no real GitHub, no real `claude`; `globalThis.fetch` is
+replaced with one that rewrites `https://api.github.com` onto the fake's port
+and throws on any other host, so a new code path that reaches for the real
+internet fails the suite instead of passing quietly.
+
+```bash
+bun test test/e2e/loop.test.ts     # the journeys alone, about a second
+```
+
+Nine journeys, seventeen tests: watching a repo backfills triage without
+reviewing anything, an auto-class PR gets reviewed and its findings land in
+the API, a triage PR waits and a Skip survives a new commit, the gate posts
+one finding and holds two whose lines left the diff, posting twice is
+refused and recreate replaces the old draft, a draft submitted in GitHub's UI
+stops blocking the next post, a garbage round fails without marking the PR
+reviewed, the auth choke point refuses a missing or wrong bearer and a
+foreign Origin, and the quota gate parks a PR above the pause threshold with
+no round run. `test/e2e/README.md` has the full account, including which
+mutations these tests catch that the module tests don't.
 
 ## Things worth breaking
 

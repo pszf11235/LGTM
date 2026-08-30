@@ -286,6 +286,60 @@ function useInvalidationSignal(): number {
   return signal;
 }
 
+// ─── Ticking clock (elapsed-time labels, no React) ─────────────────────────
+//
+// The SSE stream carries invalidation hints, never a notion of time passing
+// (see the module doc), so a round's elapsed-time label would otherwise only
+// advance when something else happens to trigger a refetch: the daemon's own
+// poll, or another PR's status changing. A round that just started and one
+// about to time out would print the same stale number between those events.
+// This is the same split as `createEventStream`/`useConnectionStatus` above.
+// The scheduling itself (`createTicker`) is a plain, non-React function, so
+// its firing and its `stop()` cancellation can be asserted directly. The
+// hook wrapping it is untested at that layer, for the same reason
+// `useConnectionStatus` is. renderToStaticMarkup never runs effects (see
+// ui.test.ts's "no DOM globals" note).
+
+export interface TickerHandle {
+  stop(): void;
+}
+
+/** Same shape as `EventStreamOptions.setTimer`: real timer by default, a fake in tests, always returning its own canceller. */
+export type IntervalTimer = (fn: () => void, ms: number) => () => void;
+
+function realInterval(fn: () => void, ms: number): () => void {
+  const id = setInterval(fn, ms);
+  return () => clearInterval(id);
+}
+
+/** Calls `onTick` every `intervalMs` until `stop()`. The one place `setInterval` is named in this module. */
+export function createTicker(onTick: () => void, intervalMs: number, setTimer: IntervalTimer = realInterval): TickerHandle {
+  const cancel = setTimer(onTick, intervalMs);
+  return { stop: cancel };
+}
+
+/**
+ * The current time, re-read every `intervalMs` while `enabled`. The component
+ * that calls this owns the ticker: mounting (with `enabled`) starts it,
+ * unmounting or `enabled` going false clears it via the effect's own cleanup,
+ * so nothing keeps ticking once the last elapsed-time row using it is gone.
+ *
+ * `enabled` exists so a view with nothing currently in flight is not woken up
+ * once a second for no reason. Pass `false` and this hook holds its last
+ * value instead of scheduling anything.
+ */
+export function useTick(intervalMs: number, enabled = true): number {
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    if (!enabled) return;
+    const ticker = createTicker(() => setNow(Date.now()), intervalMs);
+    return () => ticker.stop();
+  }, [intervalMs, enabled]);
+
+  return now;
+}
+
 // ─── Data hooks ─────────────────────────────────────────────────────────────
 
 export interface AsyncState<T> {
