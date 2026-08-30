@@ -1,0 +1,119 @@
+/**
+ * The server and the browser client are written against the same design
+ * document and never against each other. That gap shipped two real defects at
+ * once: the client read `owner` where the daemon sends `ref.owner`, and it
+ * treated the `{ prs, total }` envelope as "not an array" and returned an
+ * empty list, so the inbox rendered nothing at all while the store was full.
+ *
+ * These tests put the real route handler and the real client parser on either
+ * end of one round trip, so a shape change on either side fails here rather
+ * than in a browser nobody is looking at.
+ */
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { createApiHandler } from "./server";
+import { createApiClient } from "@/ui/api";
+import { saveMeta, saveRound } from "@/store/reviews";
+import { saveWatchList } from "@/store/watch-list";
+
+const TOKEN = "contract-token";
+const PORT = 4747;
+const ORIGIN = `http://127.0.0.1:${PORT}`;
+
+let lgtmDir: string;
+
+beforeEach(async () => {
+  lgtmDir = fs.mkdtempSync(path.join(os.tmpdir(), "lgtm-contract-"));
+  // `GET /api/prs` defaults to watched repos only, so an unwatched fixture
+  // would come back empty for a reason that has nothing to do with the shape.
+  await saveWatchList([{ owner: "acme", repo: "api", addedAt: "2026-08-30T00:00:00.000Z" }], lgtmDir);
+});
+
+afterEach(() => {
+  fs.rmSync(lgtmDir, { recursive: true, force: true });
+});
+
+/**
+ * The client sends its headers as a `Headers` instance, so they have to be
+ * copied rather than spread. Spreading one yields an empty object and drops
+ * the bearer token, which reads as a 401 and looks like an auth bug.
+ */
+function buildRequest(input: string, init?: RequestInit): Request {
+  const headers = new Headers(init?.headers);
+  headers.set("Host", `127.0.0.1:${PORT}`);
+  headers.set("Origin", ORIGIN);
+  return new Request(input.startsWith("http") ? input : `${ORIGIN}${input}`, { ...init, headers });
+}
+
+/** A client whose transport is the real handler, not a hand-written fixture. */
+function clientOverHandler() {
+  const handler = createApiHandler({ lgtmDir, token: TOKEN, port: PORT, version: "test" });
+  return createApiClient({
+    fetchImpl: (input, init) =>
+      handler(buildRequest(input, init)),
+    storage: { getItem: () => TOKEN, setItem() {}, removeItem() {} },
+    location: { hash: "", pathname: "/", search: "" },
+    history: { replaceState() {} },
+  });
+}
+
+describe("GET /api/prs, daemon to browser", () => {
+  test("a stored PR arrives with its reference intact", async () => {
+    const ref = { owner: "acme", repo: "api", number: 42 };
+    await saveMeta(lgtmDir, ref, {
+      url: "https://github.com/acme/api/pull/42",
+      title: "Add a rate limiter",
+      author: "ada",
+      state: "reviewing",
+      classification: "own",
+      headSha: "abc123",
+    });
+
+    const rows = await clientOverHandler().listPRs();
+
+    // The envelope bug returned [] here while the store held a PR.
+    expect(rows).toHaveLength(1);
+    const pr = rows[0]!;
+    expect(pr.owner).toBe("acme");
+    expect(pr.repo).toBe("api");
+    expect(pr.number).toBe(42);
+    expect(pr.state).toBe("reviewing");
+    expect(pr.title).toBe("Add a rate limiter");
+  });
+
+  test("severity counts survive the trip, so the gate section can appear", async () => {
+    const ref = { owner: "acme", repo: "api", number: 7 };
+    await saveMeta(lgtmDir, ref, { state: "reviewed", headSha: "sha1", author: "ada" });
+    await saveRound(lgtmDir, {
+      ref,
+      round: 1,
+      agent: "reviewer",
+      provider: "claude-cli",
+      status: "ok",
+      headSha: "sha1",
+      startedAt: "2026-08-30T00:00:00.000Z",
+      durationMs: 1000,
+      findings: [
+        { severity: "high", file: "a.ts", line: 3, comment: "one" },
+        { severity: "low", file: "a.ts", line: 9, comment: "two" },
+      ],
+    });
+
+    const pr = (await clientOverHandler().listPRs())[0]!;
+
+    expect(pr.findingCounts.high).toBe(1);
+    expect(pr.findingCounts.low).toBe(1);
+  });
+
+  test("every state the inbox buckets on round-trips by name", async () => {
+    for (const [i, state] of (["triage", "queued", "reviewing", "reviewed", "failed", "skipped"] as const).entries()) {
+      await saveMeta(lgtmDir, { owner: "acme", repo: "api", number: i + 1 }, { state, author: "ada", headSha: "s" });
+    }
+
+    const seen = (await clientOverHandler().listPRs()).map((pr) => pr.state).sort();
+
+    expect(seen).toEqual(["failed", "queued", "reviewed", "reviewing", "skipped", "triage"]);
+  });
+});

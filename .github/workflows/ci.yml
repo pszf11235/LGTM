@@ -1,34 +1,33 @@
 name: CI
 
 on:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
-  check:
-    name: Type Check & Test
-    runs-on: ubuntu-latest
-
+  build:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.4.0"
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile || bun install
+        run: bun install --frozen-lockfile
 
-      - name: Type check
-        run: bun run lint
+      - name: Typecheck
+        run: bunx tsc --noEmit
 
-      - name: Run tests
+      - name: Test
         run: bun test
 
-      - name: Build binary
-        run: bun scripts/build.ts
+      - name: Build
+        run: bun run build.ts
 
-      - name: Verify binary
+      - name: Smoke test the compiled binary
         run: ./dist/lgtm --version

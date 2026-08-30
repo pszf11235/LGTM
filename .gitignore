@@ -22,3 +22,11 @@ Thumbs.db
 .env
 .env.local
 .scratch/
+
+# Local build artefacts and recordings, never committed
+lgtm
+*.bun-build
+.*.bun-build
+*.mp4
+*.mov
+LGTM-review.md

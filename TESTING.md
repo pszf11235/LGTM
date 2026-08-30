@@ -1,128 +1,63 @@
 # Testing LGTM
 
-Two ways to exercise this: the automated suite, and driving the real loop by hand with a fake provider so it costs nothing.
-
-## Automated
+## Running the suite
 
 ```bash
-bun install
-bun run lint            # tsc --noEmit
-bun test                # 420 tests
-bun run build:binary
-./dist/lgtm smoke       # 12 checks against the compiled binary
+bun test              # the whole suite, offline, no network and no AI CLI needed
+bunx tsc --noEmit      # typecheck: strict, plus noUncheckedIndexedAccess
+bun run build.ts       # production binary
 ```
 
-`bun test` includes the loop end to end. `watch-cycle.test.ts` spawns real worker subprocesses against a fake CLI placed on `PATH`, so the process boundary and the output parsing are exercised rather than mocked. That is where the bugs have been.
+Build with `bun run build.ts`, never the `bun build --compile` CLI directly. That path ignores bundler plugins, including the Tailwind one, and ships a binary whose UI is unstyled.
 
-`lgtm smoke` deliberately spawns a worker too. A worker is reached by re-invoking the program itself, and that resolves differently from source than from a compiled binary, so a mistake there would break reviews only in the artefact people download.
+Every test in the suite runs offline. No real network call, no real `claude` or `gh` process, no real launchd. Clocks, timers, `fetch`, and `spawn` are all injected, so a test file's fakes live next to the test, not behind a shared mock you have to go find.
 
-## Driving the loop by hand, with no provider and no token
-
-You do not need a paid CLI or a GitHub token to see the pipeline work. Put a fake provider on `PATH` and point the store somewhere disposable.
+Run one file while you work on it:
 
 ```bash
-export HOME=$(mktemp -d)          # disposable store, keeps your real one intact
-mkdir -p "$HOME/bin" && export PATH="$HOME/bin:$PATH"
-
-cat > "$HOME/bin/claude" <<'SH'
-#!/bin/sh
-cat <<'JSON'
-{"type":"result","result":"```json\n{\"findings\":[{\"file\":\"src/auth.ts\",\"line\":2,\"severity\":\"critical\",\"comment\":\"Hardcoded API key. Move it to an env var before this ships.\"}]}\n```"}
-JSON
-SH
-chmod +x "$HOME/bin/claude"
-
-./dist/lgtm init
-./dist/lgtm ai discover           # claude-cli should now show as available
+bun test src/daemon/cycle.test.ts
 ```
 
-`ai discover` proving the fake is detected is the point: detection walks `PATH` in JS rather than shelling out to `which`, so it sees exactly the `PATH` this process has.
+## Driving the review loop offline
 
-### One review, one process per agent
+`test/fixtures/fake-claude.ts` stands in for the real Claude CLI. It's a Bun script with a shebang, already executable, and it reads the same `-p`, `--output-format`, and `--model` flags the real CLI takes. What it replies with is controlled by `FAKE_CLAUDE_MODE`:
 
-```bash
-./dist/lgtm review watch add acme/app     # any name, nothing is fetched yet
-./dist/lgtm config                        # shows the reviewer agent and its provider
-```
-
-To run a review you need a diff, which means a real repo and PR. Without a token, verify the parts that do not need the network:
-
-```bash
-# the exact request that would create the draft review, with nothing sent
-./dist/lgtm review post owner/repo#1 --dry-run
-```
-
-`--dry-run` works without a token or a reachable API on purpose. It is most useful precisely when the API is not reachable. Check the printed body has `body` and `comments` and **no** `event` key: that absence is what makes the review a draft instead of a published one.
-
-### Two reviewers in parallel
-
-```bash
-cd "$HOME/.lgtm-farm/agents"
-cp reviewer.md second.md
-# `sed -i` differs between GNU and BSD, so rewrite the line portably
-perl -pi -e 's/^provider: auto/provider: codex-cli/' second.md
-cp "$HOME/bin/claude" "$HOME/bin/codex"
-cd -
-
-./dist/lgtm config    # both agents listed, on different providers
-```
-
-With both enabled, a review spawns two worker processes. They report their own durations, and the wall clock is close to the slower one rather than the sum.
-
-### Timeouts
-
-```bash
-printf '#!/bin/sh\nsleep 300\n' > "$HOME/bin/claude" && chmod +x "$HOME/bin/claude"
-
-time (echo '{"mode":"review","provider":"claude-cli","agent":{"name":"r","provider":"claude-cli","model":null,"severity":"high","timeout":2,"enabled":true,"prompt":"p","sourcePath":"x"},"diff":"d"}' \
-  | ./dist/lgtm review internal-worker)
-```
-
-Should return in about two seconds with `"error":"claude timed out after 2s"`. This is worth checking because it used to hang forever: every one of these CLIs spawns subprocesses, those inherit the stdout pipe, and the pipe stays open while any of them lives, so killing the CLI and then reading its output to completion never finished.
-
-## With a real repo
-
-```bash
-unset GITHUB_TOKEN        # so gh auth token is used
-gh auth login             # if you have not already
-
-lgtm discover --ingest ~/projects   # pick repos with `a`, or `A` for all
-lgtm review watch list              # confirm they arrived in the watcher
-lgtm watch --once                   # one pass
-lgtm review list                    # findings, per round, per agent
-lgtm review discard owner/repo#42 -f f3
-lgtm review post owner/repo#42 --dry-run
-lgtm review post owner/repo#42
-```
-
-Then open the PR. The draft is visible only to you, with each comment on its diff line. Edit the wording, delete any you disagree with, and submit from GitHub, or run `lgtm review submit owner/repo#42`.
-
-Push a commit to that PR and run `lgtm watch --once` again. It should verify the findings you posted, report how many look resolved, and then review the new state without repeating what is still open.
-
-## Things worth breaking on purpose
-
-| Try | Expected |
+| Mode | What it emits |
 |---|---|
-| Run `lgtm watch` with nothing watched | Points at `discover --ingest`, does not error |
-| Remove every provider from `PATH` | One clear report before polling, not one error per PR |
-| Accept a repo with no git remote during ingest | "not watched (no git remote)", counted separately |
-| Finish `discover --ingest` with `q`, `a`, `s` or `A` | Prints the summary and **exits**, rather than sitting there |
-| `provider: nonsense` in an agent file | Falls back to `auto` rather than failing the review |
-| `severity: catastrophic` in an agent file | Falls back to `high` |
-| A finding on a line outside the diff | Held back with a reason, and declared in the review summary |
-| `lgtm review post` twice | Refuses the second, points at `--recreate` |
-| `lgtm review post --dry-run`, then `review list` | Nothing changed on disk. A preview writes nothing. |
-| `lgtm review pr <ref> --force` on an already reviewed commit | Reviews it again at the next round, instead of skipping |
-| `lgtm review discard` on a posted finding | Refuses. It is already on GitHub. |
-| `lgtm review discard -f f1` when two rounds both have an `f1` | Refuses as ambiguous and prints the `round:agent:id` forms |
-| Kill the provider mid-review so every agent fails | The PR is **not** marked reviewed, so the next cycle retries it |
-| Hand-edit a round file and delete a `posted:` flag | Reads as unposted, never as posted |
-| Corrupt one round file's YAML | That file is skipped, the PR still loads |
-| Two round files with byte-identical content | Editing one leaves the other alone |
+| `json` (default) | A valid envelope with two findings; the main parsing path |
+| `prose` | Markdown-formatted findings inside the envelope; exercises the prose fallback |
+| `garbage` | Unparseable text; exercises the failed-round and `.raw.txt` path |
+| `empty` | A valid envelope with zero findings |
+| `timeout` | Sleeps 30 seconds, past any real timeout; exercises the kill-and-salvage path |
+| `crash` | Exits 1 with nothing on stdout |
+| `usage` | The quota gate's `/usage` output, regardless of the prompt |
 
-## Cleaning up
+The provider and quota tests spawn this script directly by absolute path, the way the real daemon spawns a resolved binary:
+
+```ts
+const SHIM = join(import.meta.dir, "../../test/fixtures/fake-claude.ts");
+process.env.FAKE_CLAUDE_MODE = "prose";
+const outcome = await run({ ...input, binPath: SHIM });
+```
+
+`src/provider/claude.test.ts` and `src/provider/index.test.ts` run the real subprocess round trip against every mode. `src/daemon/quota.test.ts` spawns the shim in `usage` mode for the quota parser. The daemon-level cycle and boot tests inject a fake `review` function instead of spawning a process, so they don't touch the shim directly, but they do run the rest of the loop, classify, queue, gate, dry-run post, against fixture data with no I/O at all.
+
+To point a script or a manual run at the shim instead of the real CLI, set `claude_path` in `config.md` to the shim's absolute path (a manual pin skips the binary resolver's own PATH probe) and set `FAKE_CLAUDE_MODE` before starting whatever you're running. `test/fixtures/README.md` has the full flag and mode reference.
+
+## Things worth breaking
+
+design.md's testing section names seven regressions from the old codebase that already bit once. They're gathered in `src/regression.test.ts`, one `describe` block per item, deliberately away from the module tests, because each one crosses a seam a module test in isolation can't see:
 
 ```bash
-rm -rf "$HOME"        # only the temp dir from above
-task reset            # or wipe the real store
+bun test src/regression.test.ts
 ```
+
+1. A repo added through the API lands in `watch.md` and gets polled on the very next cycle, not the one after.
+2. The documented default poll interval, 15 minutes, is the actual default, not just what the docs claim.
+3. A missing `claude` or `gh` binary, and rc-file chatter from the login-shell probe (motd, nvm, direnv), never leak onto the daemon's own stderr during detection.
+4. PR listing respects GitHub's pagination. A repo with more open PRs than fit on one page doesn't silently lose the rest.
+5. Dry-run posting writes nothing, not to GitHub, not to the store.
+6. Cache and store keys are qualified by repo, so two watched repos never share one, whether that's an ETag or a review directory for the same PR number.
+7. A round where every finding fails validation, or where the CLI's output didn't parse at all, does not mark the PR reviewed. The next cycle has to retry it.
+
+If a change touches the poll cycle, the parser, or posting, check whether it can regress one of these before calling it done.
