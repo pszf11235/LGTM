@@ -45,6 +45,18 @@ export function apiBind(): Bind {
         lastCycle: context.lastCycle,
         githubToken: context.githubToken,
         config: { load: loadConfig, update: updateConfig },
+        // Settings changes reach the running daemon rather than waiting for a
+        // restart. QuotaThresholds is structurally a subset of Config, and the
+        // scheduler clamps a nonsensical interval to its default rather than
+        // disabling itself or spinning.
+        onConfigChange: (config) => {
+          context.scheduler.setIntervalMinutes(config.interval_minutes);
+          context.quota.setThresholds({
+            pause_above_pct: config.pause_above_pct,
+            resume_below_pct: config.resume_below_pct,
+            daily_cap: config.daily_cap,
+          });
+        },
       });
       return { port: server.port, stop: () => server.stop() };
     } catch (error) {

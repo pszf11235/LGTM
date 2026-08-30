@@ -90,7 +90,7 @@ export async function loadAgent(lgtmDir: string, name: string): Promise<AgentCon
     name,
     provider: parseProvider(name, data.provider, fallback.provider),
     model: parseString(data.model, fallback.model),
-    severityFloor: parseSeverity(data.severity_floor, fallback.severityFloor),
+    severityFloor: parseSeverity(data.severity_floor ?? data.severity, fallback.severityFloor),
     timeoutMinutes: parseTimeoutMinutes(name, data.timeout_minutes, fallback.timeoutMinutes),
     enabled: parseEnabled(data.enabled),
     prompt: doc.content,
@@ -125,6 +125,11 @@ export async function loadEnabledAgents(lgtmDir: string): Promise<AgentConfig[]>
 
 function parseProvider(agentName: string, value: unknown, fallback: ProviderId): ProviderId {
   if (value === undefined || value === null) return fallback;
+  // "auto" is what the previous version wrote when it picked a provider from
+  // whatever was installed. v1 has exactly one, so the honest reading of "pick
+  // for me" is that one rather than an error. Kept as an alias so a store
+  // written by the old version keeps reviewing instead of failing every Round.
+  if (value === "auto") return fallback;
 
   if (typeof value !== "string" || !PROVIDER_ID_SET.has(value)) {
     throw new Error(

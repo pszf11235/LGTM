@@ -55,6 +55,8 @@ import { createGitHubAdapter, type EtagStore } from "@/forge/github/adapter";
 import { resolveGitHubToken } from "@/forge/github/auth";
 import { loadConfig as loadStoreConfig, type Config } from "@/store/config";
 import { getStorePath } from "@/store/paths";
+import { loadAgent } from "@/store/agents";
+import { DEFAULT_AGENT_NAME } from "@/store/defaults";
 import { loadMeta } from "@/store/reviews";
 import { createBinaryResolver, type BinaryResolver, type BinaryStatus } from "./binaries";
 import {
@@ -484,6 +486,10 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
       lgtmDir,
       forge,
       events,
+      // Read per Round, never cached, so editing agents/reviewer.md changes
+      // the next review without a restart (R3.2). A broken file fails that
+      // Round by name rather than silently reviewing with defaults.
+      agent: () => loadAgent(lgtmDir, DEFAULT_AGENT_NAME),
       binPath: () => binaries.resolve("claude"),
       review: options.review,
       now: isoNow,

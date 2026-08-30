@@ -185,6 +185,11 @@ export function startApiServer(options: ApiServerOptions): ApiServer {
     hostname: API_HOSTNAME,
     port: deps.port,
     idleTimeout: 120,
+    // Hot module reloading for the SPA under `bun run dev`, so a UI change is
+    // visible without rebuilding the binary. build.ts defines NODE_ENV as
+    // production, so the compiled binary serves prebuilt assets and does not
+    // expose Bun's verbose error pages.
+    development: process.env.NODE_ENV !== "production",
     routes: {
       // Unauthenticated on purpose. A shell with no data in it; everything it
       // shows arrives over the authenticated API afterwards.

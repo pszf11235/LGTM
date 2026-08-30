@@ -367,12 +367,23 @@ function findingCounts(value: unknown): FindingCounts {
   };
 }
 
+/**
+ * Flatten one row of `GET /api/prs`.
+ *
+ * The server nests the reference under `ref` and reports findings as a full
+ * lifecycle breakdown under `findings`, with the severities the gate cares
+ * about in `findings.pendingBySeverity`. This view wants a flat row, so the
+ * translation happens here rather than in every component. Reading the flat
+ * keys as a fallback keeps a server that ever inlines them working too.
+ */
 function toPRListItem(raw: unknown): PRListItem {
   const rec = asRecord(raw);
+  const ref = asRecord(rec.ref);
+  const findings = asRecord(rec.findings);
   return {
-    owner: str(rec.owner),
-    repo: str(rec.repo),
-    number: num(rec.number),
+    owner: str(ref.owner ?? rec.owner),
+    repo: str(ref.repo ?? rec.repo),
+    number: num(ref.number ?? rec.number),
     url: str(rec.url),
     title: str(rec.title, "untitled"),
     author: str(rec.author),
@@ -389,7 +400,7 @@ function toPRListItem(raw: unknown): PRListItem {
     changedFiles: nullableNum(rec.changedFiles),
     mergeable: nullableBool(rec.mergeable),
     checkStatus: checkState(rec.checkStatus),
-    findingCounts: findingCounts(rec.findingCounts),
+    findingCounts: findingCounts(findings.pendingBySeverity ?? rec.findingCounts),
   };
 }
 
@@ -608,7 +619,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }
       const qs = params.toString();
       const body = await getJson<unknown>(`/api/prs${qs ? `?${qs}` : ""}`);
-      return Array.isArray(body) ? body.map(toPRListItem) : [];
+      // The daemon answers `{ prs, total }`. Treating a non-array as "no PRs"
+      // silently emptied the whole inbox, so read the envelope and only fall
+      // back to a bare array.
+      const rows = Array.isArray(body) ? body : asRecord(body).prs;
+      return Array.isArray(rows) ? rows.map(toPRListItem) : [];
     },
 
     async getFindings(ref) {
