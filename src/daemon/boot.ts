@@ -544,7 +544,12 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     binaries,
     forge,
     lastCycle: () => lastCycle,
-    githubToken: () => (githubTokenPresent ? "present" : null),
+    // The real token, not a presence flag. `/api/status` only ever asks whether
+    // this is non-null, but the post flow uses the same function as the bearer
+    // it sends to GitHub, so handing back a placeholder made every post a 401.
+    // Re-resolved per call rather than captured, because a token rotated while
+    // the daemon runs has to be picked up without a restart.
+    githubToken: () => resolveToken(binaries.resolve("gh")),
   };
   const bound: { server: BoundServer | null } = { server: null };
   let selection: SelectPortResult;
