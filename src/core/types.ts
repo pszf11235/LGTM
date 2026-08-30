@@ -149,6 +149,35 @@ export interface PRMeta {
   pendingReviewId: number | null;
   closedAt: string | null;
   updatedAt: string;
+
+  // ── Triage metadata ───────────────────────────────────────────────────
+  //
+  // The inbox line R2.5 asks for: author, additions and deletions, files
+  // changed, age, mergeable state, CI status. All six are nullable because
+  // they come from the per-PR detail endpoint and the Checks API, which the
+  // daemon calls only for PRs entering triage or the backfill list
+  // (design.md, "Poll cycle"). A PR known from a list row alone has not been
+  // detail-fetched, and null says exactly that. The UI renders null as a
+  // dash; it must never be filled in with a zero, which would read as a
+  // measured "no changes".
+
+  /** When the PR was opened, for the inbox's age column. */
+  createdAt: string | null;
+  additions: number | null;
+  deletions: number | null;
+  changedFiles: number | null;
+  /**
+   * Null while GitHub is still computing it, which renders as "computing".
+   * Never coerce it to false: telling someone their PR conflicts when it
+   * does not is worse than saying nothing.
+   */
+  mergeable: boolean | null;
+  /**
+   * Combined CI state for `headSha`. Null means the Checks API was never
+   * read for this PR; `"none"` is the different, measured answer that it was
+   * read and no check runs are registered.
+   */
+  checkStatus: CheckState | null;
 }
 
 // ─── Forge results ──────────────────────────────────────────────────────────
@@ -181,10 +210,17 @@ export interface PRDetail extends PRSummary {
   mergeable: boolean | null;
 }
 
+/**
+ * The vocabulary of a combined CI answer. Named on its own because it is
+ * stored as well as fetched: `PRMeta.checkStatus` keeps the state for a
+ * triage PR's head SHA without the run list behind it.
+ */
+export type CheckState = "success" | "failure" | "pending" | "none";
+
 /** Combined CI status for one head SHA, read from the Checks API only (see design.md, deferred decisions). */
 export interface CheckStatus {
   /** "none" means no check runs are registered for this SHA. */
-  state: "success" | "failure" | "pending" | "none";
+  state: CheckState;
   runs: Array<{
     name: string;
     status: "queued" | "in_progress" | "completed";

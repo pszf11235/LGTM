@@ -11,6 +11,13 @@
  * is all any harness here can exercise. FindingCard is the one exception:
  * it is pure and props-in, so it is tested with real content, not just a
  * loading placeholder.
+ *
+ * `Reviews.filterToQuery` gets a different treatment: it is the one place a
+ * filter bar selection becomes a `/api/prs` query, and a wrong mapping
+ * shows the user the wrong set of PRs while looking exactly like a healthy,
+ * empty result. That is tested against the real client (`listPRs`) and a
+ * stub `fetch`, asserting the literal request path for every status and
+ * completed-toggle combination, not against a hand-written fixture.
  */
 import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
@@ -35,7 +42,14 @@ import {
   type InvalidationHint,
 } from "./hooks";
 import { FindingCard, type FindingCardProps } from "./components/FindingCard";
-import { Inbox } from "./views/Inbox";
+import {
+  CLOSED_FILTERS,
+  filterToQuery,
+  Reviews,
+  STATUS_FILTERS,
+  type ClosedFilter,
+  type StatusFilter,
+} from "./views/Reviews";
 import { PRDetail } from "./views/PRDetail";
 
 // ─── Stubs ──────────────────────────────────────────────────────────────────
@@ -356,6 +370,107 @@ describe("totalFindings", () => {
   });
 });
 
+// ─── Reviews: filterToQuery ─────────────────────────────────────────────────
+//
+// A wrong mapping here shows the user the wrong set of PRs and reads as
+// data loss, not as a filter doing its job — so every status is asserted
+// against every completed-toggle position, run through the real
+// `listPRs` and a stub `fetch`, against the literal request path.
+
+async function requestedPath(status: StatusFilter, closed: ClosedFilter): Promise<string> {
+  const { fetch, calls } = stubFetch(() => json([]));
+  const client = createApiClient({
+    fetchImpl: fetch,
+    storage: memoryStorage(),
+    location: stubLocation("#t=tok"),
+    history: stubHistory(),
+  });
+
+  await client.listPRs(filterToQuery(status, closed));
+
+  const call = calls[0];
+  if (!call) throw new Error("listPRs made no request");
+  return call.input;
+}
+
+describe("Reviews.filterToQuery", () => {
+  test("every status a PR can be in has a filter option", () => {
+    expect(STATUS_FILTERS.map((f) => f.id)).toEqual([
+      "all",
+      "triage",
+      "in-review",
+      "ready-to-gate",
+      "reviewed",
+      "failed",
+      "skipped",
+    ]);
+  });
+
+  test("the completed toggle has exactly the server's three positions", () => {
+    expect(CLOSED_FILTERS.map((f) => f.id)).toEqual(["exclude", "include", "only"]);
+  });
+
+  const EXPECTED: Record<StatusFilter, Record<ClosedFilter, string>> = {
+    all: {
+      exclude: "/api/prs?closed=exclude",
+      include: "/api/prs?closed=include",
+      only: "/api/prs?closed=only",
+    },
+    triage: {
+      exclude: "/api/prs?state=triage&closed=exclude",
+      include: "/api/prs?state=triage&closed=include",
+      only: "/api/prs?state=triage&closed=only",
+    },
+    "in-review": {
+      exclude: "/api/prs?state=queued%2Creviewing&closed=exclude",
+      include: "/api/prs?state=queued%2Creviewing&closed=include",
+      only: "/api/prs?state=queued%2Creviewing&closed=only",
+    },
+    "ready-to-gate": {
+      exclude: "/api/prs?closed=exclude&withFindings=true",
+      include: "/api/prs?closed=include&withFindings=true",
+      only: "/api/prs?closed=only&withFindings=true",
+    },
+    reviewed: {
+      exclude: "/api/prs?state=reviewed&closed=exclude",
+      include: "/api/prs?state=reviewed&closed=include",
+      only: "/api/prs?state=reviewed&closed=only",
+    },
+    failed: {
+      exclude: "/api/prs?state=failed&closed=exclude",
+      include: "/api/prs?state=failed&closed=include",
+      only: "/api/prs?state=failed&closed=only",
+    },
+    skipped: {
+      exclude: "/api/prs?state=skipped&closed=exclude",
+      include: "/api/prs?state=skipped&closed=include",
+      only: "/api/prs?state=skipped&closed=only",
+    },
+  };
+
+  for (const status of STATUS_FILTERS.map((f) => f.id)) {
+    for (const closed of CLOSED_FILTERS.map((f) => f.id)) {
+      const expected = EXPECTED[status][closed];
+      const isDefault = status === "all" && closed === "exclude";
+
+      test(`${status} + ${closed}${isDefault ? " (the view's default)" : ""} requests exactly ${expected}`, async () => {
+        expect(await requestedPath(status, closed)).toBe(expected);
+      });
+    }
+  }
+
+  test("ready-to-gate never sends a state param — it is not one state, it cuts across every state", () => {
+    const filter = filterToQuery("ready-to-gate", "exclude");
+    expect(filter.state).toBeUndefined();
+    expect(filter.withFindings).toBe(true);
+  });
+
+  test("in-review means queued or reviewing, not failed — failed is its own filter", () => {
+    const filter = filterToQuery("in-review", "exclude");
+    expect(filter.state).toEqual(["queued", "reviewing"]);
+  });
+});
+
 // ─── hooks.ts: createEventStream ────────────────────────────────────────────
 
 /** A minimal EventTarget-shaped stub: enough surface for createEventStream, nothing else. */
@@ -599,9 +714,9 @@ describe("createEventStream", () => {
 // expected *initial* markup without throwing. api.ts/hooks.ts above are
 // where the actual data-flow logic is covered.
 
-describe("Inbox (smoke)", () => {
+describe("Reviews (smoke)", () => {
   test("renders its initial loading state without throwing", () => {
-    const html = renderToStaticMarkup(createElement(Inbox));
+    const html = renderToStaticMarkup(createElement(Reviews));
     expect(html).toContain("Loading");
   });
 });

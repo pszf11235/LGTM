@@ -40,6 +40,7 @@ import { createOKFStore } from "./okf.js";
 import type { OKFDocument } from "./okf.js";
 import { formatFindingKey } from "@/core";
 import type {
+  CheckState,
   Classification,
   Finding,
   FindingState,
@@ -324,6 +325,32 @@ const CLASSIFICATIONS: ReadonlySet<string> = new Set<Classification>([
   "none",
 ]);
 
+const CHECK_STATES: ReadonlySet<string> = new Set<CheckState>(["success", "failure", "pending", "none"]);
+
+/**
+ * The triage-metadata fields are all nullable, and null is a real answer
+ * ("never fetched"), not a parse failure. A missing key, a hand-deleted
+ * value, or a string where a number belongs all read as null rather than
+ * throwing or, worse, as 0.
+ */
+function nullableNumber(value: unknown): number | null {
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * `mergeable` gets its own reader because it is the one field where a wrong
+ * default does damage. GitHub answers null while it computes mergeability,
+ * and that must stay null all the way to the browser, which renders it as
+ * "computing". Anything that is not a real boolean is null, never false.
+ * Telling someone their PR conflicts when it does not is worse than saying
+ * nothing at all.
+ */
+function nullableBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
 /**
  * Load a PR's metadata. Null means this PR has never been seen, which is how
  * the watcher tells a brand new PR from one already known.
@@ -354,6 +381,12 @@ export async function loadMeta(lgtmDir: string, ref: PRRef): Promise<PRMeta | nu
     pendingReviewId: data.pendingReviewId == null ? null : Number(data.pendingReviewId),
     closedAt: data.closedAt == null ? null : String(data.closedAt),
     updatedAt: String(data.updatedAt ?? ""),
+    createdAt: data.createdAt == null ? null : String(data.createdAt),
+    additions: nullableNumber(data.additions),
+    deletions: nullableNumber(data.deletions),
+    changedFiles: nullableNumber(data.changedFiles),
+    mergeable: nullableBoolean(data.mergeable),
+    checkStatus: CHECK_STATES.has(data.checkStatus as string) ? (data.checkStatus as CheckState) : null,
   };
 }
 
@@ -395,6 +428,18 @@ export async function saveMeta(lgtmDir: string, ref: PRRef, update: MetaUpdate =
       "pendingReviewId" in update ? (update.pendingReviewId ?? null) : (existing?.pendingReviewId ?? null),
     closedAt: "closedAt" in update ? (update.closedAt ?? null) : (existing?.closedAt ?? null),
     updatedAt: new Date().toISOString(),
+    // Every triage field takes the `in` form rather than `??`, so a caller
+    // can write a measured null over a stale value. That matters most for
+    // `mergeable`. A PR that starts conflicting and is then rebased goes
+    // false -> null while GitHub recomputes, and `??` would keep showing the
+    // old conflict.
+    createdAt: "createdAt" in update ? (update.createdAt ?? null) : (existing?.createdAt ?? null),
+    additions: "additions" in update ? (update.additions ?? null) : (existing?.additions ?? null),
+    deletions: "deletions" in update ? (update.deletions ?? null) : (existing?.deletions ?? null),
+    changedFiles:
+      "changedFiles" in update ? (update.changedFiles ?? null) : (existing?.changedFiles ?? null),
+    mergeable: "mergeable" in update ? (update.mergeable ?? null) : (existing?.mergeable ?? null),
+    checkStatus: "checkStatus" in update ? (update.checkStatus ?? null) : (existing?.checkStatus ?? null),
   };
 
   const store = createOKFStore(lgtmDir);
@@ -415,6 +460,9 @@ function metaBody(meta: PRMeta): string {
   if (meta.headSha) lines.push(`Head: \`${meta.headSha.slice(0, 12)}\``);
   if (meta.lastReviewedSha) lines.push(`Last reviewed: \`${meta.lastReviewedSha.slice(0, 12)}\``);
 
+  const triage = triageLine(meta);
+  if (triage) lines.push(triage);
+
   if (meta.pendingReviewId) {
     lines.push("", `A draft review is open on GitHub. Edit and submit it at ${meta.url}/files`);
   }
@@ -424,6 +472,30 @@ function metaBody(meta: PRMeta): string {
   }
 
   return lines.join("\n") + "\n";
+}
+
+/**
+ * The triage metadata as one readable line, or nothing when none of it has
+ * been fetched. Each part is omitted on its own, so a PR whose detail landed
+ * but whose Checks call failed still reads its size.
+ *
+ * `mergeable: null` is deliberately absent rather than rendered as a word.
+ * The frontmatter above carries the null for anything reading the file as
+ * data, and a body line claiming anything about mergeability while GitHub is
+ * still computing it would be the one sentence here that could mislead.
+ */
+function triageLine(meta: PRMeta): string | null {
+  const parts: string[] = [];
+
+  if (meta.additions !== null || meta.deletions !== null) {
+    const size = `+${meta.additions ?? 0} -${meta.deletions ?? 0}`;
+    parts.push(meta.changedFiles !== null ? `${size} across ${meta.changedFiles} file(s)` : size);
+  }
+
+  if (meta.mergeable !== null) parts.push(meta.mergeable ? "mergeable" : "conflicts");
+  if (meta.checkStatus !== null) parts.push(`checks: ${meta.checkStatus}`);
+
+  return parts.length > 0 ? `Changes: ${parts.join(", ")}` : null;
 }
 
 // ─── Finding mutations ──────────────────────────────────────────────────────

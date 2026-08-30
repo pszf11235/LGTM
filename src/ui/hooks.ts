@@ -202,10 +202,10 @@ export function createEventStream(options: EventStreamOptions): EventStreamHandl
 // ─── One shared connection for the whole tab ───────────────────────────────
 //
 // Every hook below rides the same EventSource rather than opening one each,
-// so mounting both the PR list and the status panel in one view (Inbox does
-// exactly that) does not double the daemon's SSE fan-out. Ref-counted so the
-// connection closes when the last subscriber unmounts and reopens on the
-// next one, rather than leaking or being pinned open forever.
+// so mounting both the PR list and the status panel in one view (Reviews
+// does exactly that) does not double the daemon's SSE fan-out. Ref-counted
+// so the connection closes when the last subscriber unmounts and reopens on
+// the next one, rather than leaking or being pinned open forever.
 
 interface SharedStream {
   handle: EventStreamHandle;
@@ -250,7 +250,7 @@ function releaseSharedStream(s: SharedStream) {
   }
 }
 
-/** Live connection health, for a "the daemon may be unreachable" indicator (Inbox's empty-state health check). */
+/** Live connection health, for a "the daemon may be unreachable" indicator (the Reviews view's empty-state health check). */
 export function useConnectionStatus(): ConnectionStatus {
   const [status, setStatus] = useState<ConnectionStatus>(() => shared?.state.status ?? "connecting");
 
@@ -331,13 +331,15 @@ function useApiQuery<T>(run: (client: ApiClient) => Promise<T>, deps: Dependency
   return state;
 }
 
-/** Triage PRs and PRs with ungated findings, for the Inbox (R2.5, R5.1). */
+/** The filtered PR list behind the Reviews view (R2.5, R5.1). Refetches whenever any part of `filter` changes, not only `state`. */
 export function usePRList(filter?: PRListFilter): AsyncState<PRListItem[]> {
   const stateKey = !filter?.state ? "" : Array.isArray(filter.state) ? filter.state.join(",") : filter.state;
-  return useApiQuery((client) => client.listPRs(filter), [stateKey]);
+  const closedKey = filter?.closed ?? "";
+  const withFindingsKey = filter?.withFindings ? "1" : "";
+  return useApiQuery((client) => client.listPRs(filter), [stateKey, closedKey, withFindingsKey]);
 }
 
-/** Daemon uptime, last cycle, queue and quota — the Inbox empty state's health check. */
+/** Daemon uptime, last cycle, queue and quota — feeds the Reviews view's empty-state health check. */
 export function useStatus(): AsyncState<StatusResponse> {
   return useApiQuery((client) => client.status(), []);
 }

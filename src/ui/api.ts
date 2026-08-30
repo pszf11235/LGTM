@@ -189,7 +189,7 @@ export function totalFindings(counts: FindingCounts): number {
   return SEVERITY_ORDER.reduce((sum, sev) => sum + counts[sev], 0);
 }
 
-/** One row of `GET /api/prs`: meta plus the triage metadata R2.5 asks the inbox to show. */
+/** One row of `GET /api/prs`: meta plus the triage metadata R2.5 asks the Reviews view to show. */
 export interface PRListItem {
   owner: string;
   repo: string;
@@ -216,8 +216,19 @@ export interface PRListItem {
   findingCounts: FindingCounts;
 }
 
+/**
+ * The three server-side filters `/api/prs` accepts (design.md, "HTTP API";
+ * exact values in src/api/routes.ts's `listPRs`). `state` and `withFindings`
+ * are mutually meaningful — "ready to gate" cuts across states rather than
+ * naming one — so both are optional and either, both, or neither may be
+ * set alongside `closed`.
+ */
 export interface PRListFilter {
   state?: PRState | PRState[];
+  /** `exclude` | `include` | `only`; the server defaults to `exclude` when omitted. */
+  closed?: "exclude" | "include" | "only";
+  /** Only PRs with findings still in front of the Gate (open or held). */
+  withFindings?: boolean;
 }
 
 /** One finding as the findings endpoint renders it: the round's data plus its sliced hunk. */
@@ -279,7 +290,8 @@ export interface WatchEntry {
   lastPolledAt: string | null;
 }
 
-export interface ConfigResponse {
+/** The settings themselves. */
+export interface ConfigValues {
   interval_minutes: number;
   pause_above_pct: number;
   resume_below_pct: number;
@@ -287,6 +299,17 @@ export interface ConfigResponse {
   concurrency: number;
   claude_path?: string;
   gh_path?: string;
+}
+
+/**
+ * What `/api/config` actually answers. The daemon sends the current values
+ * beside the built-in defaults, so the settings view can show what a field
+ * would fall back to. Declaring this flat made the type a lie that happened
+ * to work, since the body was passed through unread.
+ */
+export interface ConfigResponse {
+  config: ConfigValues;
+  defaults: ConfigValues;
 }
 
 // ─── Coercion helpers ───────────────────────────────────────────────────────
@@ -465,19 +488,36 @@ function toPRFindingsResponse(raw: unknown): PRFindingsResponse {
 
 function toStatusResponse(raw: unknown): StatusResponse {
   const rec = asRecord(raw);
-  const cycle = rec.lastCycle && typeof rec.lastCycle === "object" ? asRecord(rec.lastCycle) : null;
+  // The daemon nests: scheduler, queue, quota, binaries and counts are each
+  // their own object. Reading flat keys off the top level found nothing and
+  // fell back to the defaults below, so the health panel showed a plausible
+  // interval and an empty queue no matter what the daemon was doing.
+  const scheduler = asRecord(rec.scheduler);
+  const queue = asRecord(rec.queue);
+  const quota = asRecord(rec.quota);
+  const counts = asRecord(rec.counts);
+  const cycle = asRecord(scheduler.lastCycleOutcome);
+  const binaries = Array.isArray(rec.binaries) ? rec.binaries.map(asRecord) : [];
+  const pathOf = (name: string): string | null => {
+    const hit = binaries.find((b) => b.name === name);
+    return hit ? nullableStr(hit.path) : null;
+  };
+  const mode = quota.mode;
+
   return {
     uptimeMs: num(rec.uptimeMs),
     startedAt: nullableStr(rec.startedAt),
-    intervalMinutes: num(rec.intervalMinutes, 15),
-    lastCycle: cycle ? { at: str(cycle.at), outcome: cycle.outcome === "error" ? "error" : "ok" } : null,
-    nextPollAt: nullableStr(rec.nextPollAt),
-    queueLength: num(rec.queueLength),
-    triageCount: num(rec.triageCount),
-    awaitingGate: num(rec.awaitingGate),
-    quotaMode: rec.quotaMode === "throttled" || rec.quotaMode === "fallback" ? rec.quotaMode : "ok",
-    claudePath: nullableStr(rec.claudePath),
-    ghPath: nullableStr(rec.ghPath),
+    intervalMinutes: num(scheduler.intervalMinutes, 15),
+    lastCycle: scheduler.lastCycleAt
+      ? { at: str(scheduler.lastCycleAt), outcome: cycle.status === "error" ? "error" : "ok" }
+      : null,
+    nextPollAt: nullableStr(scheduler.nextCycleAt),
+    queueLength: num(queue.queued) + num(queue.inFlight),
+    triageCount: num(counts.triage),
+    awaitingGate: num(counts.awaitingGate),
+    quotaMode: mode === "throttled" || mode === "fallback" ? mode : "ok",
+    claudePath: pathOf("claude"),
+    ghPath: pathOf("gh"),
   };
 }
 
@@ -521,10 +561,11 @@ export interface ApiClient {
   validate(ref: PRRef): Promise<FindingVerdict[]>;
   post(ref: PRRef, input: { body?: string; recreate?: boolean; dryRun?: boolean }): Promise<PostResult>;
   listWatch(): Promise<WatchEntry[]>;
-  addWatch(repo: RepoRef): Promise<PRListItem[]>;
+  /** The backfill list to confirm. Rows are the server's backfill shape, not PR rows. */
+  addWatch(repo: RepoRef): Promise<{ repo: RepoRef; entries: unknown[] }>;
   removeWatch(repo: RepoRef): Promise<void>;
   getConfig(): Promise<ConfigResponse>;
-  patchConfig(patch: Partial<ConfigResponse>): Promise<ConfigResponse>;
+  patchConfig(patch: Partial<ConfigValues>): Promise<ConfigResponse>;
 }
 
 function prPath(ref: PRRef, suffix: string): string {
@@ -617,11 +658,13 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         const states = Array.isArray(filter.state) ? filter.state : [filter.state];
         params.set("state", states.join(","));
       }
+      if (filter?.closed) params.set("closed", filter.closed);
+      if (filter?.withFindings) params.set("withFindings", "true");
       const qs = params.toString();
       const body = await getJson<unknown>(`/api/prs${qs ? `?${qs}` : ""}`);
       // The daemon answers `{ prs, total }`. Treating a non-array as "no PRs"
-      // silently emptied the whole inbox, so read the envelope and only fall
-      // back to a bare array.
+      // silently emptied the whole Reviews view, so read the envelope and
+      // only fall back to a bare array.
       const rows = Array.isArray(body) ? body : asRecord(body).prs;
       return Array.isArray(rows) ? rows.map(toPRListItem) : [];
     },
@@ -665,7 +708,10 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
 
     async listWatch() {
       const body = await getJson<unknown>("/api/watchlist");
-      const list = Array.isArray(body) ? body : [];
+      // The daemon answers `{ repos }`. Same envelope shape as /api/prs, and
+      // the same silent-empty-list bug if it is read as a bare array.
+      const envelope = asRecord(body).repos;
+      const list = Array.isArray(body) ? body : Array.isArray(envelope) ? envelope : [];
       return list.map((w) => {
         const rec = asRecord(w);
         return {
@@ -678,8 +724,16 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     },
 
     async addWatch(repo) {
+      // The response is the backfill list, whose rows carry the confirm pane's
+      // own vocabulary (`mergeable` as a word, `checks`, `preSelected`) rather
+      // than a PR row. Parsing it as one produced a list of nulls, so it is
+      // returned as sent and typed as what it is.
       const body = await sendJson<unknown>("/api/watchlist", "POST", repo);
-      return Array.isArray(body) ? body.map(toPRListItem) : [];
+      const rec = asRecord(body);
+      return {
+        repo: { owner: str(asRecord(rec.repo).owner), repo: str(asRecord(rec.repo).repo) },
+        entries: Array.isArray(rec.entries) ? rec.entries : [],
+      };
     },
 
     async removeWatch(repo) {

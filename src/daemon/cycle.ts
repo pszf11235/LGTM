@@ -15,7 +15,10 @@
  *    "Store layout"). A hundred watched PRs that rewrote `meta.md` every
  *    fifteen minutes would be a hundred invalidations an hour for no news.
  *    So the write is conditional on there being something to say, and the
- *    "unchanged PR writes nothing" test exists to keep it that way.
+ *    "unchanged PR writes nothing" test exists to keep it that way. Triage
+ *    metadata obeys the same rule from the other side: it is fetched only
+ *    when it can have changed, and a fetch that comes back identical to
+ *    what is on disk is dropped rather than written.
  *
  * 2. One repo's failure is that repo's failure. A dead token, a repo renamed
  *    out from under the watch list, a rate limit: each of those must leave
@@ -68,6 +71,7 @@ import type {
   NotModified,
   PRMeta,
   PRRef,
+  PRState,
   PRSummary,
   RepoRef,
 } from "@/core";
@@ -436,20 +440,143 @@ async function handleOpenPR(
   const reconciled = await reconcilePendingReview(deps, ref, meta);
   if (reconciled) patch.pendingReviewId = null;
 
+  // The state this PR ends the cycle in, which is what decides whether it
+  // wants triage metadata. `patch` never carries a state after this point, so
+  // reading it before the write is the same as reading it after.
+  const state = patch.state ?? meta?.state ?? null;
+
+  // Folded into the same patch, so a PR that both changes state and gets
+  // fresh metadata still costs one write and one fs.watch event.
+  const triage = await refreshTriageMetadata(deps, ref, summary, meta, state);
+  if (triage) Object.assign(patch, triage);
+
   if (dequeue) deps.queue.remove(ref);
 
-  if (decision.action !== "none" || reconciled) {
+  // Metadata that moved on its own is a refresh, so `/api/status` counts it
+  // as the work it was rather than reporting an untouched repo.
+  const action: DecisionAction = decision.action === "none" && triage ? "refresh" : decision.action;
+
+  if (action !== "none" || reconciled) {
     await saveMeta(deps.lgtmDir, ref, patch);
-    deps.log?.(`cycle: ${formatRef(ref)} ${decision.action}: ${decision.reason}`);
+    const reason = action === decision.action ? decision.reason : "triage metadata changed";
+    deps.log?.(`cycle: ${formatRef(ref)} ${action}: ${reason}`);
     emit(deps, { type: "pr-changed", ref });
   }
 
   // Written first, then queued, so a Round that starts immediately reads the
   // metadata this cycle just wrote rather than the previous cycle's.
-  const state = patch.state ?? meta?.state ?? null;
   if (state === "queued") deps.queue.enqueue(ref, summary.headSha);
 
-  return { action: decision.action, reconciled };
+  return { action, reconciled };
+}
+
+// ─── Triage metadata ────────────────────────────────────────────────────────
+
+/**
+ * The inbox line R2.5 asks for: additions, deletions, files changed, age,
+ * mergeable state, CI status. None of it is on the list row, so each refresh
+ * costs a `getPR` and a `getCheckStatus`, two calls against a rate limit that
+ * the ETag on the listing exists to protect. What follows is the policy for
+ * spending them, and it is deliberately narrow.
+ *
+ * Only PRs whose state is `triage` are fetched at all. The triage row is the
+ * only place the browser renders this line (`PRMetaLine`, reached from
+ * `TriageRow` and nowhere else), and design.md says the same: "the daemon
+ * fetches it only for PRs entering triage or the backfill list, not on every
+ * cycle".
+ *
+ * Within triage, the detail call fires on three triggers:
+ *
+ *  - The PR is entering triage now, from unknown or from another state.
+ *  - Its head SHA moved. New commits are when size and mergeability actually
+ *    change, so this is the refresh that keeps a PR sitting in triage for
+ *    days from showing Monday's numbers.
+ *  - Nothing has ever been fetched (`additions === null`). This is the one
+ *    case that can write on an otherwise `none` decision, and it is what
+ *    fills in PRs that entered triage before this data was stored at all,
+ *    and it happens once per PR. The next cycle sees a number and stops.
+ *
+ * The Checks call has one extra trigger, because CI is the one thing here
+ * that changes without a commit. A status still reading `pending` is re-read
+ * every cycle, which stops itself the moment CI finishes, and one call per
+ * cycle per triage PR with running CI is worth not showing "Checks running"
+ * on a build that went green an hour ago.
+ *
+ * Known gap, named rather than papered over. Mergeability also changes when
+ * the base branch moves under a PR that got no new commits, and this policy
+ * does not catch that. The alternative is a detail call per triage PR per
+ * cycle, which is the cost design.md declined to pay.
+ */
+async function refreshTriageMetadata(
+  deps: CycleDeps,
+  ref: PRRef,
+  summary: PRSummary,
+  meta: PRMeta | null,
+  state: PRState | null
+): Promise<MetaUpdate | null> {
+  if (state !== "triage") return null;
+
+  const wantDetail =
+    meta === null ||
+    meta.state !== "triage" ||
+    meta.headSha !== summary.headSha ||
+    meta.additions === null;
+
+  const wantChecks = wantDetail || meta.checkStatus === null || meta.checkStatus === "pending";
+  if (!wantDetail && !wantChecks) return null;
+
+  const patch: MetaUpdate = {};
+
+  if (wantDetail) {
+    const detail = await fetchQuietly(deps, `detail for ${formatRef(ref)}`, () => deps.forge.getPR(ref));
+    if (detail) {
+      // Assigned only where the value differs, so a fetch that confirms what
+      // is already on disk produces no patch and therefore no write.
+      if (detail.createdAt !== meta?.createdAt) patch.createdAt = detail.createdAt;
+      if (detail.additions !== meta?.additions) patch.additions = detail.additions;
+      if (detail.deletions !== meta?.deletions) patch.deletions = detail.deletions;
+      if (detail.changedFiles !== meta?.changedFiles) patch.changedFiles = detail.changedFiles;
+      // Straight through, null included. GitHub answers null while it is
+      // still computing mergeability, the browser renders that as
+      // "computing", and coercing it to false would claim a conflict that
+      // may not exist.
+      if (detail.mergeable !== meta?.mergeable) patch.mergeable = detail.mergeable;
+    }
+  }
+
+  if (wantChecks) {
+    const checks = await fetchQuietly(deps, `checks for ${formatRef(ref)}`, () =>
+      deps.forge.getCheckStatus(ref, summary.headSha)
+    );
+    if (checks && checks.state !== meta?.checkStatus) patch.checkStatus = checks.state;
+  }
+
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/**
+ * Run one metadata fetch, and swallow its failure into a log line.
+ *
+ * Deliberately quieter than the rest of this module. A PR's classification,
+ * its queueing and its close stamp are the cycle's actual job and they all
+ * survive a Forge that will not answer `getPR`; losing them because the size
+ * of a diff could not be read would be the wrong trade. Nor does this emit an
+ * `error` event. R8.2's notifications are for problems the user must act on,
+ * and a stale metadata line is not one. The stored value stays as it was,
+ * which is either null (a dash) or the last reading, and the next cycle tries
+ * again.
+ */
+async function fetchQuietly<T>(
+  deps: CycleDeps,
+  what: string,
+  call: () => Promise<T>
+): Promise<T | null> {
+  try {
+    return await call();
+  } catch (error) {
+    deps.log?.(`cycle: ${what} could not be fetched: ${messageOf(error)}`);
+    return null;
+  }
 }
 
 /**

@@ -161,6 +161,12 @@ export async function backfillOpenPRs(
     // once a human confirms, never here and never on the next poll cycle
     // either, because writing this meta now is what keeps that PR from
     // looking "unknown" to that cycle.
+    //
+    // The triage metadata is persisted rather than only returned. Both calls
+    // above have already been paid for, and the confirm pane is not the last
+    // place this data is wanted. The inbox renders the same line for as long
+    // as the PR sits in triage, so dropping the answers here would leave the
+    // first poll cycle to either fetch them again or show a row of dashes.
     await saveMeta(lgtmDir, ref, {
       url: detail.url,
       title: detail.title,
@@ -169,6 +175,14 @@ export async function backfillOpenPRs(
       classification,
       draft: detail.draft,
       headSha: detail.headSha,
+      createdAt: detail.createdAt,
+      additions: detail.additions,
+      deletions: detail.deletions,
+      changedFiles: detail.changedFiles,
+      // Straight through, null included. `mergeableStatus` renders it for
+      // the confirm pane; the store keeps the tri-state.
+      mergeable: detail.mergeable,
+      checkStatus: checkStatus.state,
     });
 
     entries.push({ ref, detail, checkStatus, classification, autoClass, preSelected });

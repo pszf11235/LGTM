@@ -33,7 +33,7 @@ import fs from "fs/promises";
 import { postRoutes } from "./post";
 
 import { formatFindingKey, parseFindingKey } from "@/core";
-import type { Finding, ForgeAdapter, PRMeta, PRRef, PRState, Severity } from "@/core";
+import type { CheckState, Finding, ForgeAdapter, PRMeta, PRRef, PRState, Severity } from "@/core";
 import { reviewsWhenReady } from "@/core/classify";
 import { parseDiff, sliceHunk } from "@/core/diff";
 import type { SlicedHunk } from "@/core/diff";
@@ -296,6 +296,20 @@ export interface PRRow {
   pendingReviewId: number | null;
   closedAt: string | null;
   updatedAt: string;
+
+  // ── Triage metadata ───────────────────────────────────────────────────
+  //
+  // Flat, and under exactly the names the browser reads (`PRListItem` in
+  // src/ui/api.ts). Null travels as null. The row means "not fetched" or
+  // "GitHub is still computing it", and the browser renders a dash or
+  // "Computing…"; filling a null in with a zero here would turn "unknown"
+  // into a measured "no changes" on its way across the wire.
+  createdAt: string | null;
+  additions: number | null;
+  deletions: number | null;
+  changedFiles: number | null;
+  mergeable: boolean | null;
+  checkStatus: CheckState | null;
   /** Derived, never stored: an auto-class draft held until it leaves draft state (R2.3). */
   reviewsWhenReady: boolean;
   /** False once its repo leaves the watch list. Its files stay on disk (R9.5). */
@@ -342,6 +356,12 @@ async function scanPRs(deps: ApiDeps): Promise<PRRow[]> {
       pendingReviewId: meta.pendingReviewId,
       closedAt: meta.closedAt,
       updatedAt: meta.updatedAt,
+      createdAt: meta.createdAt,
+      additions: meta.additions,
+      deletions: meta.deletions,
+      changedFiles: meta.changedFiles,
+      mergeable: meta.mergeable,
+      checkStatus: meta.checkStatus,
       reviewsWhenReady: reviewsWhenReady(meta),
       watched: watched.has(repoKey(ref.owner, ref.repo)),
       findings: counts,

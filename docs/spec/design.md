@@ -28,6 +28,8 @@ flowchart LR
     post[Post gate action] --> forge
 ```
 
+[architecture.md](../architecture.md) draws the same system as data flows and trust boundaries instead of components.
+
 Single-writer rule: only the daemon writes the store. The SPA and the CLI mutate through the API. The daemon also watches the store directory with `fs.watch` so hand-edits show up in the UI without a restart.
 
 ## Store layout

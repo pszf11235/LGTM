@@ -1,6 +1,6 @@
 /**
- * The gate as the user meets it: the confirm pane, the inbox decision
- * buttons, and the discard on a finding card.
+ * The gate as the user meets it: the confirm pane, the Reviews view's
+ * decision buttons, and the discard on a finding card.
  *
  * Two harnesses, for the reason ui.test.ts records. `renderToStaticMarkup`
  * is all this project has (bun test has no DOM), and it never runs effects,
@@ -23,7 +23,7 @@ import type { PRRef } from "@/core";
 import type { GateActions, GateVerdict, PostInput, PostResult } from "./actions";
 import type { FindingWithContext, PRListItem } from "./api";
 import { createPostController, PostPane, groupVerdictsByFile } from "./views/PostPane";
-import { SkippedSection, TriageRow } from "./views/Inbox";
+import { SkippedSection, TriageRow } from "./views/Reviews";
 import { FindingCard } from "./components/FindingCard";
 
 // ─── Fixtures and stubs ─────────────────────────────────────────────────────
@@ -534,7 +534,7 @@ describe("PostPane", () => {
   });
 });
 
-// ─── Inbox decisions ────────────────────────────────────────────────────────
+// ─── Reviews decisions ──────────────────────────────────────────────────────
 
 function prItem(over: Partial<PRListItem>): PRListItem {
   return {
@@ -562,7 +562,7 @@ function prItem(over: Partial<PRListItem>): PRListItem {
   };
 }
 
-describe("Inbox decision buttons", () => {
+describe("Reviews decision buttons", () => {
   test("skip and review are live, not placeholders", () => {
     const html = renderToStaticMarkup(createElement(TriageRow, { pr: prItem({}), actions: BASE_GATE }));
 

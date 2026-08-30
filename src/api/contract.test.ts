@@ -59,6 +59,22 @@ function clientOverHandler() {
   });
 }
 
+/**
+ * The same response before the client touches it.
+ *
+ * The client's readers are deliberately lenient: a missing key and an
+ * explicit null both parse to null. That is right for a browser and wrong
+ * for a test, because it makes "the daemon stopped sending this field" look
+ * exactly like "the daemon sent null". A handful of assertions below read
+ * the raw row for that reason.
+ */
+async function rawPRRows(): Promise<Array<Record<string, unknown>>> {
+  const handler = createApiHandler({ lgtmDir, token: TOKEN, port: PORT, version: "test" });
+  const res = await handler(buildRequest("/api/prs", { headers: { Authorization: `Bearer ${TOKEN}` } }));
+  const body = (await res.json()) as { prs: Array<Record<string, unknown>> };
+  return body.prs;
+}
+
 describe("GET /api/prs, daemon to browser", () => {
   test("a stored PR arrives with its reference intact", async () => {
     const ref = { owner: "acme", repo: "api", number: 42 };
@@ -107,6 +123,78 @@ describe("GET /api/prs, daemon to browser", () => {
     expect(pr.findingCounts.low).toBe(1);
   });
 
+  test("triage metadata arrives under the names the inbox reads", async () => {
+    // The inbox line R2.5 asks for. Every one of these rendered as a dash
+    // while the store held the numbers, because nothing carried them.
+    const ref = { owner: "acme", repo: "api", number: 11 };
+    await saveMeta(lgtmDir, ref, {
+      state: "triage",
+      author: "ada",
+      headSha: "sha1",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      additions: 120,
+      deletions: 34,
+      changedFiles: 7,
+      mergeable: true,
+      checkStatus: "failure",
+    });
+
+    const pr = (await clientOverHandler().listPRs())[0]!;
+
+    expect(pr.createdAt).toBe("2026-08-01T00:00:00.000Z");
+    expect(pr.additions).toBe(120);
+    expect(pr.deletions).toBe(34);
+    expect(pr.changedFiles).toBe(7);
+    expect(pr.mergeable).toBe(true);
+    expect(pr.checkStatus).toBe("failure");
+  });
+
+  test("a mergeable GitHub is still computing crosses the wire as null", async () => {
+    // Null must survive as null, because the browser renders "Computing…"
+    // for it. Coercing it to false anywhere along this path tells the user
+    // their PR conflicts when it does not.
+    const ref = { owner: "acme", repo: "api", number: 12 };
+    await saveMeta(lgtmDir, ref, {
+      state: "triage",
+      author: "ada",
+      headSha: "sha1",
+      additions: 5,
+      mergeable: null,
+      checkStatus: "pending",
+    });
+
+    // The field is sent, and it is sent as null. The client cannot tell those
+    // apart, so the raw row is what proves it.
+    const row = (await rawPRRows())[0]!;
+    expect("mergeable" in row).toBe(true);
+    expect(row.mergeable).toBeNull();
+
+    const pr = (await clientOverHandler().listPRs())[0]!;
+    expect(pr.mergeable).toBeNull();
+    // Its neighbours came through, so the null above is a value and not a
+    // row that never got populated.
+    expect(pr.additions).toBe(5);
+    expect(pr.checkStatus).toBe("pending");
+  });
+
+  test("a PR nothing has detail-fetched arrives as nulls, not as zeros", async () => {
+    // A PR known from a list row alone. `+0 -0` would read as a measured
+    // empty diff; the browser renders null as a dash.
+    const ref = { owner: "acme", repo: "api", number: 13 };
+    await saveMeta(lgtmDir, ref, { state: "queued", author: "ada", headSha: "sha1" });
+
+    const row = (await rawPRRows())[0]!;
+    expect(row.additions).toBeNull();
+    expect(row.checkStatus).toBeNull();
+
+    const pr = (await clientOverHandler().listPRs())[0]!;
+    expect(pr.additions).toBeNull();
+    expect(pr.deletions).toBeNull();
+    expect(pr.changedFiles).toBeNull();
+    expect(pr.createdAt).toBeNull();
+    expect(pr.checkStatus).toBeNull();
+  });
+
   test("every state the inbox buckets on round-trips by name", async () => {
     for (const [i, state] of (["triage", "queued", "reviewing", "reviewed", "failed", "skipped"] as const).entries()) {
       await saveMeta(lgtmDir, { owner: "acme", repo: "api", number: i + 1 }, { state, author: "ada", headSha: "s" });
@@ -115,5 +203,83 @@ describe("GET /api/prs, daemon to browser", () => {
     const seen = (await clientOverHandler().listPRs()).map((pr) => pr.state).sort();
 
     expect(seen).toEqual(["failed", "queued", "reviewed", "reviewing", "skipped", "triage"]);
+  });
+});
+
+/**
+ * The rest of the client surface, for the same reason. A comment in
+ * BackfillPane records that watchlist, config and status "do not match this
+ * route table's actual response shapes as of this writing", and the fix was to
+ * route around the client rather than to correct it. These tests decide which
+ * of those are still true.
+ */
+describe("the rest of the client surface", () => {
+  test("listWatch reads the watch list the daemon sends", async () => {
+    const rows = await clientOverHandler().listWatch();
+    expect(rows.map((r) => `${r.owner}/${r.repo}`)).toEqual(["acme/api"]);
+  });
+
+  test("getConfig reads the config the daemon sends", async () => {
+    const cfg = await clientOverHandler().getConfig();
+    expect(cfg.config.interval_minutes).toBe(15);
+    expect(cfg.defaults.pause_above_pct).toBe(70);
+  });
+
+  test("status reads the status the daemon sends", async () => {
+    const status = await clientOverHandler().status();
+    // These were every-field-undefined before the parser read the nesting.
+    expect(status.intervalMinutes).toBe(15);
+    expect(status.quotaMode).toBe("ok");
+    expect(status.triageCount).toBe(0);
+    expect(typeof status.uptimeMs).toBe("number");
+  });
+
+  test("addWatch refuses rather than half-adding a repo with no forge", async () => {
+    // Documented behaviour: without a Forge the route cannot list the repo's
+    // open PRs, and adding it to the watch list anyway would skip the backfill
+    // R2.6 requires. It answers 503 instead.
+    await expect(clientOverHandler().addWatch({ owner: "new", repo: "repo" })).rejects.toThrow();
+  });
+
+  test("addWatch returns the backfill list the daemon sends", async () => {
+    const detail = {
+      ref: { owner: "new", repo: "repo", number: 1 },
+      url: "https://github.com/new/repo/pull/1",
+      title: "A pull request",
+      author: "someone",
+      draft: false,
+      createdAt: "2026-08-30T00:00:00.000Z",
+      updatedAt: "2026-08-30T00:00:00.000Z",
+      headSha: "sha",
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      mergeable: null,
+    };
+    const forge = {
+      listOpenPRs: async () => [detail],
+      getPR: async () => detail,
+      getCheckStatus: async () => ({ state: "none" as const, runs: [] }),
+      authenticatedUser: async () => "someone",
+    };
+
+    const handler = createApiHandler({
+      lgtmDir,
+      token: TOKEN,
+      port: PORT,
+      version: "test",
+      forge: forge as unknown as Parameters<typeof createApiHandler>[0]["forge"],
+    });
+    const client = createApiClient({
+      fetchImpl: (input, init) => handler(buildRequest(input, init)),
+      storage: { getItem: () => TOKEN, setItem() {}, removeItem() {} },
+      location: { hash: "", pathname: "/", search: "" },
+      history: { replaceState() {} },
+    });
+
+    const result = await client.addWatch({ owner: "new", repo: "repo" });
+
+    expect(result.repo.owner).toBe("new");
+    expect(result.entries).toHaveLength(1);
   });
 });

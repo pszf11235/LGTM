@@ -62,6 +62,15 @@ function meta(over: Partial<PRMeta> = {}): PRMeta {
     pendingReviewId: null,
     closedAt: null,
     updatedAt: "2026-08-02T00:00:00.000Z",
+    // Triage metadata. Null throughout, since `decide` neither reads nor
+    // writes it: the fetch that fills it in is the daemon's, and keeping it
+    // out of these fixtures' way is the point of it being nullable.
+    createdAt: null,
+    additions: null,
+    deletions: null,
+    changedFiles: null,
+    mergeable: null,
+    checkStatus: null,
     ...over,
   };
 }

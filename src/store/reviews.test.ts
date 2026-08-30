@@ -409,6 +409,90 @@ describe("meta", () => {
     expect(second.updatedAt).not.toBe(first.updatedAt);
   });
 
+  test("triage metadata round-trips through the frontmatter", async () => {
+    await saveMeta(store, ref, {
+      createdAt: "2026-08-01T00:00:00.000Z",
+      additions: 120,
+      deletions: 34,
+      changedFiles: 7,
+      mergeable: true,
+      checkStatus: "failure",
+    });
+
+    const meta = (await loadMeta(store, ref))!;
+    expect(meta.createdAt).toBe("2026-08-01T00:00:00.000Z");
+    expect(meta.additions).toBe(120);
+    expect(meta.deletions).toBe(34);
+    expect(meta.changedFiles).toBe(7);
+    expect(meta.mergeable).toBe(true);
+    expect(meta.checkStatus).toBe("failure");
+  });
+
+  test("triage metadata is null before anything fetched it, never zero", async () => {
+    // Null is the honest answer for a PR known only from a list row, where
+    // nobody has called the detail endpoint yet. A 0 would render as a
+    // measured "+0 -0" in the inbox.
+    const meta = await saveMeta(store, ref, { state: "triage" });
+
+    expect(meta.createdAt).toBeNull();
+    expect(meta.additions).toBeNull();
+    expect(meta.deletions).toBeNull();
+    expect(meta.changedFiles).toBeNull();
+    expect(meta.mergeable).toBeNull();
+    expect(meta.checkStatus).toBeNull();
+  });
+
+  test("a mergeable GitHub is still computing stays null all the way to disk", async () => {
+    // The one field where a wrong default does damage. Null means
+    // "computing", and false claims a conflict the user would go looking for.
+    await saveMeta(store, ref, { mergeable: null });
+
+    expect((await loadMeta(store, ref))!.mergeable).toBeNull();
+  });
+
+  test("a rebase clears a stored conflict back to computing", async () => {
+    // false -> null is a real transition, so the patch has to be able to
+    // write null over a value rather than read it as "field omitted".
+    await saveMeta(store, ref, { mergeable: false });
+    expect((await loadMeta(store, ref))!.mergeable).toBe(false);
+
+    await saveMeta(store, ref, { mergeable: null });
+    expect((await loadMeta(store, ref))!.mergeable).toBeNull();
+  });
+
+  test("a save that omits triage metadata keeps what was fetched before", async () => {
+    await saveMeta(store, ref, { additions: 9, deletions: 2, changedFiles: 1, checkStatus: "success" });
+    await saveMeta(store, ref, { state: "queued" });
+
+    const meta = (await loadMeta(store, ref))!;
+    expect(meta.state).toBe("queued");
+    expect(meta.additions).toBe(9);
+    expect(meta.checkStatus).toBe("success");
+  });
+
+  test("no checks and never fetched are different answers", async () => {
+    // "none" is measured. The Checks API was read and this SHA has no runs,
+    // where null is that it was never read at all. The inbox renders one as
+    // "No checks" and the other as a dash.
+    await saveMeta(store, ref, { checkStatus: "none" });
+    expect((await loadMeta(store, ref))!.checkStatus).toBe("none");
+  });
+
+  test("the body carries the triage line once there is something to say", async () => {
+    await saveMeta(store, ref, {
+      title: "Add auth",
+      additions: 12,
+      deletions: 3,
+      changedFiles: 2,
+      mergeable: true,
+      checkStatus: "success",
+    });
+
+    const body = await fs.readFile(path.join(reviewDir(store, ref), "meta.md"), "utf-8");
+    expect(body).toContain("+12 -3 across 2 file(s)");
+    expect(body).toContain("checks: success");
+  });
+
   test("mentions the open draft when one exists, with a link to edit it", async () => {
     await saveMeta(store, ref, { title: "Add auth", pendingReviewId: 4242 });
 
@@ -534,6 +618,51 @@ describe("hand-edited files", () => {
 
     expect(await fs.readFile(filePath, "utf-8")).toContain("my own notes here");
     expect((await loadRound(store, ref, 1, "reviewer"))!.findings[0]!.state).toBe("discarded");
+  });
+
+  test("a meta.md with no triage fields reads as null rather than throwing", async () => {
+    // Every meta.md written before this data existed looks like this, and so
+    // does one a user trimmed by hand.
+    const dir = reviewDir(store, ref);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "meta.md"),
+      stringifyOKF({ owner: ref.owner, repo: ref.repo, number: ref.number, state: "triage" }, "body"),
+      "utf-8"
+    );
+
+    const meta = (await loadMeta(store, ref))!;
+    expect(meta.state).toBe("triage");
+    expect(meta.additions).toBeNull();
+    expect(meta.changedFiles).toBeNull();
+    expect(meta.mergeable).toBeNull();
+    expect(meta.checkStatus).toBeNull();
+  });
+
+  test("garbage in a triage field reads as null, and never as false or zero", async () => {
+    const dir = reviewDir(store, ref);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "meta.md"),
+      stringifyOKF(
+        {
+          owner: ref.owner,
+          repo: ref.repo,
+          number: ref.number,
+          additions: "lots",
+          mergeable: "maybe",
+          checkStatus: "greenish",
+        },
+        "body"
+      ),
+      "utf-8"
+    );
+
+    const meta = (await loadMeta(store, ref))!;
+    expect(meta.additions).toBeNull();
+    // Not false. A hand-edit typo must not tell the user their PR conflicts.
+    expect(meta.mergeable).toBeNull();
+    expect(meta.checkStatus).toBeNull();
   });
 
   test("a corrupt round file is skipped rather than taking the PR down", async () => {

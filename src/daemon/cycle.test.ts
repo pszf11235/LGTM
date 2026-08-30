@@ -14,7 +14,14 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import { formatFindingKey, type ForgeAdapter, type PRDetail, type PRRef, type PRSummary } from "@/core";
+import {
+  formatFindingKey,
+  type CheckStatus,
+  type ForgeAdapter,
+  type PRDetail,
+  type PRRef,
+  type PRSummary,
+} from "@/core";
 import { reviewsWhenReady } from "@/core/classify";
 import { defaultAgentConfig, type AgentConfig, type ReviewInput, type ReviewOutcome } from "@/provider";
 import { diffSnapshotPath, loadAllRounds, loadMeta, reviewDir, saveMeta, saveRound } from "@/store/reviews";
@@ -74,7 +81,15 @@ function detail(overrides: Partial<PRDetail> = {}): PRDetail {
   };
 }
 
-/** Every method not overridden throws, so an unexpected Forge call fails the test loudly. */
+const OK_CHECKS: CheckStatus = { state: "success", runs: [] };
+
+/**
+ * Every method not overridden throws, so an unexpected Forge call fails the
+ * test loudly. Two exceptions: `getPR` and `getCheckStatus` answer by
+ * default, because the cycle legitimately calls them for PRs in triage
+ * (R2.5's inbox line). Whether it calls them at the right times is asserted
+ * by counting instead, in `countingForge` below.
+ */
 function fakeForge(overrides: Partial<ForgeAdapter>): ForgeAdapter {
   const refuse =
     (name: string) =>
@@ -84,14 +99,38 @@ function fakeForge(overrides: Partial<ForgeAdapter>): ForgeAdapter {
 
   return {
     listOpenPRs: refuse("listOpenPRs"),
-    getPR: refuse("getPR"),
+    getPR: async (target: PRRef) => detail({ number: target.number }),
     getDiff: refuse("getDiff"),
-    getCheckStatus: refuse("getCheckStatus"),
+    getCheckStatus: async () => OK_CHECKS,
     createDraftReview: refuse("createDraftReview"),
     deleteDraftReview: refuse("deleteDraftReview"),
     getReview: refuse("getReview"),
     authenticatedUser: async () => LOGIN,
     ...overrides,
+  };
+}
+
+interface CountingForge extends ForgeAdapter {
+  /** How many times each triage-metadata endpoint was asked. */
+  calls: { detail: number; checks: number };
+}
+
+/** A forge that counts its metadata calls, so "not on every cycle" is testable. */
+function countingForge(overrides: Partial<ForgeAdapter>): CountingForge {
+  const base = fakeForge(overrides);
+  const calls = { detail: 0, checks: 0 };
+
+  return {
+    ...base,
+    calls,
+    getPR: async (target) => {
+      calls.detail += 1;
+      return base.getPR(target);
+    },
+    getCheckStatus: async (target, sha) => {
+      calls.checks += 1;
+      return base.getCheckStatus(target, sha);
+    },
   };
 }
 
@@ -397,6 +436,210 @@ describe("runCycle: open PRs", () => {
 
     expect(queue.enqueued).toEqual([{ ref: ref(), headSha: "sha1" }]);
     expect((await loadMeta(store, ref()))?.title).toBe("stored title");
+  });
+});
+
+// ─── Triage metadata ────────────────────────────────────────────────────────
+//
+// R2.5's inbox line: additions, deletions, files changed, age, mergeable
+// state, CI status. None of it is on the list row, so every reading costs a
+// `getPR` and a `getCheckStatus`. These tests are as much about the calls
+// that do NOT happen as about the data that lands.
+
+describe("runCycle: triage metadata", () => {
+  test("a PR entering triage is detail-fetched, and the numbers reach meta.md", async () => {
+    await watch();
+    const forge = countingForge({
+      listOpenPRs: async () => [summary()],
+      getPR: async () => detail({ additions: 120, deletions: 34, changedFiles: 7, mergeable: false }),
+      getCheckStatus: async (): Promise<CheckStatus> => ({ state: "failure", runs: [] }),
+    });
+
+    await runCycle(deps({ forge }));
+
+    const meta = (await loadMeta(store, ref()))!;
+    expect(meta.state).toBe("triage");
+    expect(meta.additions).toBe(120);
+    expect(meta.deletions).toBe(34);
+    expect(meta.changedFiles).toBe(7);
+    expect(meta.mergeable).toBe(false);
+    expect(meta.checkStatus).toBe("failure");
+    expect(meta.createdAt).toBe("2026-08-01T00:00:00Z");
+    expect(forge.calls).toEqual({ detail: 1, checks: 1 });
+  });
+
+  test("a PR that goes straight to the queue costs no metadata calls", async () => {
+    // Only the triage inbox renders this line, and design.md is explicit
+    // that the detail endpoint is not on the per-cycle path.
+    await watch();
+    const forge = countingForge({ listOpenPRs: async () => [summary({ author: LOGIN })] });
+
+    await runCycle(deps({ forge }));
+
+    expect((await loadMeta(store, ref()))?.state).toBe("queued");
+    expect(forge.calls).toEqual({ detail: 0, checks: 0 });
+  });
+
+  test("a skipped PR is never detail-fetched", async () => {
+    await watch();
+    await saveMeta(store, ref(), { state: "skipped", headSha: "sha1" });
+    const forge = countingForge({ listOpenPRs: async () => [summary({ headSha: "sha2" })] });
+
+    await runCycle(deps({ forge }));
+
+    expect(forge.calls).toEqual({ detail: 0, checks: 0 });
+  });
+
+  test("a triage PR with nothing new is not re-fetched, and writes nothing", async () => {
+    await watch();
+    await saveMeta(store, ref(), {
+      title: "stored title",
+      state: "triage",
+      headSha: "sha1",
+      additions: 4,
+      deletions: 1,
+      changedFiles: 1,
+      mergeable: true,
+      checkStatus: "success",
+    });
+    const events = recorder();
+    const forge = countingForge({ listOpenPRs: async () => [summary({ title: "renamed upstream" })] });
+
+    await runCycle(deps({ events: events.sink, forge }));
+
+    expect(forge.calls).toEqual({ detail: 0, checks: 0 });
+    expect((await loadMeta(store, ref()))?.title).toBe("stored title");
+    expect(events.types()).toEqual(["cycle-finished"]);
+  });
+
+  test("new commits refresh the size and the mergeable flag", async () => {
+    // The chosen refresh trigger. A new head SHA is when a diff's size and
+    // its mergeability actually change, and a PR sitting in triage for days
+    // with Monday's numbers is worse than a dash.
+    await watch();
+    await saveMeta(store, ref(), {
+      state: "triage",
+      headSha: "sha1",
+      additions: 4,
+      deletions: 1,
+      changedFiles: 1,
+      mergeable: true,
+      checkStatus: "success",
+    });
+    const forge = countingForge({
+      listOpenPRs: async () => [summary({ headSha: "sha2" })],
+      getPR: async () => detail({ headSha: "sha2", additions: 200, mergeable: false }),
+    });
+
+    await runCycle(deps({ forge }));
+
+    const meta = (await loadMeta(store, ref()))!;
+    expect(meta.headSha).toBe("sha2");
+    expect(meta.additions).toBe(200);
+    expect(meta.mergeable).toBe(false);
+    expect(forge.calls).toEqual({ detail: 1, checks: 1 });
+  });
+
+  test("CI still running is re-read every cycle, without a second detail call", async () => {
+    // Checks are the one field that moves without a commit, and the re-read
+    // stops itself. Once the answer is no longer "pending", nothing asks
+    // again until the head SHA moves.
+    await watch();
+    await saveMeta(store, ref(), {
+      state: "triage",
+      headSha: "sha1",
+      additions: 4,
+      deletions: 1,
+      changedFiles: 1,
+      mergeable: true,
+      checkStatus: "pending",
+    });
+    const forge = countingForge({ listOpenPRs: async () => [summary()] });
+
+    await runCycle(deps({ forge }));
+
+    expect((await loadMeta(store, ref()))?.checkStatus).toBe("success");
+    expect(forge.calls).toEqual({ detail: 0, checks: 1 });
+  });
+
+  test("a check that is still pending confirms itself and writes nothing", async () => {
+    await watch();
+    await saveMeta(store, ref(), {
+      title: "stored title",
+      state: "triage",
+      headSha: "sha1",
+      additions: 4,
+      deletions: 1,
+      changedFiles: 1,
+      mergeable: true,
+      checkStatus: "pending",
+    });
+    const events = recorder();
+    const forge = countingForge({
+      listOpenPRs: async () => [summary()],
+      getCheckStatus: async (): Promise<CheckStatus> => ({ state: "pending", runs: [] }),
+    });
+
+    await runCycle(deps({ events: events.sink, forge }));
+
+    expect(forge.calls).toEqual({ detail: 0, checks: 1 });
+    expect((await loadMeta(store, ref()))?.title).toBe("stored title");
+    expect(events.types()).toEqual(["cycle-finished"]);
+  });
+
+  test("a PR that entered triage before this data existed is filled in exactly once", async () => {
+    // Every meta.md written by an earlier version has all six fields null,
+    // and its decision every cycle is `none`. One write repairs it; the
+    // cycle after that has nothing left to ask.
+    await watch();
+    await saveMeta(store, ref(), { state: "triage", headSha: "sha1" });
+
+    const first = countingForge({ listOpenPRs: async () => [summary()] });
+    await runCycle(deps({ forge: first }));
+
+    expect(first.calls).toEqual({ detail: 1, checks: 1 });
+    expect((await loadMeta(store, ref()))?.additions).toBe(4);
+
+    const second = countingForge({ listOpenPRs: async () => [summary()] });
+    await runCycle(deps({ forge: second }));
+
+    expect(second.calls).toEqual({ detail: 0, checks: 0 });
+  });
+
+  test("a mergeable GitHub is still computing is stored as null, never as a conflict", async () => {
+    await watch();
+    const forge = countingForge({
+      listOpenPRs: async () => [summary()],
+      getPR: async () => detail({ mergeable: null }),
+    });
+
+    await runCycle(deps({ forge }));
+
+    expect((await loadMeta(store, ref()))?.mergeable).toBeNull();
+  });
+
+  test("a detail fetch that fails costs the PR its metadata and nothing else", async () => {
+    // Classification, queueing and the close stamp are the cycle's job. None
+    // of them may be lost because the size of a diff could not be read, and
+    // a stale metadata line is not something to notify a human about (R8.2).
+    await watch();
+    const events = recorder();
+    const forge = fakeForge({
+      listOpenPRs: async () => [summary()],
+      getPR: async () => {
+        throw new Error("502 Bad Gateway");
+      },
+    });
+
+    const result = await runCycle(deps({ events: events.sink, forge }));
+
+    const meta = (await loadMeta(store, ref()))!;
+    expect(meta.state).toBe("triage");
+    expect(meta.additions).toBeNull();
+    // The Checks call is independent, so its answer still lands.
+    expect(meta.checkStatus).toBe("success");
+    expect(result.repos[0]?.errors).toBe(0);
+    expect(events.causes()).toEqual([]);
   });
 });
 

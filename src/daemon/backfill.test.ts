@@ -138,6 +138,40 @@ describe("backfillOpenPRs", () => {
     expect((await getWatchedRepoKeys(store)).size).toBe(0);
   });
 
+  test("persists the triage metadata it fetched instead of only returning it", async () => {
+    // Both calls have already been paid for. Dropping the answers would mean
+    // the inbox renders a row of dashes for a PR the confirm pane just
+    // described in full.
+    const forge = fakeForge({
+      listOpenPRs: async () => [summary({ number: 1 })],
+      getPR: async (ref) =>
+        detail({ number: ref.number, additions: 120, deletions: 34, changedFiles: 7, mergeable: false }),
+      getCheckStatus: async () => ({ state: "failure", runs: [] }) as CheckStatus,
+    });
+
+    await backfillOpenPRs(store, forge, REPO);
+
+    const meta = (await loadMeta(store, { ...REPO, number: 1 }))!;
+    expect(meta.additions).toBe(120);
+    expect(meta.deletions).toBe(34);
+    expect(meta.changedFiles).toBe(7);
+    expect(meta.mergeable).toBe(false);
+    expect(meta.checkStatus).toBe("failure");
+    expect(meta.createdAt).toBe("2026-08-01T00:00:00Z");
+  });
+
+  test("a mergeable GitHub has not computed yet is stored as null, not as a conflict", async () => {
+    const forge = fakeForge({
+      listOpenPRs: async () => [summary({ number: 1 })],
+      getPR: async (ref) => detail({ number: ref.number, mergeable: null }),
+      getCheckStatus: async () => OK_CHECKS,
+    });
+
+    await backfillOpenPRs(store, forge, REPO);
+
+    expect((await loadMeta(store, { ...REPO, number: 1 }))!.mergeable).toBeNull();
+  });
+
   test("an auto-class PR that is still a draft is listed and classified but not pre-selected", async () => {
     const forge = fakeForge({
       listOpenPRs: async () => [summary({ number: 1, author: LOGIN, draft: true })],
