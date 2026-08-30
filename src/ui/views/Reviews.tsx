@@ -266,6 +266,18 @@ function SeverityCounts({ counts }: { counts: FindingCounts }) {
 
 // ─── Rows ───────────────────────────────────────────────────────────────────
 
+/**
+ * Which PR this row is. Author and age alone are not enough to act on when the
+ * list can span several repositories, so every row leads with owner/repo#number.
+ */
+function PRIdentity({ pr }: { pr: PRListItem }) {
+  return (
+    <span className="font-mono text-xs text-foreground/70">
+      {pr.owner}/{pr.repo}#{pr.number}
+    </span>
+  );
+}
+
 function PRMetaLine({ pr }: { pr: PRListItem }) {
   const mergeable = formatMergeable(pr.mergeable);
   const checks = formatCheckStatus(pr.checkStatus);
@@ -276,6 +288,7 @@ function PRMetaLine({ pr }: { pr: PRListItem }) {
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <PRIdentity pr={pr} />
       <span>@{pr.author}</span>
       <span>{changes}</span>
       <span>{formatAge(pr.createdAt)} old</span>
@@ -404,6 +417,7 @@ function InReviewRow({ pr, onOpenPR }: { pr: PRListItem; onOpenPR?: (ref: PRRef)
           <ClassificationTag classification={pr.classification} />
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <PRIdentity pr={pr} />
           <span className="text-xs text-muted-foreground">@{pr.author}</span>
           <span className={stuck ? "text-xs font-medium text-destructive" : "text-xs text-muted-foreground"}>
             {reviewStateLabel(pr)}
@@ -438,6 +452,7 @@ function ReviewedRow({ pr, onOpenPR }: { pr: PRListItem; onOpenPR?: (ref: PRRef)
           <ClassificationTag classification={pr.classification} />
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <PRIdentity pr={pr} />
           <span className="text-xs text-muted-foreground">@{pr.author}</span>
           {hasFindings ? (
             <SeverityCounts counts={pr.findingCounts} />
@@ -474,6 +489,7 @@ function ClosedRow({ pr, onOpenPR }: { pr: PRListItem; onOpenPR?: (ref: PRRef) =
           <ClassificationTag classification={pr.classification} />
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <PRIdentity pr={pr} />
           <span className="text-xs text-muted-foreground">@{pr.author}</span>
           <span className="text-xs text-muted-foreground">Closed {formatAge(pr.closedAt)} ago</span>
           {hasFindings && <SeverityCounts counts={pr.findingCounts} />}
@@ -521,7 +537,8 @@ export function SkippedRow({ pr, actions }: { pr: PRListItem; actions?: GateActi
   );
 }
 
-/** Dispatches one PR to the row that renders its state. */
+
+/** Dispatch a row to the renderer its state calls for. */
 function ReviewRow({ pr, onOpenPR, actions }: { pr: PRListItem; onOpenPR?: (ref: PRRef) => void; actions?: GateActions }) {
   switch (pr.state) {
     case "triage":
@@ -537,22 +554,6 @@ function ReviewRow({ pr, onOpenPR, actions }: { pr: PRListItem; onOpenPR?: (ref:
     case "closed":
       return <ClosedRow pr={pr} onOpenPR={onOpenPR} />;
   }
-}
-
-// ─── Sections ───────────────────────────────────────────────────────────────
-
-function Section({ title, count, children }: { title: string; count: number; children: ReactNode }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between text-base">
-          <span>{title}</span>
-          <span className="text-sm font-normal text-muted-foreground">{count}</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
-  );
 }
 
 export function SkippedSection({ prs, actions }: { prs: PRListItem[]; actions?: GateActions }) {
@@ -660,7 +661,6 @@ export function Reviews({ onOpenPR, actions }: ReviewsProps) {
     );
   }
 
-  const statusLabel = STATUS_FILTERS.find((f) => f.id === status)?.label ?? "All";
   const rows = mainList.data ?? [];
   // The one client-side split left: pulling the collapsed skipped section
   // back out of an "all" response the server already filtered correctly.
@@ -692,11 +692,13 @@ export function Reviews({ onOpenPR, actions }: ReviewsProps) {
       ) : (
         <>
           {visibleRows.length > 0 && (
-            <Section title={statusLabel} count={visibleRows.length}>
-              {visibleRows.map((pr) => (
-                <ReviewRow key={`${pr.owner}/${pr.repo}#${pr.number}`} pr={pr} onOpenPR={onOpenPR} actions={actions} />
-              ))}
-            </Section>
+            <Card>
+              <CardContent className="pt-6">
+                {visibleRows.map((pr) => (
+                  <ReviewRow key={`${pr.owner}/${pr.repo}#${pr.number}`} pr={pr} onOpenPR={onOpenPR} actions={actions} />
+                ))}
+              </CardContent>
+            </Card>
           )}
 
           {status === "all" && <SkippedSection prs={skippedInline} actions={actions} />}
