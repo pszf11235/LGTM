@@ -149,6 +149,11 @@ async function requestJson(
       headers: {
         ...(spec.body ? { "Content-Type": "application/json" } : {}),
         Authorization: `Bearer ${location.token}`,
+        // The API requires a matching Origin on every write, which is what
+        // stops a web page from driving the daemon through a browser. A CLI
+        // is not a browser and sends none by default, so it states the one
+        // the daemon serves. Without this every `watch add` and `rm` is a 403.
+        Origin: daemonBaseUrl(location),
       },
     });
   } catch {

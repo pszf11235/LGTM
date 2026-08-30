@@ -13,20 +13,33 @@ As of this writing, `bun test` reports 991 passing tests across 36 files, 2459 a
 - **M0, clean slate.** The Bun scaffold, `build.ts`'s `Bun.build()` compile step with the Tailwind plugin, and CI (`.github/workflows/ci.yml`: typecheck, test, build, then a `--version` smoke run of the compiled binary).
 - **M1, domain port.** `okf.ts`'s frontmatter round trip and its `structuredClone` guard, `pr-ref.ts`, the diff parser plus hunk slicing for finding cards, the new store layout (`meta.md`, per-round files, the `r<N>:<agent>:<id>` finding key), and `watch.md` / `config.md` read and write with their documented defaults.
 - **M2, forge and provider.** The GitHub `ForgeAdapter` with ETag support on the list and review-reconciliation calls, the draft-review module (no `event` key, throws unless the response is `PENDING`, refuses an empty comment list, and exposes no function that could publish), the GitHub token resolution chain, the Claude provider's spawn/timeout/salvage loop and prompt assembly, the login-shell PATH probe with its manual-pin override, and the fake `claude` shim at `test/fixtures/fake-claude.ts` (see [TESTING.md](../../TESTING.md)).
-- **M3, daemon, as modules.** The scheduler, poll cycle and classifier, review queue, quota gate, backfill, diff snapshotting, and notifier are each built and tested standalone. `createDaemon` (`src/daemon/boot.ts`) assembles all of them into one running daemon and has its own boot-sequence tests covering the lock, the binary probe order, and the rendezvous file. What stops this milestone from being reachable through the compiled binary is in [Not wired yet](#not-wired-yet).
+- **M3, daemon, as modules.** The scheduler, poll cycle and classifier, review queue, quota gate, backfill, diff snapshotting, and notifier are each built and tested standalone. `createDaemon` (`src/daemon/boot.ts`) assembles all of them into one running daemon and has its own boot-sequence tests covering the lock, the binary probe order, and the rendezvous file. `lgtm up` runs it, and a booted daemon creates its store, binds loopback, serves the UI and the API, polls on its schedule, and shuts down cleanly on a signal.
 - **M4, API read path.** Every read route in design.md's HTTP API table (`health`, `status`, `events`, `prs`, `prs/.../findings`, `watchlist`, `config`) is defined and mounted in the live route table (`src/api/routes.ts`), with a test matrix that walks the table and asserts bearer, Host, and Origin checks on every entry. The two mutating routes this milestone also needs, `decision` and the findings `PATCH`, are mounted and tested too. `lgtm status`, `lgtm open`, and `lgtm watch add|rm|ls` are real implementations against that API, not stubs.
 - **M6, partially.** `lgtm install` and `lgtm uninstall` write and bootstrap a real launchd plist and have their own tests (`src/cli/install.ts`, `src/cli/install.test.ts`). The release workflow (`.github/workflows/release.yml`) builds the darwin-arm64 binary and a checksum on a version tag. The seven-item regression checklist from design.md's testing section is encoded as tests, one `describe` block per item, in `src/regression.test.ts` (see [TESTING.md](../../TESTING.md)).
 
 ## Not wired yet
 
-Everything in this section exists as tested code. None of it is reachable by running the compiled binary today.
+The seams that parallel work leaves behind are closed. `lgtm up` starts the
+daemon, the real API router and the SPA are mounted on the port it binds,
+`App.tsx` renders the four views, `postRoutes()` is spliced into the route
+table, the post pane is mounted in the PR detail view, and the store watcher
+runs with the daemon.
 
-- **`lgtm up` does not start the daemon.** `src/main.ts` still calls `notImplemented("up")` and exits. `createDaemon` does everything design.md's "Daemon lifecycle" describes, and its tests exercise the full boot sequence, but nothing in `main.ts` calls it. Until this lands, LGTM cannot watch a real repository, and `lgtm install`'s launchd plist has nothing running to keep alive.
-- **The web UI you'd reach is still the M0 placeholder.** `src/ui/App.tsx` renders a "Scaffold is up. Views land next." card. It imports nothing from `src/ui/views/`. The Inbox, PR detail, Repos, Settings, and BackfillPane components are real, built against real data types, and pass smoke-level render tests (`src/ui/ui.test.ts`, `src/ui/repos.test.ts`, using `renderToStaticMarkup` since the test runner has no DOM), but no route from the served SPA reaches any of them.
-- **The real API router never reaches the HTTP server `createDaemon` binds.** Its default `fetch` handler answers `/api/health` only, on purpose, so the port-scan handshake has a signature to probe against (`healthOnlyHandler` in `src/daemon/boot.ts`). The full router in `src/api/server.ts` / `src/api/routes.ts` is designed to be passed in through the `fetch` option; nothing does that yet.
-- **`POST .../validate` and `POST .../post` aren't mounted.** `src/api/post.ts` implements both, `runValidate`, `runPost`, their route handlers, and a `postRoutes()` helper meant to extend the table, all with their own tests. `src/api/routes.ts` marks the spot with a comment reading "M5 lands here", but `postRoutes()` is never merged into `apiRoutes()`, so design.md's two remaining HTTP API rows don't exist on the mounted server.
-- **The gate's pieces are further along than the app that would show them.** The inbox's skip, review, unskip, and review-anyway actions, and the finding card's discard and restore actions, are wired for real against live backend routes, each behind a hook that guards against double-clicks (`src/ui/views/Inbox.tsx`, `src/ui/components/FindingCard.tsx`). A post confirm pane exists as a real component with its own controller (`src/ui/views/PostPane.tsx`, `src/ui/actions.ts`). None of it is reachable by running the binary today, because `App.tsx` doesn't render any of these views regardless (above), and the post pane's own backend, `validate` and `post`, isn't mounted on the server either (above).
-- **Hand-edits to the store don't reach a running daemon.** `src/daemon/store-watch.ts` implements the debounced `fs.watch` to SSE bridge design.md promises, with its own tests, but its file comment says plainly that wiring it into `boot.ts` is someone else's job. Nothing has done that yet.
+What remains unproven is the part no amount of wiring settles.
+
+- **No review has ever run against a real pull request.** The daemon has been
+  booted against a live GitHub token and a real repository: it authenticated,
+  listed open pull requests, and wrote the watch list. That repository had no
+  open PRs, so nothing has yet been classified, queued, reviewed, or posted.
+  The first real round, and the first draft review, are still ahead.
+- **The keyboard shortcuts in design.md's Web UI section are not bound.**
+  `j`/`k` between cards, `d` to discard, `enter` to confirm. They need a
+  document-level listener that no view owns, and the render harness has no DOM
+  to exercise it with.
+- **`src/ui/api.ts` still carries its own `validate` and `post` methods**,
+  written before `src/api/post.ts` existed and parsing shapes it does not
+  send. `src/ui/actions.ts` is the client the gate actually uses. The stale
+  pair should go, so the gate has one client rather than two.
 
 ## Known gaps, by design or by an open seam
 

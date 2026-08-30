@@ -67,6 +67,7 @@ import {
 import { createEventBus, type DaemonEvent, type EventBus } from "./events";
 import { createNotifier, setUiPort, type SpawnFn } from "./notify";
 import { createReviewQueue, type QueueSnapshot, type ReviewQueue } from "./queue";
+import { createStoreWatch, type StoreWatch } from "./store-watch";
 import {
   createClaudeUsageProbe,
   createQuotaGate,
@@ -583,10 +584,16 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     handlers.length = 0;
   }
 
+  // Declared before `shutdown` closes over it. Signal handlers are attached
+  // below but before the watcher starts, so a signal arriving in that window
+  // must find a binding rather than a temporal dead zone.
+  let storeWatch: StoreWatch | null = null;
+
   async function shutdown(): Promise<void> {
     log("boot: shutting down");
     try {
       detachSignals();
+      storeWatch?.stop();
       // The scheduler first, so no cycle starts while the rest comes apart.
       // Its stop() settles once the running cycle has.
       await scheduler.stop();
@@ -625,6 +632,12 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
 
   // 10. Run. The scheduler's boot cycle starts immediately and is not awaited.
   scheduler.start();
+  // Hand-edits to the store are a product feature (ADR 0004), so the daemon
+  // watches the directory it also writes and turns changes into invalidations
+  // an open UI can act on. The watcher debounces; it cannot always tell the
+  // daemon's own writes from a person's, which costs a redundant refetch.
+  storeWatch = createStoreWatch({ dir: lgtmDir, bus: events, log });
+  storeWatch.start();
   quota.start(() => {
     // In-flight Rounds count. A queue whose entries are all running still
     // needs a fresh reading before the next one is let through.

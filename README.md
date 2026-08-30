@@ -36,7 +36,7 @@ lgtm watch add owner/repo   # start watching a repository
 
 `lgtm open` finds the running daemon and launches your browser with a bearer token in the URL fragment; the page moves it to local storage and strips it from the address bar on load. Adding a repository, from the Repos view or with `watch add`, triggers a backfill: you see its currently open PRs with the auto-class ones pre-selected, and nothing auto-queues until you confirm the list. `lgtm status` reports daemon liveness, the last cycle, queue depth, and quota state, and exits non-zero when nothing is running.
 
-Read [Status](#status) before you try this: as of this writing, `lgtm up` does not actually start the daemon yet.
+Read [Status](#status) before you try this. The daemon runs, but it has not yet been pointed at a real repository.
 
 ## The store
 
@@ -67,7 +67,7 @@ v1 targets macOS only (`lgtm install` writes a launchd LaunchAgent). [ADR 0002](
 
 ## Status
 
-This is a ground-up rebuild on the `v2` branch. The typecheck is clean, the test suite passes, and the binary builds, but it has never watched a real repository or posted a real draft review. `lgtm up` doesn't start the daemon yet, and the web UI you'd reach with `lgtm open` still shows a scaffold placeholder, not the real views, even though the daemon internals and the individual view components are each built and tested on their own. Read [docs/spec/status.md](docs/spec/status.md) for the specifics, milestone by milestone.
+This is a ground-up rebuild on the `v2` branch. The typecheck is clean, the test suite passes, the binary builds, and the daemon runs: it creates its store, binds loopback, serves the UI and the API, polls on a schedule, and shuts down cleanly. What it has never done is watch a real repository or post a real draft review. Every run so far has been against an empty store with no GitHub token, so the first review round and the first post are still ahead. Read [docs/spec/status.md](docs/spec/status.md) for the specifics, milestone by milestone.
 
 ## Learn more
 
