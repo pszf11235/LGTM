@@ -46,33 +46,6 @@ const REPO_PATTERN = /^([\w.-]+)\/([\w.-]+)$/;
 // the unauthenticated flip on a 401), but its typed `listWatch`/`addWatch`
 // methods do not match `/api/watchlist`'s actual response shape as of this
 // writing, so this view fetches directly and only borrows the token.
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getDefaultApiClient().getToken();
-
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  const text = await res.text();
-
-  if (!res.ok) {
-    let message = text;
-    try {
-      const parsed = JSON.parse(text) as { message?: unknown };
-      if (typeof parsed.message === "string") message = parsed.message;
-    } catch {
-      // Not JSON. Fall back to whatever the body carried.
-    }
-    throw new Error(message || `${init?.method ?? "GET"} ${path} failed (${res.status})`);
-  }
-
-  return (text ? JSON.parse(text) : undefined) as T;
-}
 
 function formatLastPolled(iso: string | null): string {
   if (!iso) return "never polled";
@@ -153,10 +126,10 @@ export function Repos() {
     setLoading(true);
     setListError(null);
     try {
-      const response = await apiRequest<WatchlistResponse>("/api/watchlist");
+      const response = await getDefaultApiClient().request<WatchlistResponse>("/api/watchlist");
       setEntries(response.repos);
       try {
-        const status = await apiRequest<{ autoReview?: boolean }>("/api/status");
+        const status = await getDefaultApiClient().request<{ autoReview?: boolean }>("/api/status");
         setDaemonAutoReview(status.autoReview !== false);
       } catch {
         // The list is the point of this view. A status call that failed only
@@ -176,7 +149,7 @@ export function Repos() {
   async function handleAutoReview(entry: WatchRow, value: boolean | null) {
     setSettingAuto(entry.key);
     try {
-      await apiRequest("/api/watchlist", {
+      await getDefaultApiClient().request("/api/watchlist", {
         method: "PATCH",
         body: JSON.stringify({ owner: entry.owner, repo: entry.repo, autoReview: value }),
       });
@@ -208,7 +181,7 @@ export function Repos() {
     setRemoving(entry.key);
     try {
       const query = new URLSearchParams({ owner: entry.owner, repo: entry.repo });
-      await apiRequest<unknown>(`/api/watchlist?${query.toString()}`, { method: "DELETE" });
+      await getDefaultApiClient().request<unknown>(`/api/watchlist?${query.toString()}`, { method: "DELETE" });
       await load();
     } catch (err) {
       setListError(err instanceof Error ? err.message : String(err));

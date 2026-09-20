@@ -53,33 +53,6 @@ interface ConfigResponse {
 // methods do not match those routes' actual response shapes as of this
 // writing (src/api/routes.ts's `/api/status`, `/api/config`), so this view
 // fetches directly and only borrows the token.
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getDefaultApiClient().getToken();
-
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  const text = await res.text();
-
-  if (!res.ok) {
-    let message = text;
-    try {
-      const parsed = JSON.parse(text) as { message?: unknown };
-      if (typeof parsed.message === "string") message = parsed.message;
-    } catch {
-      // Not JSON. Fall back to whatever the body carried.
-    }
-    throw new Error(message || `${init?.method ?? "GET"} ${path} failed (${res.status})`);
-  }
-
-  return (text ? JSON.parse(text) : undefined) as T;
-}
 
 // ─── Display helpers ────────────────────────────────────────────────────────
 
@@ -229,7 +202,7 @@ export function Settings() {
     setSigningIn(true);
     setLoginNote(null);
     try {
-      const res = await apiRequest<{ started: boolean; command: string; error: string | null }>(
+      const res = await getDefaultApiClient().request<{ started: boolean; command: string; error: string | null }>(
         "/api/provider/login",
         { method: "POST" }
       );
@@ -256,8 +229,8 @@ export function Settings() {
   const load = useCallback(async () => {
     setLoading(true);
     const [statusResult, configResult] = await Promise.allSettled([
-      apiRequest<StatusResponse>("/api/status"),
-      apiRequest<ConfigResponse>("/api/config"),
+      getDefaultApiClient().request<StatusResponse>("/api/status"),
+      getDefaultApiClient().request<ConfigResponse>("/api/config"),
     ]);
 
     if (statusResult.status === "fulfilled") {
@@ -301,7 +274,7 @@ export function Settings() {
     };
 
     try {
-      const response = await apiRequest<ConfigResponse>("/api/config", {
+      const response = await getDefaultApiClient().request<ConfigResponse>("/api/config", {
         method: "PATCH",
         body: JSON.stringify(patch),
       });

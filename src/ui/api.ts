@@ -720,6 +720,13 @@ export interface ApiClient {
   /** The backfill list to confirm. Rows are the server's backfill shape, not PR rows. */
   addWatch(repo: RepoRef): Promise<{ repo: RepoRef; entries: unknown[] }>;
   removeWatch(repo: RepoRef): Promise<void>;
+  /**
+   * One typed call against a route, for views that want the wire shape rather
+   * than a view model. Shares this client's token and its 401 handling, which
+   * is the reason it exists: three views had grown their own copy of this and
+   * none of them flipped the tab's auth state.
+   */
+  request<T>(path: string, init?: RequestInit): Promise<T>;
   getConfig(): Promise<ConfigResponse>;
   patchConfig(patch: Partial<ConfigValues>): Promise<ConfigResponse>;
 }
@@ -766,7 +773,22 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       throw new ApiError("unauthenticated", REAUTH_MESSAGE, 401);
     }
     if (!res.ok) {
-      throw new ApiError("http", `${init.method ?? "GET"} ${path} failed with ${res.status}`, res.status);
+      // The daemon explains itself in `message`; a bare status code makes the
+      // user guess. Falls back to the status when there is nothing to read.
+      const detail = await res
+        .clone()
+        .json()
+        .then((body: unknown) =>
+          typeof (body as { message?: unknown })?.message === "string"
+            ? ((body as { message: string }).message)
+            : null
+        )
+        .catch(() => null);
+      throw new ApiError(
+        "http",
+        detail ?? `${init.method ?? "GET"} ${path} failed with ${res.status}`,
+        res.status
+      );
     }
 
     if (requireAuth) setAuthState("ok");
@@ -894,6 +916,16 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       await raw(`/api/watchlist?owner=${encodeURIComponent(repo.owner)}&repo=${encodeURIComponent(repo.repo)}`, {
         method: "DELETE",
       });
+    },
+
+    async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+      const headers = new Headers(init.headers);
+      if (init.body !== undefined && !headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json");
+      }
+      const res = await raw(path, { ...init, headers });
+      const text = await res.text();
+      return (text ? JSON.parse(text) : undefined) as T;
     },
 
     async getConfig() {
