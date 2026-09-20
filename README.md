@@ -8,10 +8,10 @@ A background daemon polls your watched repositories on a timer, 15 minutes by de
 
 1. **Classify.** A PR you authored, were requested to review, were assigned, or are @-mentioned in gets queued automatically. Everything else waits in a triage inbox until you tell it to review or skip.
 2. **Review.** Queued PRs go to the Claude CLI in print mode, one round per head commit. Findings, one per file and line, each with a severity, a comment, and an optional suggestion, land in a markdown file in the store.
-3. **Gate.** You open the local web UI, read each finding next to the diff hunk it's about, and discard whatever isn't worth raising.
+3. **Gate.** You open the local web UI's Reviews view, read each finding next to the diff hunk it's about, and discard whatever isn't worth raising.
 4. **Post.** What's left goes up as one pending draft review on GitHub. You open that draft in GitHub's own editor and submit it yourself, or don't.
 
-New commits on a PR LGTM already reviewed start a fresh round. The prompt tells the CLI what it already raised so it doesn't repeat itself, but there's no separate pass that re-checks old findings once they're posted (see [Status](#status)).
+New commits on a PR LGTM already reviewed start a fresh round. The prompt tells the CLI what it already raised so it doesn't repeat itself, but there's no separate pass that re-checks old findings once they're posted: see [status.md's Known gaps](docs/spec/status.md#known-gaps-by-design-or-by-an-open-seam).
 
 ## Why a draft review is the whole point
 
@@ -36,7 +36,7 @@ lgtm watch add owner/repo   # start watching a repository
 
 `lgtm open` finds the running daemon and launches your browser with a bearer token in the URL fragment; the page moves it to local storage and strips it from the address bar on load. Adding a repository, from the Repos view or with `watch add`, triggers a backfill: you see its currently open PRs with the auto-class ones pre-selected, and nothing auto-queues until you confirm the list. `lgtm status` reports daemon liveness, the last cycle, queue depth, and quota state, and exits non-zero when nothing is running.
 
-Read [Status](#status) before you try this. The daemon runs, but it has not yet been pointed at a real repository.
+GitHub auth has to resolve before a watched repo does anything: `GITHUB_TOKEN` or `GH_TOKEN`, then `gh auth token`, then a saved credential file (see [What it needs](#what-it-needs)). See [Status](#status) for what this build has actually been run against.
 
 ## The store
 
@@ -46,6 +46,7 @@ Everything LGTM knows lives at `~/.lgtm-farm/` as markdown files with YAML front
 ~/.lgtm-farm/
   token                        bearer token for the API, mode 0600
   daemon.json                  port, pid, start time
+  credentials.json             GitHub token, if you saved one this way rather than via gh; mode 0600
   config.md                    interval, quota thresholds, concurrency, binary path pins
   watch.md                     the repositories being polled
   agents/reviewer.md           the review prompt, yours to edit
@@ -54,7 +55,7 @@ Everything LGTM knows lives at `~/.lgtm-farm/` as markdown files with YAML front
     meta.md                    state, classification, head SHA, round count
     r<N>-<agent>.md            one file per review round, findings in frontmatter
     diff-<sha>.patch           a snapshot of the diff at each reviewed head
-  logs/daemon.log
+  logs/daemon.log              only if you ran `lgtm install`; it's launchd's stdout/stderr redirect
 ```
 
 `agents/reviewer.md` is the file worth opening first. It's the block of instructions the daemon appends to the CLI's built-in review command, written in your own words, not shipped as a fixed prompt.
@@ -67,16 +68,18 @@ v1 targets macOS only (`lgtm install` writes a launchd LaunchAgent). [ADR 0002](
 
 ## Status
 
-This is a ground-up rebuild on the `v2` branch. The typecheck is clean, the test suite passes, the binary builds, and the daemon runs: it creates its store, binds loopback, serves the UI and the API, polls on a schedule, and shuts down cleanly. What it has never done is watch a real repository or post a real draft review. Every run so far has been against an empty store with no GitHub token, so the first review round and the first post are still ahead. Read [docs/spec/status.md](docs/spec/status.md) for the specifics, milestone by milestone.
+This is a ground-up rebuild, merged to `main`. The typecheck is clean, the test suite passes, and the binary builds. The daemon runs end to end: it creates its store, binds loopback, serves the UI and the API, polls on a schedule, and shuts down cleanly. It has authenticated against real GitHub, listed real pull requests, and reviewed real PRs end to end.
+
+It's one person's tool. Nobody but its author has run it, and the two weeks of daily use that gate v1.1 haven't happened yet. This isn't finished; read [docs/spec/status.md](docs/spec/status.md) for the milestone-by-milestone record, including what's still unproven.
 
 ## Learn more
 
 - [docs/spec/requirements.md](docs/spec/requirements.md), what v1 does and what it deliberately doesn't
 - [docs/spec/design.md](docs/spec/design.md), how it's built
 - [docs/architecture.md](docs/architecture.md), where data lives and the lines it cannot cross
-- [docs/spec/tasks.md](docs/spec/tasks.md), the milestone plan (its checkboxes lag reality; [status.md](docs/spec/status.md) is the current record)
+- [docs/spec/tasks.md](docs/spec/tasks.md), the milestone plan the build followed, kept as a record now that every milestone has landed
 - [docs/spec/decisions.md](docs/spec/decisions.md), why, in the words of the session that decided it
 - [docs/spec/models.md](docs/spec/models.md), which model tier each kind of task needs, and what the build showed about that
 - [docs/adr/](docs/adr/), the five decisions that were hard to reverse
 - [CONTEXT.md](CONTEXT.md), the project glossary
-- [TESTING.md](TESTING.md), running the suite and driving the review loop offline
+- [TESTING.md](TESTING.md), running the suite, including the offline end-to-end journeys, and driving the review loop by hand

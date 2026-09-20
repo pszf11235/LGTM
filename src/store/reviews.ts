@@ -86,6 +86,28 @@ export function diffSnapshotPath(lgtmDir: string, ref: PRRef, sha: string): stri
   return path.join(reviewDir(lgtmDir, ref), `diff-${sha}.patch`);
 }
 
+/**
+ * The one directory every Round is spawned from: `<lgtmDir>/sessions/`.
+ *
+ * Empty by design. Nothing of ours is written here; it exists to be a working
+ * directory with a fixed name. The Claude CLI files each print-mode session
+ * under a slug of the directory it ran in, so a Round spawned from wherever
+ * the daemon happened to start leaves its session under a slug nobody can
+ * predict, and `claude --resume <id>` from anywhere else finds nothing. One
+ * directory the store owns turns "resume this round" into a command that can
+ * be printed.
+ */
+export function sessionsDir(lgtmDir: string): string {
+  return path.join(lgtmDir, "sessions");
+}
+
+/** `sessionsDir`, created if it is not there yet. */
+export async function ensureSessionsDir(lgtmDir: string): Promise<string> {
+  const dir = sessionsDir(lgtmDir);
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
+}
+
 export function prUrl(ref: PRRef): string {
   return `https://github.com/${ref.owner}/${ref.repo}/pull/${ref.number}`;
 }
@@ -148,7 +170,29 @@ function normaliseFindings(value: unknown): Finding[] {
     .filter((f) => f.file && f.comment);
 }
 
+/** A non-empty string, or null. Anything else in the field reads as null. */
+function nullableString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/** A number at or above zero, or null. Rejects NaN, negatives and junk alike. */
+function nonNegativeNumber(value: unknown): number | null {
+  const parsed = nullableNumber(value);
+  return parsed !== null && parsed >= 0 ? parsed : null;
+}
+
+/**
+ * The four session fields all read the same way as the triage fields on
+ * meta.md: absent, hand-deleted, or garbage all come back null. Every round
+ * file written before these fields existed is exactly the "absent" case, so
+ * this is what keeps an older round loading unchanged rather than as a
+ * corrupt one.
+ */
 function parseRoundFileData(data: Record<string, unknown>): RoundFile {
+  const turns = nonNegativeNumber(data.turns);
+
   return {
     round: Number(data.round ?? 0),
     agent: String(data.agent ?? ""),
@@ -158,6 +202,10 @@ function parseRoundFileData(data: Record<string, unknown>): RoundFile {
     startedAt: String(data.startedAt ?? ""),
     durationMs: Number(data.durationMs ?? 0),
     findings: normaliseFindings(data.findings),
+    sessionId: nullableString(data.sessionId),
+    sessionCwd: nullableString(data.sessionCwd),
+    costUsd: nonNegativeNumber(data.costUsd),
+    turns: turns !== null && Number.isInteger(turns) ? turns : null,
   };
 }
 
@@ -234,6 +282,16 @@ export interface SaveRoundInput {
   findings: Array<Omit<Finding, "id" | "state" | "heldReason">>;
   /** Unparseable provider output. Written only when status is "failed", so a healthy round never leaves a transcript on disk. */
   raw?: string;
+
+  /**
+   * The Provider run behind this round. Optional at the call site and null on
+   * disk when omitted: a Provider that reports no session is not an error, and
+   * a caller that has nothing to say here should not have to say null.
+   */
+  sessionId?: string | null;
+  sessionCwd?: string | null;
+  costUsd?: number | null;
+  turns?: number | null;
 }
 
 /**
@@ -264,6 +322,10 @@ export async function saveRound(lgtmDir: string, input: SaveRoundInput): Promise
     startedAt: input.startedAt,
     durationMs: input.durationMs,
     findings,
+    sessionId: input.sessionId ?? null,
+    sessionCwd: input.sessionCwd ?? null,
+    costUsd: input.costUsd ?? null,
+    turns: input.turns ?? null,
   };
 
   const store = createOKFStore(lgtmDir);
@@ -280,6 +342,10 @@ export async function saveRound(lgtmDir: string, input: SaveRoundInput): Promise
 
 function roundBody(round: RoundFile): string {
   const lines = [`# Round ${round.round} — ${round.agent}${round.provider ? ` (${round.provider})` : ""}`, ""];
+
+  // Before the two early returns below, because a failed round is the one a
+  // human is most likely to want to reopen and ask about.
+  lines.push(...sessionLines(round));
 
   if (round.status === "failed") {
     lines.push("Review failed. See the .raw.txt file next to this one for the unparsed output.", "");
@@ -303,6 +369,38 @@ function roundBody(round: RoundFile): string {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * The resume command, spelled out, plus what the round cost.
+ *
+ * Written as one runnable line rather than two facts to assemble, because the
+ * `cd` is not optional trivia: run the resume from anywhere else and the CLI
+ * reports no such session. Nothing is printed when there is no session id,
+ * which is every round file written before this existed.
+ */
+function sessionLines(round: RoundFile): string[] {
+  const lines: string[] = [];
+
+  if (round.sessionId) {
+    const resume = `claude --resume ${round.sessionId}`;
+    lines.push(
+      `Resume this review: \`${round.sessionCwd ? `cd ${round.sessionCwd} && ${resume}` : resume}\``,
+      ""
+    );
+  }
+
+  const spent: string[] = [];
+  if (round.costUsd !== null) spent.push(formatUsd(round.costUsd));
+  if (round.turns !== null) spent.push(`${round.turns} turn(s)`);
+  if (spent.length > 0) lines.push(`Cost: ${spent.join(", ")}`, "");
+
+  return lines;
+}
+
+/** Two decimals, except where two decimals would round a real cost to $0.00. */
+function formatUsd(value: number): string {
+  return `$${value >= 0.01 ? value.toFixed(2) : value.toFixed(4)}`;
 }
 
 // ─── Meta ───────────────────────────────────────────────────────────────────

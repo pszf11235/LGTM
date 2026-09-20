@@ -13,10 +13,16 @@
  * anywhere above the working directory. And it inherits the session's default
  * model unless told otherwise, which cost twice as much for the same review,
  * so --model is never omitted here.
+ *
+ * The working directory still matters for a different reason. Print-mode
+ * sessions persist under ~/.claude/projects/<cwd-slug>/, keyed by where the
+ * CLI ran, and `claude --resume <session-id>` only finds one from the same
+ * place. So the daemon hands every Round one directory it owns, and the
+ * outcome reports both the id and the directory back.
  */
 
 import { formatFindingKey } from "@/core";
-import { extractFindings, validateFindings } from "./parse";
+import { extractFindings, extractSessionMeta, validateFindings, type SessionMeta } from "./parse";
 import type { AgentConfig, Provider, PriorFinding, ReviewInput, ReviewOutcome } from "./index";
 
 /**
@@ -188,6 +194,11 @@ function fromSpawn(outcome: SpawnOutcome, timeoutMinutes: number): { output: str
 async function review(input: ReviewInput): Promise<ReviewOutcome> {
   const startedAt = Date.now();
 
+  // Filled in from the envelope once the CLI has printed one. Until then the
+  // Round genuinely has no session, and every outcome below says so honestly
+  // rather than leaving the fields off.
+  let session: SessionMeta = { sessionId: null, costUsd: null, turns: null };
+
   const outcome = (
     findings: ReviewOutcome["findings"],
     raw: string,
@@ -201,6 +212,13 @@ async function review(input: ReviewInput): Promise<ReviewOutcome> {
     error,
     durationMs: Date.now() - startedAt,
     dropped,
+    sessionId: session.sessionId,
+    costUsd: session.costUsd,
+    turns: session.turns,
+    // Echoed back rather than assumed by the caller: this is where the CLI
+    // actually ran, and therefore the only directory a resume will find the
+    // session under.
+    sessionCwd: input.sessionCwd ?? null,
   });
 
   try {
@@ -209,7 +227,13 @@ async function review(input: ReviewInput): Promise<ReviewOutcome> {
 
     const spawned = await run(claudeArgs(input.agent, prompt, input.binPath), {
       timeoutSeconds: timeoutMinutes * 60,
+      cwd: input.sessionCwd,
     });
+
+    // Read before the failure branches below. A Round that timed out or whose
+    // output would not parse is exactly the one worth resuming by hand, so the
+    // session id is salvaged from whatever arrived, not only from a clean run.
+    session = extractSessionMeta(spawned.stdout);
 
     // Partial output after a timeout is kept as raw, so the failed Round has
     // something to dump next to it. It is not parsed: a truncated answer that

@@ -14,6 +14,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { createApiHandler } from "./server";
+import type { ApiDeps } from "./server";
 import { createApiClient } from "@/ui/api";
 import { saveMeta, saveRound } from "@/store/reviews";
 import { saveWatchList } from "@/store/watch-list";
@@ -47,9 +48,9 @@ function buildRequest(input: string, init?: RequestInit): Request {
   return new Request(input.startsWith("http") ? input : `${ORIGIN}${input}`, { ...init, headers });
 }
 
-/** A client whose transport is the real handler, not a hand-written fixture. */
-function clientOverHandler() {
-  const handler = createApiHandler({ lgtmDir, token: TOKEN, port: PORT, version: "test" });
+/** A client whose transport is the real handler, not a hand-written fixture. Extra deps splice in a live queue/quota/forge for the tests that need one. */
+function clientOverDeps(extra: Partial<ApiDeps> = {}) {
+  const handler = createApiHandler({ lgtmDir, token: TOKEN, port: PORT, version: "test", ...extra });
   return createApiClient({
     fetchImpl: (input, init) =>
       handler(buildRequest(input, init)),
@@ -57,6 +58,10 @@ function clientOverHandler() {
     location: { hash: "", pathname: "/", search: "" },
     history: { replaceState() {} },
   });
+}
+
+function clientOverHandler() {
+  return clientOverDeps();
 }
 
 /**
@@ -204,6 +209,20 @@ describe("GET /api/prs, daemon to browser", () => {
 
     expect(seen).toEqual(["failed", "queued", "reviewed", "reviewing", "skipped", "triage"]);
   });
+
+  test("a row's own key is the daemon's owner/repo#number, not something the browser has to reassemble", async () => {
+    // Reviews.tsx matches this row against the status queue's inFlightRounds
+    // / queuedEntries by this exact field (routes.ts's `formatRef`). Two
+    // independent spellings of the same identity, one built from `ref` here
+    // and another built from `owner`/`repo`/`number` on the browser side, is
+    // exactly the kind of drift this file exists to catch.
+    const ref = { owner: "acme", repo: "api", number: 42 };
+    await saveMeta(lgtmDir, ref, { state: "reviewing", author: "ada", headSha: "sha1" });
+
+    const pr = (await clientOverHandler().listPRs())[0]!;
+
+    expect(pr.key).toBe("acme/api#42");
+  });
 });
 
 /**
@@ -284,6 +303,81 @@ describe("the rest of the client surface", () => {
   });
 });
 
+/**
+ * `/api/status`'s queue and quota detail, end to end.
+ *
+ * The browser client's status parser used to collapse the whole `queue`
+ * object into a single `queueLength` number and drop the rest. No view
+ * could tell a round twenty seconds in from one about to time out, or which
+ * PR held which of the concurrency slots. These pass a real `ApiDeps.queue`
+ * / `ApiDeps.quota` (the same shapes `daemon/queue.ts` and `daemon/quota.ts`
+ * actually produce) through the real route handler and the real client
+ * parser, so a shape change on either side fails here.
+ */
+describe("GET /api/status, daemon to browser: queue and quota detail", () => {
+  const QUEUED_AT = Date.parse("2026-08-30T00:01:00.000Z");
+  const STARTED_AT = Date.parse("2026-08-30T00:00:30.000Z");
+
+  function queueFake(pausedByGate = false): Pick<import("@/daemon/queue").ReviewQueue, "enqueue" | "remove" | "status"> {
+    return {
+      enqueue: () => "queued",
+      remove: () => false,
+      status: () => ({
+        queued: 1,
+        inFlight: 1,
+        pausedByGate,
+        queuedEntries: [{ ref: { owner: "acme", repo: "api", number: 9 }, headSha: "sha-queued", queuedAt: QUEUED_AT }],
+        inFlightRounds: [{ ref: { owner: "acme", repo: "api", number: 7 }, headSha: "sha-flight", startedAt: STARTED_AT }],
+      }),
+    };
+  }
+
+  function quotaFake(): { state: () => import("@/daemon/quota").QuotaState } {
+    return {
+      state: () => ({
+        mode: "throttled",
+        maxPercent: 82,
+        windows: [],
+        readAt: null,
+        resetAt: null,
+        consecutiveParseFailures: 0,
+        runsToday: 3,
+        dailyCap: 20,
+        lastError: null,
+      }),
+    };
+  }
+
+  test("in-flight rounds and queued entries arrive keyed, timed and matchable", async () => {
+    const status = await clientOverDeps({ queue: queueFake() }).status();
+
+    expect(status.queue.inFlightRounds).toEqual([
+      { key: "acme/api#7", headSha: "sha-flight", startedAt: new Date(STARTED_AT).toISOString() },
+    ]);
+    expect(status.queue.queuedEntries).toEqual([
+      { key: "acme/api#9", headSha: "sha-queued", queuedAt: new Date(QUEUED_AT).toISOString() },
+    ]);
+    // The flat convenience field other views still read stays correct too.
+    expect(status.queueLength).toBe(2);
+  });
+
+  test("pausedByGate, and the quota mode/percentage that explain it, all survive together", async () => {
+    const status = await clientOverDeps({ queue: queueFake(true), quota: quotaFake() }).status();
+
+    expect(status.queue.pausedByGate).toBe(true);
+    expect(status.quotaMode).toBe("throttled");
+    expect(status.quotaPercent).toBe(82);
+  });
+
+  test("with no queue or quota wired up, the client still gets a fully-shaped, empty queue rather than a hole", async () => {
+    const status = await clientOverHandler().status();
+
+    expect(status.queue).toEqual({ queued: 0, inFlight: 0, pausedByGate: false, queuedEntries: [], inFlightRounds: [] });
+    expect(status.quotaMode).toBe("ok");
+    expect(status.quotaPercent).toBeNull();
+  });
+});
+
 describe("GET .../findings, daemon to browser", () => {
   test("findings grouped under rounds reach the detail view", async () => {
     const ref = { owner: "acme", repo: "api", number: 99 };
@@ -319,6 +413,95 @@ describe("GET .../findings, daemon to browser", () => {
     expect(res.meta.owner).toBe("acme");
     expect(res.meta.number).toBe(99);
     expect(res.meta.title).toBe("Add a rate limiter");
+  });
+
+  test("a round's session fields and its ready-made resume command arrive", async () => {
+    const ref = { owner: "acme", repo: "api", number: 101 };
+    await saveMeta(lgtmDir, ref, { state: "reviewed", headSha: "sha1", author: "ada" });
+    await saveRound(lgtmDir, {
+      ref,
+      round: 1,
+      agent: "reviewer",
+      provider: "claude-cli",
+      status: "ok",
+      headSha: "sha1",
+      startedAt: "2026-08-30T00:00:00.000Z",
+      durationMs: 1000,
+      findings: [{ severity: "high", file: "a.ts", line: 3, comment: "one" }],
+      sessionId: "sess-abc123",
+      sessionCwd: "/Users/ada/repos/api",
+      costUsd: 0.42,
+      turns: 7,
+    });
+
+    const res = await clientOverHandler().getFindings(ref);
+
+    expect(res.rounds).toHaveLength(1);
+    const round = res.rounds[0]!;
+    expect(round.sessionId).toBe("sess-abc123");
+    expect(round.sessionCwd).toBe("/Users/ada/repos/api");
+    expect(round.costUsd).toBe(0.42);
+    expect(round.turns).toBe(7);
+    // Built server-side, from the same sessionId and sessionCwd, so the
+    // client never has to reassemble it.
+    expect(round.resumeCommand).toBe("cd /Users/ada/repos/api && claude --resume sess-abc123");
+  });
+
+  test("resumeCommand omits the cd when the round carries no working directory", async () => {
+    const ref = { owner: "acme", repo: "api", number: 102 };
+    await saveMeta(lgtmDir, ref, { state: "reviewed", headSha: "sha1", author: "ada" });
+    await saveRound(lgtmDir, {
+      ref,
+      round: 1,
+      agent: "reviewer",
+      provider: "claude-cli",
+      status: "ok",
+      headSha: "sha1",
+      startedAt: "2026-08-30T00:00:00.000Z",
+      durationMs: 1000,
+      findings: [{ severity: "low", file: "a.ts", line: 1, comment: "one" }],
+      sessionId: "sess-xyz",
+      sessionCwd: null,
+    });
+
+    const res = await clientOverHandler().getFindings(ref);
+
+    expect(res.rounds[0]?.resumeCommand).toBe("claude --resume sess-xyz");
+  });
+
+  test("a round with no session id sends and parses a null resumeCommand, not a guessed one", async () => {
+    const ref = { owner: "acme", repo: "api", number: 103 };
+    await saveMeta(lgtmDir, ref, { state: "reviewed", headSha: "sha1", author: "ada" });
+    await saveRound(lgtmDir, {
+      ref,
+      round: 1,
+      agent: "reviewer",
+      provider: "claude-cli",
+      status: "ok",
+      headSha: "sha1",
+      startedAt: "2026-08-30T00:00:00.000Z",
+      durationMs: 1000,
+      findings: [{ severity: "low", file: "a.ts", line: 1, comment: "one" }],
+    });
+
+    // The raw wire shape, not the client's coercion, so a route that starts
+    // omitting the key entirely (rather than sending it as null) would still
+    // fail this rather than being smoothed over by the parser.
+    const handler = createApiHandler({ lgtmDir, token: TOKEN, port: PORT, version: "test" });
+    const raw = await handler(
+      buildRequest(`/api/prs/acme/api/103/findings`, { headers: { Authorization: `Bearer ${TOKEN}` } }),
+    );
+    const body = (await raw.json()) as { rounds: Array<Record<string, unknown>> };
+    expect(body.rounds[0]?.sessionId).toBeNull();
+    expect(body.rounds[0]?.resumeCommand).toBeNull();
+
+    const res = await clientOverHandler().getFindings(ref);
+    const round = res.rounds[0]!;
+    expect(round.sessionId).toBeNull();
+    expect(round.sessionCwd).toBeNull();
+    expect(round.costUsd).toBeNull();
+    expect(round.turns).toBeNull();
+    expect(round.resumeCommand).toBeNull();
   });
 
   test("findings from several rounds all arrive", async () => {

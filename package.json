@@ -7,7 +7,7 @@
     "lgtm": "src/main.ts"
   },
   "scripts": {
-    "dev": "bun --hot src/main.ts",
+    "dev": "bun --hot src/main.ts up",
     "build": "bun run build.ts",
     "test": "bun test",
     "lint": "tsc --noEmit"

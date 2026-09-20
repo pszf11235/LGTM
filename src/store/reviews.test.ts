@@ -38,6 +38,7 @@ import path from "path";
 import { parseOKF, stringifyOKF } from "./okf.js";
 import {
   diffSnapshotPath,
+  ensureSessionsDir,
   listReviewedPRs,
   loadAllRounds,
   loadMeta,
@@ -53,6 +54,7 @@ import {
   reviewDir,
   saveMeta,
   saveRound,
+  sessionsDir,
   type SaveRoundInput,
 } from "./reviews.js";
 import type { Finding, PRRef } from "@/core";
@@ -561,6 +563,96 @@ describe("failed rounds", () => {
   });
 });
 
+// ─── The session behind a round ─────────────────────────────────────────────
+
+describe("session", () => {
+  const SESSION = {
+    sessionId: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    sessionCwd: "/Users/someone/.lgtm-farm/sessions",
+    costUsd: 0.77,
+    turns: 14,
+  };
+
+  test("every round is spawned from one directory the store owns", async () => {
+    // The Claude CLI files sessions under a slug of the working directory it
+    // ran in, so this fixed name is what makes a session findable later.
+    expect(sessionsDir(store)).toBe(path.join(store, "sessions"));
+
+    expect(await ensureSessionsDir(store)).toBe(sessionsDir(store));
+    expect(await fs.exists(sessionsDir(store))).toBe(true);
+  });
+
+  test("creating the sessions directory twice is not an error", async () => {
+    // Every round calls it, so it has to be safe to call on an existing store.
+    await ensureSessionsDir(store);
+    await ensureSessionsDir(store);
+
+    expect(await fs.exists(sessionsDir(store))).toBe(true);
+  });
+
+  test("a round records the session, the directory, the cost and the turns", async () => {
+    await writeRound(ref, 1, "reviewer", [finding()], SESSION);
+
+    expect(await loadRound(store, ref, 1, "reviewer")).toMatchObject(SESSION);
+  });
+
+  test("the session lands in the frontmatter, where a human can read it", async () => {
+    await writeRound(ref, 1, "reviewer", [finding()], SESSION);
+
+    const { data } = parseOKF(
+      await fs.readFile(path.join(reviewDir(store, ref), "r1-reviewer.md"), "utf-8")
+    );
+
+    expect(data.sessionId).toBe(SESSION.sessionId);
+    expect(data.sessionCwd).toBe(SESSION.sessionCwd);
+    expect(data.costUsd).toBe(0.77);
+    expect(data.turns).toBe(14);
+  });
+
+  test("the body spells out the command that resumes the review", async () => {
+    // Both halves or nothing: run the resume from any other directory and the
+    // CLI reports no such session, so the cd is part of the instruction.
+    await writeRound(ref, 1, "reviewer", [finding()], SESSION);
+
+    const body = await fs.readFile(path.join(reviewDir(store, ref), "r1-reviewer.md"), "utf-8");
+
+    expect(body).toContain(
+      `cd ${SESSION.sessionCwd} && claude --resume ${SESSION.sessionId}`
+    );
+    expect(body).toContain("Cost: $0.77, 14 turn(s)");
+  });
+
+  test("a failed round says how to resume it too", async () => {
+    // The round most worth reopening by hand: the review ran, and only the
+    // reading of it failed.
+    await writeRound(ref, 1, "reviewer", [], { ...SESSION, status: "failed", raw: "not JSON" });
+
+    const body = await fs.readFile(path.join(reviewDir(store, ref), "r1-reviewer.md"), "utf-8");
+
+    expect(body).toContain("Review failed");
+    expect(body).toContain(`claude --resume ${SESSION.sessionId}`);
+  });
+
+  test("a round with no session says nothing about resuming", async () => {
+    await writeRound(ref, 1, "reviewer", [finding()]);
+
+    const round = (await loadRound(store, ref, 1, "reviewer"))!;
+    expect(round).toMatchObject({ sessionId: null, sessionCwd: null, costUsd: null, turns: null });
+
+    const body = await fs.readFile(path.join(reviewDir(store, ref), "r1-reviewer.md"), "utf-8");
+    expect(body).not.toContain("--resume");
+    expect(body).not.toContain("Cost:");
+  });
+
+  test("a round that cost nearly nothing still reports a number", async () => {
+    // Two decimals would round $0.0031 to $0.00 and read as free.
+    await writeRound(ref, 1, "reviewer", [finding()], { costUsd: 0.0031 });
+
+    const body = await fs.readFile(path.join(reviewDir(store, ref), "r1-reviewer.md"), "utf-8");
+    expect(body).toContain("Cost: $0.0031");
+  });
+});
+
 // ─── Hand-edited files ──────────────────────────────────────────────────────
 
 describe("hand-edited files", () => {
@@ -663,6 +755,75 @@ describe("hand-edited files", () => {
     // Not false. A hand-edit typo must not tell the user their PR conflicts.
     expect(meta.mergeable).toBeNull();
     expect(meta.checkStatus).toBeNull();
+  });
+
+  test("a round file written before sessions existed loads with them null", async () => {
+    // Exactly the shape every round file on disk already has. It must keep
+    // loading unchanged, with four honest nulls rather than a parse failure.
+    const dir = reviewDir(store, ref);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "r1-reviewer.md"),
+      stringifyOKF(
+        {
+          round: 1,
+          agent: "reviewer",
+          provider: "claude-cli",
+          status: "ok",
+          headSha: "abc123",
+          startedAt: "2026-08-29T10:00:00Z",
+          durationMs: 84210,
+          findings: [{ id: "f1", file: "src/limiter.ts", line: 118, severity: "high", comment: "boom", state: "open" }],
+        },
+        "# Round 1"
+      ),
+      "utf-8"
+    );
+
+    const round = (await loadRound(store, ref, 1, "reviewer"))!;
+
+    expect(round).toMatchObject({
+      round: 1,
+      agent: "reviewer",
+      status: "ok",
+      headSha: "abc123",
+      durationMs: 84210,
+      sessionId: null,
+      sessionCwd: null,
+      costUsd: null,
+      turns: null,
+    });
+    expect(round.findings[0]).toMatchObject({ id: "f1", file: "src/limiter.ts", state: "open" });
+  });
+
+  test("garbage in a session field reads as null, never as a resumable id", async () => {
+    // A round file claiming a session that does not exist would print a
+    // resume command that fails, which is worse than printing none.
+    const dir = reviewDir(store, ref);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "r1-reviewer.md"),
+      stringifyOKF(
+        {
+          round: 1,
+          agent: "reviewer",
+          sessionId: "   ",
+          sessionCwd: 42,
+          costUsd: "free",
+          turns: 2.5,
+          findings: [],
+        },
+        "body"
+      ),
+      "utf-8"
+    );
+
+    expect(await loadRound(store, ref, 1, "reviewer")).toMatchObject({
+      sessionId: null,
+      sessionCwd: null,
+      costUsd: null,
+      turns: null,
+    });
   });
 
   test("a corrupt round file is skipped rather than taking the PR down", async () => {

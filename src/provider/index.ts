@@ -16,7 +16,15 @@ import type { FindingKey, Severity } from "@/core";
 import { claudeProvider, DEFAULT_MODEL } from "./claude";
 import type { RawFinding } from "./parse";
 
-export { extractFindings, validateFindings, meetsSeverity, SEVERITY_ORDER, type RawFinding } from "./parse";
+export {
+  extractFindings,
+  extractSessionMeta,
+  validateFindings,
+  meetsSeverity,
+  SEVERITY_ORDER,
+  type RawFinding,
+  type SessionMeta,
+} from "./parse";
 export { DEFAULT_MODEL } from "./claude";
 
 // ─── Agent configuration ────────────────────────────────────────────────────
@@ -95,6 +103,19 @@ export interface ReviewInput {
 
   /** Findings from earlier Rounds on this PR. */
   priorFindings?: PriorFinding[];
+
+  /**
+   * The directory the Provider is spawned in.
+   *
+   * Not a detail of the spawn. The CLI files each print-mode session under
+   * ~/.claude/projects/<cwd-slug>/, so the working directory is half the
+   * address of the session, and `claude --resume <id>` run from anywhere else
+   * will not find it. The daemon passes one stable directory it owns
+   * (`<lgtmDir>/sessions/`) so every Round's session is somewhere a human can
+   * be told about. Omitted, the Round runs wherever the daemon started and
+   * its session lands in an unpredictable slug.
+   */
+  sessionCwd?: string;
 }
 
 /**
@@ -120,6 +141,29 @@ export interface ReviewOutcome {
 
   /** Findings the Provider returned that were unusable or below the floor. */
   dropped: number;
+
+  // ── The run behind the Round ──────────────────────────────────────────
+  //
+  // Facts about the conversation that produced the Findings, not about the
+  // Findings themselves. All optional, and null when the Provider reported
+  // nothing: a Provider with no notion of a session, a cost, or a turn count
+  // is not a failed one, and a Round records what it was told and no more.
+
+  /**
+   * The Provider session, resumable with `claude --resume <id>` from
+   * `sessionCwd`. This is what lets a human pick up the conversation that
+   * wrote a finding instead of starting a fresh review to argue with it.
+   */
+  sessionId?: string | null;
+
+  /** What the Round spent of the user's own subscription. */
+  costUsd?: number | null;
+
+  /** How many turns the Provider took. */
+  turns?: number | null;
+
+  /** The directory the Provider ran in, without which `sessionId` is unusable. */
+  sessionCwd?: string | null;
 }
 
 /**
@@ -160,6 +204,10 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
       error: `unknown provider "${input.agent.provider}", expected one of ${PROVIDER_IDS.join(", ")}`,
       durationMs: 0,
       dropped: 0,
+      sessionId: null,
+      costUsd: null,
+      turns: null,
+      sessionCwd: null,
     };
   }
 
