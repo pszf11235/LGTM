@@ -52,6 +52,8 @@ import type { MetaUpdate } from "@/store/reviews";
 import { loadWatchList, removeFromWatchList, saveWatchList } from "@/store/watch-list";
 import { DEFAULTS, loadConfig, updateConfig } from "@/store/config";
 import type { Config } from "@/store/config";
+import type { FindingCard, FindingCounts, PRRow } from "./contract";
+export type { FindingCard, FindingCounts, PRRow } from "./contract";
 import { addRepoWithBackfill, mergeableStatus } from "@/daemon/backfill";
 import type { BackfillEntry } from "@/daemon/backfill";
 import type { DaemonEvent, EventBus } from "@/daemon/events";
@@ -250,18 +252,6 @@ function repoKey(owner: string, repo: string): string {
 
 const SEVERITIES: readonly Severity[] = ["critical", "high", "medium", "low"];
 
-export interface FindingCounts {
-  total: number;
-  open: number;
-  held: number;
-  posted: number;
-  discarded: number;
-  /** open + held: everything still in front of the Gate (see `pendingFindings` in @/store/reviews). */
-  pending: number;
-  /** Pending findings by severity, which is what the inbox badge counts. */
-  pendingBySeverity: Record<Severity, number>;
-}
-
 function emptyCounts(): FindingCounts {
   return {
     total: 0,
@@ -283,44 +273,6 @@ function countFindings(findings: Finding[], into: FindingCounts): void {
       into.pendingBySeverity[finding.severity] += 1;
     }
   }
-}
-
-export interface PRRow {
-  ref: PRRef;
-  /** `owner/repo#42`, the same rendering the CLI and the logs use. */
-  key: string;
-  url: string;
-  title: string;
-  author: string;
-  state: PRState;
-  classification: PRMeta["classification"];
-  draft: boolean;
-  headSha: string;
-  lastReviewedSha: string | null;
-  failedAttempts: number;
-  rounds: number;
-  pendingReviewId: number | null;
-  closedAt: string | null;
-  updatedAt: string;
-
-  // ── Triage metadata ───────────────────────────────────────────────────
-  //
-  // Flat, and under exactly the names the browser reads (`PRListItem` in
-  // src/ui/api.ts). Null travels as null. The row means "not fetched" or
-  // "GitHub is still computing it", and the browser renders a dash or
-  // "Computing…"; filling a null in with a zero here would turn "unknown"
-  // into a measured "no changes" on its way across the wire.
-  createdAt: string | null;
-  additions: number | null;
-  deletions: number | null;
-  changedFiles: number | null;
-  mergeable: boolean | null;
-  checkStatus: CheckState | null;
-  /** Derived, never stored: an auto-class draft held until it leaves draft state (R2.3). */
-  reviewsWhenReady: boolean;
-  /** False once its repo leaves the watch list. Its files stay on disk (R9.5). */
-  watched: boolean;
-  findings: FindingCounts;
 }
 
 /**
@@ -710,27 +662,6 @@ const decision: RouteHandler = async ({ req, params, deps }) => {
 };
 
 // ─── GET /api/prs/:owner/:repo/:number/findings ─────────────────────────────
-
-export interface FindingCard {
-  /** The canonical key, `r2:reviewer:f1`. The only handle the PATCH route accepts. */
-  key: string;
-  id: string;
-  round: number;
-  agent: string;
-  severity: Severity;
-  file: string;
-  line: number;
-  comment: string;
-  suggestion: string | null;
-  state: Finding["state"];
-  heldReason: string | null;
-  /** About ten lines around the finding, sliced from its own round's snapshot. */
-  hunk: SlicedHunk | null;
-  /** Why there is no hunk, so the card can say so instead of rendering an empty box. */
-  hunkFallback: "no-snapshot" | "line-not-in-diff" | null;
-  /** GitHub, at the SHA this round reviewed. What the card links to when it has no hunk (R5.1, R5.3). */
-  githubUrl: string;
-}
 
 /**
  * A finding's hunk comes from the diff snapshot of *its own round*, not from

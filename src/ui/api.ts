@@ -39,6 +39,14 @@ import type {
   Severity,
 } from "@/core";
 import type { SlicedHunk } from "@/core/diff";
+// The wire contract. These shapes are the daemon's, not this file's, so a
+// change to one now stops compiling here rather than becoming an empty view.
+import {
+  decodeList,
+  decodePRIdentity,
+  decodeRoundFindings,
+  decodeSection,
+} from "@/api/contract";
 
 // ─── Injectable browser seams ───────────────────────────────────────────────
 
@@ -477,7 +485,7 @@ function findingCounts(value: unknown): FindingCounts {
  */
 function toPRListItem(raw: unknown): PRListItem {
   const rec = asRecord(raw);
-  const ref = asRecord(rec.ref);
+  const ref = decodeSection(raw, "ref");
   const findings = asRecord(rec.findings);
   return {
     key: str(rec.key),
@@ -615,18 +623,12 @@ function toPRDetailMeta(raw: unknown): PRDetailMeta {
  * so flattening preserves the order the view groups by file.
  */
 function toPRFindingsResponse(raw: unknown): PRFindingsResponse {
-  const rec = asRecord(raw);
-  const roundsRaw = Array.isArray(rec.rounds) ? rec.rounds : [];
-  const nested = roundsRaw.flatMap((round) => {
-    const list = asRecord(round).findings;
-    return Array.isArray(list) ? list : [];
-  });
-  const flat = Array.isArray(rec.findings) ? rec.findings : [];
-  const findings = (nested.length > 0 ? nested : flat).map(toFinding);
+  const roundsRaw = decodeList(raw, "rounds");
+  const findings = decodeRoundFindings(raw).map(toFinding);
   const rounds = roundsRaw.map(toRoundSummary);
 
   // `ref` holds owner/repo/number; `pr` holds everything else about it.
-  const meta = { ...asRecord(rec.ref), ...asRecord(rec.pr ?? rec.meta) };
+  const meta = decodePRIdentity(raw);
   return { meta: toPRDetailMeta(meta), findings, rounds };
 }
 
@@ -640,10 +642,10 @@ function toStatusResponse(raw: unknown): StatusResponse {
   // their own object. Reading flat keys off the top level found nothing and
   // fell back to the defaults below, so the health panel showed a plausible
   // interval and an empty queue no matter what the daemon was doing.
-  const scheduler = asRecord(rec.scheduler);
-  const queue = asRecord(rec.queue);
-  const quota = asRecord(rec.quota);
-  const counts = asRecord(rec.counts);
+  const scheduler = decodeSection(raw, "scheduler");
+  const queue = decodeSection(raw, "queue");
+  const quota = decodeSection(raw, "quota");
+  const counts = decodeSection(raw, "counts");
   const cycle = asRecord(scheduler.lastCycleOutcome);
   const binaries = Array.isArray(rec.binaries) ? rec.binaries.map(asRecord) : [];
   const pathOf = (name: string): string | null => {
@@ -819,8 +821,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       // The daemon answers `{ prs, total }`. Treating a non-array as "no PRs"
       // silently emptied the whole Reviews view, so read the envelope and
       // only fall back to a bare array.
-      const rows = Array.isArray(body) ? body : asRecord(body).prs;
-      return Array.isArray(rows) ? rows.map(toPRListItem) : [];
+      return decodeList(body, "prs").map(toPRListItem);
     },
 
     async getFindings(ref) {
@@ -864,8 +865,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const body = await getJson<unknown>("/api/watchlist");
       // The daemon answers `{ repos }`. Same envelope shape as /api/prs, and
       // the same silent-empty-list bug if it is read as a bare array.
-      const envelope = asRecord(body).repos;
-      const list = Array.isArray(body) ? body : Array.isArray(envelope) ? envelope : [];
+      const list = decodeList(body, "repos");
       return list.map((w) => {
         const rec = asRecord(w);
         return {
