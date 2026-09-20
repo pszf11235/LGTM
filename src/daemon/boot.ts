@@ -70,7 +70,7 @@ import { createEventBus, type DaemonEvent, type EventBus } from "./events";
 import { createNotifier, setUiPort, type SpawnFn } from "./notify";
 import { createReviewQueue, type QueueSnapshot, type ReviewQueue } from "./queue";
 import { createStoreWatch, type StoreWatch } from "./store-watch";
-import { startProviderLogin } from "./login";
+import { createLoginSession, type LoginSession } from "./login";
 import { checkProviderAuth, type ProviderAuthResult } from "@/provider/auth";
 import {
   createClaudeUsageProbe,
@@ -145,7 +145,8 @@ export interface BindContext {
   /** False when qualifying PRs wait in triage instead of being reviewed. */
   autoReview: () => boolean;
   /** Opens a terminal running the CLI's sign-in flow. */
-  startLogin: () => Promise<{ started: boolean; command: string; error: string | null }>;
+  /** The CLI sign-in flow, which spans two requests: start, then the code. */
+  login: LoginSession;
 }
 
 /**
@@ -569,6 +570,22 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
   });
 
   // 9. The port, and daemon.json once the socket is real.
+  // The sign-in flow, which outlives a single request: the CLI waits on stdin
+  // between printing its URL and being handed the code.
+  const login: LoginSession = createLoginSession({
+    binPath: binaries.resolve("claude"),
+    spawn: (cmd) =>
+      Bun.spawn({ cmd, stdin: "pipe", stdout: "pipe", stderr: "pipe" }) as unknown as ReturnType<
+        Parameters<typeof createLoginSession>[0]["spawn"]
+      >,
+    isSignedIn: async () => {
+      const result = await checkProviderAuth(binaries.resolve("claude"));
+      lastAuth = result;
+      return result.state === "authenticated";
+    },
+    log,
+  });
+
   const bindContext: BindContext = {
     lgtmDir,
     token,
@@ -583,12 +600,7 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     lastCycle: () => lastCycle,
     providerAuth: () => ({ state: lastAuth.state, method: lastAuth.method }),
     autoReview: () => config.auto_review,
-    startLogin: () =>
-      startProviderLogin(binaries.resolve("claude"), async (cmd) => {
-        const proc = Bun.spawn({ cmd, stdout: "pipe", stderr: "pipe" });
-        const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-        return { exitCode, stderr };
-      }),
+    login,
     // The real token, not a presence flag. `/api/status` only ever asks whether
     // this is non-null, but the post flow uses the same function as the bearer
     // it sends to GitHub, so handing back a placeholder made every post a 401.
@@ -640,6 +652,7 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     handlers.length = 0;
   }
 
+
   // Declared before `shutdown` closes over it. Signal handlers are attached
   // below but before the watcher starts, so a signal arriving in that window
   // must find a binding rather than a temporal dead zone.
@@ -650,6 +663,7 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     try {
       detachSignals();
       storeWatch?.stop();
+      login.cancel();
       // The scheduler first, so no cycle starts while the rest comes apart.
       // Its stop() settles once the running cycle has.
       await scheduler.stop();

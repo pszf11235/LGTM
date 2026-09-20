@@ -336,6 +336,8 @@ describe("route table", () => {
       "POST /api/prs/:owner/:repo/:number/validate",
       "POST /api/prs/:owner/:repo/:number/post",
       "POST /api/provider/login",
+      "POST /api/provider/login/code",
+      "DELETE /api/provider/login",
       "GET /api/watchlist",
       "POST /api/watchlist",
       "PATCH /api/watchlist",

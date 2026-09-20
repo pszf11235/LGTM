@@ -46,7 +46,7 @@ export function apiBind(): Bind {
         githubToken: context.githubToken,
         providerAuth: context.providerAuth,
         autoReview: context.autoReview,
-        startLogin: context.startLogin,
+        login: context.login,
         config: { load: loadConfig, update: updateConfig },
         // Settings changes reach the running daemon rather than waiting for a
         // restart. QuotaThresholds is structurally a subset of Config, and the

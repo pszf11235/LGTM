@@ -111,7 +111,16 @@ export interface ApiDeps {
   /** False when qualifying PRs wait in triage instead of being reviewed. */
   autoReview?: () => boolean;
   /** Opens a terminal running the CLI's sign-in flow. Absent means the route says so. */
-  startLogin?: () => Promise<{ started: boolean; command: string; error: string | null }>;
+  /**
+   * The CLI sign-in flow. Two calls rather than one, because the CLI prints a
+   * URL and then waits on stdin for the code the callback page shows.
+   */
+  login?: {
+    start(): Promise<{ status: string; url: string | null; command: string; error: string | null }>;
+    submit(code: string): Promise<{ status: string; error: string | null }>;
+    cancel(): void;
+    readonly waiting: boolean;
+  };
 
   /** ms since epoch, when the daemon started. Defaults to construction time. */
   startedAt?: number;
@@ -904,17 +913,43 @@ const patchWatchlistRepo: RouteHandler = async ({ req, deps }) => {
 };
 
 /**
- * Start the CLI's sign-in flow. The daemon opens a terminal for it, because
- * the flow needs a browser and somewhere to report into, and a page cannot be
- * either. The response always carries the command, so a UI can show it when
- * the window did not open.
+ * Begin signing in. The CLI opens the browser itself and prints the authorize
+ * URL, which travels back so the UI can offer it when the browser did not
+ * open. The CLI is then left waiting for the code, which arrives at the route
+ * below.
  */
 const postProviderLogin: RouteHandler = async ({ deps }) => {
-  if (!deps.startLogin) {
-    return fail(503, "no-login", "this daemon cannot open a terminal for you");
-  }
-  const outcome = await deps.startLogin();
-  return json(outcome, outcome.started ? 200 : 502);
+  if (!deps.login) return fail(503, "no-login", "this daemon cannot sign you in");
+
+  const outcome = await deps.login.start();
+  return json(outcome, outcome.status === "waiting-for-code" ? 200 : 502);
+};
+
+/**
+ * Hand the callback page's code to the waiting CLI.
+ *
+ * The code is one-time and goes straight to the CLI's stdin. The credential it
+ * exchanges for is written by the CLI into its own store; nothing here reads
+ * or keeps it.
+ */
+const postProviderLoginCode: RouteHandler = async ({ req, deps }) => {
+  if (!deps.login) return fail(503, "no-login", "this daemon cannot sign you in");
+
+  const body = await readJsonBody(req);
+  if (!body) return fail(400, "bad-body", "expected a JSON object");
+
+  const code = typeof body.code === "string" ? body.code : "";
+  if (!code.trim()) return fail(400, "bad-code", "code is required");
+
+  const outcome = await deps.login.submit(code);
+  return json(outcome, outcome.status === "signed-in" ? 200 : 502);
+};
+
+/** Abandon a flow the user walked away from, so it stops holding a process. */
+const deleteProviderLogin: RouteHandler = async ({ deps }) => {
+  if (!deps.login) return fail(503, "no-login", "this daemon cannot sign you in");
+  deps.login.cancel();
+  return json({ cancelled: true });
 };
 
 const listWatchlist: RouteHandler = async ({ deps }) => {
@@ -1242,6 +1277,24 @@ export function apiRoutes(): RouteDef[] {
       mutating: true,
       queryToken: false,
       handler: postProviderLogin,
+    },
+    {
+      method: "POST",
+      path: "/api/provider/login/code",
+      name: "provider.login.code",
+      bearer: true,
+      mutating: true,
+      queryToken: false,
+      handler: postProviderLoginCode,
+    },
+    {
+      method: "DELETE",
+      path: "/api/provider/login",
+      name: "provider.login.cancel",
+      bearer: true,
+      mutating: true,
+      queryToken: false,
+      handler: deleteProviderLogin,
     },
     {
       method: "GET",
