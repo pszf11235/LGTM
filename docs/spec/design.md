@@ -101,6 +101,10 @@ status: ok               # ok | failed. A failed round still writes this file, w
 headSha: abc123
 startedAt: ...
 durationMs: 84210
+sessionId: f47ac10b-…      # the CLI session this round ran in, null when the
+sessionCwd: ~/.lgtm-farm/sessions  #   provider reported none. `claude --resume`
+costUsd: 0.77              #   from sessionCwd reopens it with its full context
+turns: 14
 findings:
   - id: f1
     severity: high        # after applying the agent's severity floor
@@ -270,7 +274,7 @@ Transport probe order: `terminal-notifier` (resolved like other binaries; suppor
 ## Build and distribution
 
 - Bun >= 1.3.13 required. The CSS `@layer` bug that mangles Tailwind v4 output was a 1.3.0 regression fixed in 1.3.13 (April 2026), so a plain 1.3.x floor would admit exactly the broken versions. The dev machine runs 1.4.0; CI pins 1.4.0 too (`.github/workflows/ci.yml`, `release.yml`).
-- Dev loop: `bun --hot src/main.ts`, Bun.serve with `routes` and the HTML import; Tailwind via `bun-plugin-tailwind` configured in `bunfig.toml` `[serve.static]`.
+- Dev loop: `bun run dev`, which is `bun --hot src/main.ts up`. Bun.serve with `routes` and the HTML import; Tailwind via `bun-plugin-tailwind` configured in `bunfig.toml` `[serve.static]`.
 - Production: `bun run build.ts`, which calls the `Bun.build()` JS API with `compile: { outfile: "dist/lgtm" }` and the Tailwind plugin. Never the `bun build --compile` CLI. It ignores bundler plugins and produces an unstyled binary (open Bun bug).
 - Distribution v1: a GitHub release with the darwin-arm64 binary and a checksum. Plain binaries downloaded via curl carry no Gatekeeper burden. No brew tap, no signing, until after the dogfood period.
 
