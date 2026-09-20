@@ -31,6 +31,8 @@ interface WatchRow {
   addedAt: string;
   lastPolledAt: string | null;
   conditional: boolean;
+  /** null means the repo follows the daemon default rather than pinning one. */
+  autoReview: boolean | null;
 }
 
 interface WatchlistResponse {
@@ -44,33 +46,6 @@ const REPO_PATTERN = /^([\w.-]+)\/([\w.-]+)$/;
 // the unauthenticated flip on a 401), but its typed `listWatch`/`addWatch`
 // methods do not match `/api/watchlist`'s actual response shape as of this
 // writing, so this view fetches directly and only borrows the token.
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getDefaultApiClient().getToken();
-
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  const text = await res.text();
-
-  if (!res.ok) {
-    let message = text;
-    try {
-      const parsed = JSON.parse(text) as { message?: unknown };
-      if (typeof parsed.message === "string") message = parsed.message;
-    } catch {
-      // Not JSON. Fall back to whatever the body carried.
-    }
-    throw new Error(message || `${init?.method ?? "GET"} ${path} failed (${res.status})`);
-  }
-
-  return (text ? JSON.parse(text) : undefined) as T;
-}
 
 function formatLastPolled(iso: string | null): string {
   if (!iso) return "never polled";
@@ -84,7 +59,57 @@ function formatLastPolled(iso: string | null): string {
   return `${days}d ago`;
 }
 
+/**
+ * One repo's auto-review setting: follow the daemon, or pin it on or off.
+ *
+ * Three states rather than a switch, because "following the default" is a real
+ * answer and a two-way toggle would have to pick one the moment you touched it.
+ */
+function AutoReviewControl({
+  entry,
+  daemonDefault,
+  busy,
+  onChange,
+}: {
+  entry: WatchRow;
+  daemonDefault: boolean;
+  busy: boolean;
+  onChange: (value: boolean | null) => void;
+}) {
+  const effective = entry.autoReview ?? daemonDefault;
+  const options: Array<{ value: boolean | null; label: string }> = [
+    { value: null, label: `Default (${daemonDefault ? "auto" : "manual"})` },
+    { value: true, label: "Auto" },
+    { value: false, label: "Manual" },
+  ];
+
+  return (
+    <div className="flex items-center gap-2" data-testid={`auto-review-${entry.key}`}>
+      <span className={`text-xs ${effective ? "text-muted-foreground" : "text-foreground"}`}>
+        {effective ? "Reviews automatically" : "Waits for you"}
+      </span>
+      <select
+        aria-label={`Auto review for ${entry.key}`}
+        className="rounded-md border bg-background px-2 py-1 text-xs"
+        disabled={busy}
+        value={entry.autoReview === null ? "default" : String(entry.autoReview)}
+        onChange={(e) => {
+          const raw = e.target.value;
+          onChange(raw === "default" ? null : raw === "true");
+        }}
+      >
+        {options.map((o) => (
+          <option key={String(o.value)} value={o.value === null ? "default" : String(o.value)}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 export function Repos() {
+
   const [entries, setEntries] = useState<WatchRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -92,13 +117,24 @@ export function Repos() {
   const [addError, setAddError] = useState<string | null>(null);
   const [pending, setPending] = useState<RepoRef | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [settingAuto, setSettingAuto] = useState<string | null>(null);
+  // What "Default" resolves to, so the option can say which it means rather
+  // than making the reader go and look it up in Settings.
+  const [daemonAutoReview, setDaemonAutoReview] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     setListError(null);
     try {
-      const response = await apiRequest<WatchlistResponse>("/api/watchlist");
+      const response = await getDefaultApiClient().request<WatchlistResponse>("/api/watchlist");
       setEntries(response.repos);
+      try {
+        const status = await getDefaultApiClient().request<{ autoReview?: boolean }>("/api/status");
+        setDaemonAutoReview(status.autoReview !== false);
+      } catch {
+        // The list is the point of this view. A status call that failed only
+        // costs the label on one option, so it must not blank the page.
+      }
     } catch (err) {
       setListError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -109,6 +145,23 @@ export function Repos() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function handleAutoReview(entry: WatchRow, value: boolean | null) {
+    setSettingAuto(entry.key);
+    try {
+      await getDefaultApiClient().request("/api/watchlist", {
+        method: "PATCH",
+        body: JSON.stringify({ owner: entry.owner, repo: entry.repo, autoReview: value }),
+      });
+      setEntries((rows) =>
+        rows.map((r) => (r.key === entry.key ? { ...r, autoReview: value } : r))
+      );
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSettingAuto(null);
+    }
+  }
 
   function handleAdd(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -128,7 +181,7 @@ export function Repos() {
     setRemoving(entry.key);
     try {
       const query = new URLSearchParams({ owner: entry.owner, repo: entry.repo });
-      await apiRequest<unknown>(`/api/watchlist?${query.toString()}`, { method: "DELETE" });
+      await getDefaultApiClient().request<unknown>(`/api/watchlist?${query.toString()}`, { method: "DELETE" });
       await load();
     } catch (err) {
       setListError(err instanceof Error ? err.message : String(err));
@@ -192,6 +245,12 @@ export function Repos() {
                     </a>
                     <p className="text-xs text-muted-foreground">{formatLastPolled(entry.lastPolledAt)}</p>
                   </div>
+                  <AutoReviewControl
+                    entry={entry}
+                    daemonDefault={daemonAutoReview}
+                    busy={settingAuto === entry.key}
+                    onChange={(value) => void handleAutoReview(entry, value)}
+                  />
                   <Button
                     type="button"
                     variant="ghost"

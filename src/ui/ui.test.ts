@@ -47,6 +47,7 @@ import {
   CLOSED_FILTERS,
   DEFAULT_ROUND_TIMEOUT_MS,
   elapsedMs,
+  DaemonNotices,
   filterToQuery,
   formatDuration,
   quotaReason,
@@ -59,6 +60,7 @@ import {
   type StatusFilter,
 } from "./views/Reviews";
 import type { PRListItem, StatusResponse } from "./api";
+import { ProviderAuthRow } from "./views/Settings";
 import { PRDetail, RoundSession, type RoundSessionProps } from "./views/PRDetail";
 
 // ─── Stubs ──────────────────────────────────────────────────────────────────
@@ -740,6 +742,8 @@ function baseStatus(overrides: Partial<StatusResponse> = {}): StatusResponse {
     quotaPercent: null,
     claudePath: null,
     ghPath: null,
+    providerAuth: "authenticated",
+    autoReview: true,
     ...overrides,
   };
 }
@@ -1343,5 +1347,123 @@ describe("RoundSession (smoke)", () => {
     expect(html).not.toContain("$0.42");
     expect(html).toContain("1 turn");
     expect(html).not.toContain("1 turns");
+  });
+});
+
+// ─── Daemon notices ─────────────────────────────────────────────────────────
+
+describe("DaemonNotices", () => {
+  test("says the CLI is signed out, because nothing else would", () => {
+    const html = renderToStaticMarkup(
+      createElement(DaemonNotices, { status: baseStatus({ providerAuth: "unauthenticated" }) })
+    );
+    expect(html).toContain("not signed in");
+    expect(html).toContain("claude auth login");
+  });
+
+  test("says auto review is off, and does not call it an error", () => {
+    const html = renderToStaticMarkup(createElement(DaemonNotices, { status: baseStatus({ autoReview: false }) }));
+    expect(html).toContain("Auto review is off");
+    expect(html).not.toContain("destructive");
+  });
+
+  test("shows both at once when both are true", () => {
+    const html = renderToStaticMarkup(
+      createElement(DaemonNotices, { status: baseStatus({ providerAuth: "unauthenticated", autoReview: false }) })
+    );
+    expect(html).toContain("not signed in");
+    expect(html).toContain("Auto review is off");
+  });
+
+  test("stays out of the way when everything is fine", () => {
+    expect(renderToStaticMarkup(createElement(DaemonNotices, { status: baseStatus() }))).toBe("");
+    expect(renderToStaticMarkup(createElement(DaemonNotices, { status: null }))).toBe("");
+  });
+
+  test("an unknown auth probe is not reported as signed out", () => {
+    // The probe failing to answer is not evidence of being logged out, and
+    // crying wolf on a missing binary would train the banner to be ignored.
+    const html = renderToStaticMarkup(createElement(DaemonNotices, { status: baseStatus({ providerAuth: "unknown" }) }));
+    expect(html).toBe("");
+  });
+});
+
+// ─── Sign-in ────────────────────────────────────────────────────────────────
+
+describe("ProviderAuthRow", () => {
+  const idle = { phase: "idle" as const, url: null, busy: false, error: null, note: null };
+  const signedOut = { provider: { state: "unauthenticated", method: null } };
+
+  test("offers to sign in, and says what pressing it does", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProviderAuthRow, {
+        status: signedOut,
+        login: idle,
+        onStart: () => {},
+        onSubmitCode: () => {},
+        onCancel: () => {},
+      })
+    );
+    expect(html).toContain("Sign in");
+    expect(html).toContain("Opens your browser");
+  });
+
+  test("asks for the code once the CLI is waiting, and offers the URL", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProviderAuthRow, {
+        status: signedOut,
+        login: { ...idle, phase: "waiting", url: "https://claude.com/cai/oauth/authorize?x=1" },
+        onStart: () => {},
+        onSubmitCode: () => {},
+        onCancel: () => {},
+      })
+    );
+    expect(html).toContain("Paste the code here");
+    // The browser may not have opened, so the URL has to be reachable.
+    expect(html).toContain("https://claude.com/cai/oauth/authorize?x=1");
+    expect(html).toContain("Cancel");
+  });
+
+  test("a signed-in account offers nothing to press", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProviderAuthRow, {
+        status: { provider: { state: "authenticated", method: "claude.ai" } },
+        login: idle,
+        onStart: () => {},
+        onSubmitCode: () => {},
+        onCancel: () => {},
+      })
+    );
+    expect(html).toContain("Signed in with claude.ai");
+    expect(html).not.toContain("Sign in<");
+  });
+
+  test("an unknown probe does not read as signed out", () => {
+    // A missing binary is not evidence of being logged out, and saying so
+    // would train the warning to be ignored.
+    const html = renderToStaticMarkup(
+      createElement(ProviderAuthRow, {
+        status: { provider: { state: "unknown", method: null } },
+        login: idle,
+        onStart: () => {},
+        onSubmitCode: () => {},
+        onCancel: () => {},
+      })
+    );
+    expect(html).not.toContain("reviews are on hold");
+  });
+
+  test("a rejected code keeps the field, so a retype does not cost the flow", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProviderAuthRow, {
+        status: signedOut,
+        login: { ...idle, phase: "waiting", url: null, error: "that code was not accepted" },
+        onStart: () => {},
+        onSubmitCode: () => {},
+        onCancel: () => {},
+      })
+    );
+    expect(html).toContain("that code was not accepted");
+    expect(html).toContain("Paste the code here");
   });
 });

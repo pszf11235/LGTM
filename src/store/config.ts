@@ -17,6 +17,13 @@ export interface Config {
   resume_below_pct: number;
   daily_cap: number;
   concurrency: number;
+  /**
+   * Whether a PR that qualifies for review is reviewed without being asked.
+   * False puts every PR in triage instead, so reviews only run when a human
+   * presses the button. Nothing else changes: classification still happens,
+   * and the row still says the PR would have qualified.
+   */
+  auto_review: boolean;
   claude_path?: string;
   gh_path?: string;
 }
@@ -27,6 +34,7 @@ export const DEFAULTS: Config = {
   resume_below_pct: 60,
   daily_cap: 20,
   concurrency: 2,
+  auto_review: true,
 };
 
 /**
@@ -48,6 +56,9 @@ export async function loadConfig(): Promise<Config> {
     resume_below_pct: parseNumber(data.resume_below_pct, DEFAULTS.resume_below_pct),
     daily_cap: parseNumber(data.daily_cap, DEFAULTS.daily_cap),
     concurrency: parseNumber(data.concurrency, DEFAULTS.concurrency),
+    // Anything other than an explicit false leaves auto review on, so a
+    // malformed value cannot quietly stop the product doing its job.
+    auto_review: data.auto_review === false ? false : DEFAULTS.auto_review,
     claude_path: parseOptionalString(data.claude_path),
     gh_path: parseOptionalString(data.gh_path),
   };

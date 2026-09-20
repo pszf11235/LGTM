@@ -258,7 +258,10 @@ export function createGitHubAdapter(options: GitHubAdapterOptions = {}): ForgeAd
     return { state: rollUp(runs), runs };
   }
 
-  async function createDraftReview(ref: PRRef, review: DraftReview): Promise<{ id: number }> {
+  async function createDraftReview(
+    ref: PRRef,
+    review: DraftReview
+  ): Promise<{ id: number; url: string | null }> {
     // A review with no comments would be a body-only review: public-looking
     // noise that says nothing. The post flow aborts before reaching here when
     // zero findings validate, and this is the backstop.
@@ -268,7 +271,7 @@ export function createGitHubAdapter(options: GitHubAdapterOptions = {}): ForgeAd
 
     const built = buildDraftReviewRequest(ref, review);
     const res = await request(built.path, { method: built.method, body: built.body });
-    const created = (await res.json()) as { id?: number; state?: string };
+    const created = (await res.json()) as { id?: number; state?: string; html_url?: string };
 
     if (typeof created.id !== "number") {
       throw new Error("GitHub returned a review with no id");
@@ -284,7 +287,10 @@ export function createGitHubAdapter(options: GitHubAdapterOptions = {}): ForgeAd
       );
     }
 
-    return { id: created.id };
+    // GitHub's own deep link to the review, which lands on the draft rather
+    // than on the files tab. Absent in theory, so the caller gets null and
+    // falls back rather than rendering "undefined".
+    return { id: created.id, url: created.html_url ?? null };
   }
 
   async function deleteDraftReview(ref: PRRef, id: number): Promise<void> {

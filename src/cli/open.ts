@@ -30,7 +30,7 @@ export function buildOpenUrl(location: DaemonLocation): string {
   return `${daemonBaseUrl(location)}/#t=${location.token}`;
 }
 
-const defaultLaunch: BrowserLauncher = async (url) => {
+export const defaultLaunch: BrowserLauncher = async (url) => {
   // v1 is macOS-only (requirements.md, "Premise"), so `open` is always at
   // /usr/bin/open — no binary-resolution dance like binaries.ts runs for
   // claude/gh is needed for a command this fixed.

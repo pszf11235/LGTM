@@ -29,6 +29,7 @@
  */
 
 import type { DraftReview, Finding, PRRef } from "@/core";
+import { buildDraftReviewRequest } from "./adapter";
 import type { ParsedDiff } from "@/core/diff";
 import { getCommentableLines } from "@/core/diff";
 
@@ -190,9 +191,8 @@ export function checkLines(findings: PostableFinding[], diff: ParsedDiff): LineC
 
 // ─── Posting ────────────────────────────────────────────────────────────────
 
-function reviewsUrl(ref: PRRef): string {
-  return `https://api.github.com/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews`;
-}
+/** Where the adapter sends. Used to render an absolute URL for the dry run. */
+const GITHUB_API_BASE = "https://api.github.com";
 
 function githubHeaders(token: string): Record<string, string> {
   return {
@@ -211,94 +211,18 @@ function githubHeaders(token: string): Record<string, string> {
  * whole file, and it is not something to verify by reading.
  */
 export function buildPendingReviewRequest(input: PendingReviewInput): PendingReviewRequest {
+  // The adapter's builder, not a second one. The dry run is only worth
+  // anything if it previews the request that would really be sent, and two
+  // builders drifting apart is how a preview starts lying. The body carries no
+  // `event` key, which is what makes this a PENDING draft rather than a
+  // published review; the human submits in GitHub's UI (ADR 0001).
+  const built = buildDraftReviewRequest(input.ref, input.review);
+
   return {
-    url: reviewsUrl(input.ref),
-    method: "POST",
+    url: `${GITHUB_API_BASE}${built.path}`,
+    method: built.method,
     headers: { ...githubHeaders(input.token), "Content-Type": "application/json" },
-    // No `event` key. Its absence is what makes this a PENDING draft rather
-    // than a published review, and there is nowhere else in LGTM that could add
-    // one back. The human submits in GitHub's UI (ADR 0001).
-    body: {
-      body: input.review.body,
-      comments: input.review.comments,
-    },
+    body: built.body,
   };
 }
 
-/**
- * Create a pending review on GitHub.
- *
- * Throws on failure, with GitHub's own message, because a silent failure here
- * looks identical to a clean PR.
- */
-export async function postPendingReview(input: PendingReviewInput): Promise<PendingReviewResult> {
-  if (input.review.comments.length === 0) {
-    throw new Error("refusing to create a review with no comments");
-  }
-
-  const request = buildPendingReviewRequest(input);
-
-  const res = await fetch(request.url, {
-    method: request.method,
-    headers: request.headers,
-    body: JSON.stringify(request.body),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
-
-  if (!res.ok) {
-    const detail = (await res.text()).slice(0, 500);
-    throw new Error(`GitHub ${res.status} creating review: ${detail}`);
-  }
-
-  const review = (await res.json()) as { id?: number; state?: string; html_url?: string };
-
-  if (typeof review.id !== "number") {
-    throw new Error("GitHub returned a review with no id");
-  }
-
-  // Anything but PENDING means the comments are already public, which is the
-  // exact accident this design exists to prevent. A missing state is treated
-  // the same way: the draft contract is a claim this module has to be able to
-  // prove, and an unrecognisable response proves nothing. The old codebase
-  // shrugged at an absent state; v1 does not.
-  const state = typeof review.state === "string" ? review.state.trim().toUpperCase() : null;
-  if (state !== "PENDING") {
-    throw new Error(
-      `expected a PENDING review but GitHub returned ` +
-        `${review.state === undefined ? "no state" : `"${review.state}"`}. ` +
-        `The comments may already be visible on the PR.`
-    );
-  }
-
-  return {
-    reviewId: review.id,
-    commentCount: input.review.comments.length,
-    url:
-      review.html_url ??
-      `https://github.com/${input.ref.owner}/${input.ref.repo}/pull/${input.ref.number}/files`,
-  };
-}
-
-/**
- * Delete a draft review, so a post can replace it.
- *
- * Only a pending review can be deleted; a submitted one cannot. A 404 is a
- * success, since the goal is that the draft is gone and someone deleting it in
- * GitHub's UI first is the normal way that happens.
- */
-export async function deleteDraftReview(input: {
-  ref: PRRef;
-  reviewId: number;
-  token: string;
-}): Promise<void> {
-  const res = await fetch(`${reviewsUrl(input.ref)}/${input.reviewId}`, {
-    method: "DELETE",
-    headers: githubHeaders(input.token),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
-
-  if (!res.ok && res.status !== 404) {
-    const detail = (await res.text()).slice(0, 500);
-    throw new Error(`GitHub ${res.status} deleting pending review: ${detail}`);
-  }
-}

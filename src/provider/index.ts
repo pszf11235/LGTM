@@ -17,6 +17,7 @@ import { claudeProvider, DEFAULT_MODEL } from "./claude";
 import type { RawFinding } from "./parse";
 
 export {
+  detectAuthFailure,
   extractFindings,
   extractSessionMeta,
   validateFindings,
@@ -26,6 +27,15 @@ export {
   type SessionMeta,
 } from "./parse";
 export { DEFAULT_MODEL } from "./claude";
+export {
+  checkProviderAuth,
+  isAuthenticated,
+  AUTH_STATUS_ARGS,
+  AUTH_TIMEOUT_SECONDS,
+  type CheckAuthOptions,
+  type ProviderAuthResult,
+  type ProviderAuthState,
+} from "./auth";
 
 // ─── Agent configuration ────────────────────────────────────────────────────
 
@@ -119,6 +129,31 @@ export interface ReviewInput {
 }
 
 /**
+ * Why a failed Round failed, coarse enough for a caller to act on.
+ *
+ * `auth` is the one that changes behaviour rather than wording. A Provider
+ * that is not logged in fails every Round it is handed, identically, until a
+ * human logs in again, so the retry cap must not be spent on it: three
+ * attempts against an expired session leave the PR stuck at the cap once the
+ * session comes back. Every other kind is an ordinary failure that a retry
+ * might well clear.
+ *
+ * `unparseable` is what auth failures used to be filed as, which is how eight
+ * Rounds were spent on a condition no retry could fix.
+ */
+export type ProviderFailureKind =
+  /** The Provider has no usable session or key. Retrying cannot help. */
+  | "auth"
+  /** Killed on the Round's deadline. */
+  | "timeout"
+  /** It answered, and nothing in the answer was findings. */
+  | "unparseable"
+  /** It ran and exited non-zero with nothing usable on stdout. */
+  | "crashed"
+  /** It could not be run at all: a missing binary, an unknown Provider id. */
+  | "unavailable";
+
+/**
  * The result of one Round, before the Store writes it.
  *
  * `status` mirrors the Round file's own field. It is derived here rather than
@@ -136,6 +171,13 @@ export interface ReviewOutcome {
 
   /** Null when status is "ok". */
   error: string | null;
+
+  /**
+   * What kind of failure `error` describes. Null or absent on a Round that
+   * succeeded, and absent from Providers written before this existed, so a
+   * caller reading it must treat "not auth" and "did not say" alike.
+   */
+  failure?: ProviderFailureKind | null;
 
   durationMs: number;
 
@@ -202,6 +244,7 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
       findings: [],
       raw: "",
       error: `unknown provider "${input.agent.provider}", expected one of ${PROVIDER_IDS.join(", ")}`,
+      failure: "unavailable",
       durationMs: 0,
       dropped: 0,
       sessionId: null,

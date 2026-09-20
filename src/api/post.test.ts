@@ -113,7 +113,15 @@ afterEach(async () => {
   await fs.rm(store, { recursive: true, force: true }).catch(() => {});
 });
 
-/** A Forge that answers the three calls the post flow may make and refuses the rest. */
+/**
+ * The adapter's own create, over the mocked fetch. The post flow goes through
+ * the adapter now, and the assertions below read the request it put on the
+ * wire, so this has to be the real implementation rather than a stand-in.
+ */
+const realCreateDraftReview: ForgeAdapter["createDraftReview"] = (ref, review) =>
+  createGitHubAdapter({ resolveToken: () => "ghp_secret" }).createDraftReview(ref, review);
+
+/** A Forge that answers the calls the post flow may make and refuses the rest. */
 function fakeForge(): ForgeAdapter {
   const unexpected = (name: string) => () => {
     throw new Error(`the post flow must not call forge.${name}`);
@@ -123,9 +131,14 @@ function fakeForge(): ForgeAdapter {
     listOpenPRs: unexpected("listOpenPRs"),
     getPR: unexpected("getPR"),
     getCheckStatus: unexpected("getCheckStatus"),
-    // The create goes through draft-review.ts, so that the dry run and the
-    // real post share one request builder. Nothing calls this.
-    createDraftReview: unexpected("createDraftReview"),
+    // The create goes through the adapter, which is the only module allowed
+    // to speak to the forge. It still builds its request with the shared
+    // builder, so the dry run previews exactly what this sends. The fetch
+    // mock below records the wire call, which is where the assertions look.
+    createDraftReview: async (ref, review) => {
+      trace.push(`createDraftReview ${ref.number}`);
+      return realCreateDraftReview(ref, review);
+    },
     authenticatedUser: unexpected("authenticatedUser"),
 
     getDiff: async (ref) => {
@@ -422,6 +435,7 @@ describe("an existing pending draft", () => {
       "getReview 555",
       "deleteDraftReview 555",
       "getDiff 42",
+      "createDraftReview 42",
       `http POST ${REVIEWS_URL}`,
     ]);
 

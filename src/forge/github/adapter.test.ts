@@ -492,11 +492,18 @@ const DRAFT = {
 
 describe("createDraftReview", () => {
   test("posts body and comments and nothing else", async () => {
-    const calls = mockFetch(() => json({ id: 987654, state: "PENDING" }));
+    const calls = mockFetch(() =>
+      json({ id: 987654, state: "PENDING", html_url: "https://github.com/acme/api/pull/42#pullrequestreview-987654" })
+    );
 
     const created = await adapter().createDraftReview(PR, DRAFT);
 
-    expect(created).toEqual({ id: 987654 });
+    // The review's own deep link travels with its id, so the gate can send a
+    // human to the draft rather than to the files tab.
+    expect(created).toEqual({
+      id: 987654,
+      url: "https://github.com/acme/api/pull/42#pullrequestreview-987654",
+    });
     expect(calls[0]?.method).toBe("POST");
     expect(calls[0]?.url).toBe("https://api.github.com/repos/acme/api/pulls/42/reviews");
     expect(Object.keys(calls[0]?.body as object).sort()).toEqual(["body", "comments"]);
@@ -519,6 +526,29 @@ describe("createDraftReview", () => {
     mockFetch(() => json({ state: "PENDING" }));
 
     await expect(adapter().createDraftReview(PR, DRAFT)).rejects.toThrow(/no id/);
+  });
+
+  test("accepts the state in whatever casing GitHub sends it", async () => {
+    // Carried over from the module this replaced. GitHub has been seen to
+    // answer "Pending", and treating that as "not PENDING" would refuse a
+    // draft it had just created correctly.
+    mockFetch(() => json({ id: 7, state: "Pending" }));
+
+    expect(await adapter().createDraftReview(PR, DRAFT)).toEqual({ id: 7, url: null });
+  });
+
+  test("surfaces GitHub's own error text rather than a generic failure", async () => {
+    mockFetch(() => json({ message: "Validation Failed" }, { status: 422 }));
+
+    let error: Error | undefined;
+    await adapter()
+      .createDraftReview(PR, DRAFT)
+      .catch((e: Error) => {
+        error = e;
+      });
+
+    expect(error?.message).toContain("422");
+    expect(error?.message).toContain("Validation Failed");
   });
 
   test("refuses an empty comment list before making any request", async () => {

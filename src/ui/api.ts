@@ -39,6 +39,14 @@ import type {
   Severity,
 } from "@/core";
 import type { SlicedHunk } from "@/core/diff";
+// The wire contract. These shapes are the daemon's, not this file's, so a
+// change to one now stops compiling here rather than becoming an empty view.
+import {
+  decodeList,
+  decodePRIdentity,
+  decodeRoundFindings,
+  decodeSection,
+} from "@/api/contract";
 
 // ─── Injectable browser seams ───────────────────────────────────────────────
 
@@ -202,6 +210,10 @@ export interface StatusResponse {
   quotaPercent: number | null;
   claudePath: string | null;
   ghPath: string | null;
+  /** Whether the review CLI is signed in. "unknown" when the probe could not answer. */
+  providerAuth: "authenticated" | "unauthenticated" | "unknown";
+  /** False when qualifying PRs wait in triage instead of being reviewed. */
+  autoReview: boolean;
 }
 
 export type CheckState = "success" | "failure" | "pending" | "none";
@@ -473,7 +485,7 @@ function findingCounts(value: unknown): FindingCounts {
  */
 function toPRListItem(raw: unknown): PRListItem {
   const rec = asRecord(raw);
-  const ref = asRecord(rec.ref);
+  const ref = decodeSection(raw, "ref");
   const findings = asRecord(rec.findings);
   return {
     key: str(rec.key),
@@ -611,19 +623,17 @@ function toPRDetailMeta(raw: unknown): PRDetailMeta {
  * so flattening preserves the order the view groups by file.
  */
 function toPRFindingsResponse(raw: unknown): PRFindingsResponse {
-  const rec = asRecord(raw);
-  const roundsRaw = Array.isArray(rec.rounds) ? rec.rounds : [];
-  const nested = roundsRaw.flatMap((round) => {
-    const list = asRecord(round).findings;
-    return Array.isArray(list) ? list : [];
-  });
-  const flat = Array.isArray(rec.findings) ? rec.findings : [];
-  const findings = (nested.length > 0 ? nested : flat).map(toFinding);
+  const roundsRaw = decodeList(raw, "rounds");
+  const findings = decodeRoundFindings(raw).map(toFinding);
   const rounds = roundsRaw.map(toRoundSummary);
 
   // `ref` holds owner/repo/number; `pr` holds everything else about it.
-  const meta = { ...asRecord(rec.ref), ...asRecord(rec.pr ?? rec.meta) };
+  const meta = decodePRIdentity(raw);
   return { meta: toPRDetailMeta(meta), findings, rounds };
+}
+
+function providerAuthState(value: unknown): StatusResponse["providerAuth"] {
+  return value === "authenticated" || value === "unauthenticated" ? value : "unknown";
 }
 
 function toStatusResponse(raw: unknown): StatusResponse {
@@ -632,10 +642,10 @@ function toStatusResponse(raw: unknown): StatusResponse {
   // their own object. Reading flat keys off the top level found nothing and
   // fell back to the defaults below, so the health panel showed a plausible
   // interval and an empty queue no matter what the daemon was doing.
-  const scheduler = asRecord(rec.scheduler);
-  const queue = asRecord(rec.queue);
-  const quota = asRecord(rec.quota);
-  const counts = asRecord(rec.counts);
+  const scheduler = decodeSection(raw, "scheduler");
+  const queue = decodeSection(raw, "queue");
+  const quota = decodeSection(raw, "quota");
+  const counts = decodeSection(raw, "counts");
   const cycle = asRecord(scheduler.lastCycleOutcome);
   const binaries = Array.isArray(rec.binaries) ? rec.binaries.map(asRecord) : [];
   const pathOf = (name: string): string | null => {
@@ -661,6 +671,9 @@ function toStatusResponse(raw: unknown): StatusResponse {
     quotaPercent: nullableNum(quota.maxPercent),
     claudePath: pathOf("claude"),
     ghPath: pathOf("gh"),
+    providerAuth: providerAuthState(asRecord(rec.provider).state),
+    // Absent means an older daemon, which only ever reviewed automatically.
+    autoReview: rec.autoReview !== false,
   };
 }
 
@@ -707,6 +720,13 @@ export interface ApiClient {
   /** The backfill list to confirm. Rows are the server's backfill shape, not PR rows. */
   addWatch(repo: RepoRef): Promise<{ repo: RepoRef; entries: unknown[] }>;
   removeWatch(repo: RepoRef): Promise<void>;
+  /**
+   * One typed call against a route, for views that want the wire shape rather
+   * than a view model. Shares this client's token and its 401 handling, which
+   * is the reason it exists: three views had grown their own copy of this and
+   * none of them flipped the tab's auth state.
+   */
+  request<T>(path: string, init?: RequestInit): Promise<T>;
   getConfig(): Promise<ConfigResponse>;
   patchConfig(patch: Partial<ConfigValues>): Promise<ConfigResponse>;
 }
@@ -753,7 +773,22 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       throw new ApiError("unauthenticated", REAUTH_MESSAGE, 401);
     }
     if (!res.ok) {
-      throw new ApiError("http", `${init.method ?? "GET"} ${path} failed with ${res.status}`, res.status);
+      // The daemon explains itself in `message`; a bare status code makes the
+      // user guess. Falls back to the status when there is nothing to read.
+      const detail = await res
+        .clone()
+        .json()
+        .then((body: unknown) =>
+          typeof (body as { message?: unknown })?.message === "string"
+            ? ((body as { message: string }).message)
+            : null
+        )
+        .catch(() => null);
+      throw new ApiError(
+        "http",
+        detail ?? `${init.method ?? "GET"} ${path} failed with ${res.status}`,
+        res.status
+      );
     }
 
     if (requireAuth) setAuthState("ok");
@@ -808,8 +843,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       // The daemon answers `{ prs, total }`. Treating a non-array as "no PRs"
       // silently emptied the whole Reviews view, so read the envelope and
       // only fall back to a bare array.
-      const rows = Array.isArray(body) ? body : asRecord(body).prs;
-      return Array.isArray(rows) ? rows.map(toPRListItem) : [];
+      return decodeList(body, "prs").map(toPRListItem);
     },
 
     async getFindings(ref) {
@@ -853,8 +887,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const body = await getJson<unknown>("/api/watchlist");
       // The daemon answers `{ repos }`. Same envelope shape as /api/prs, and
       // the same silent-empty-list bug if it is read as a bare array.
-      const envelope = asRecord(body).repos;
-      const list = Array.isArray(body) ? body : Array.isArray(envelope) ? envelope : [];
+      const list = decodeList(body, "repos");
       return list.map((w) => {
         const rec = asRecord(w);
         return {
@@ -883,6 +916,16 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       await raw(`/api/watchlist?owner=${encodeURIComponent(repo.owner)}&repo=${encodeURIComponent(repo.repo)}`, {
         method: "DELETE",
       });
+    },
+
+    async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+      const headers = new Headers(init.headers);
+      if (init.body !== undefined && !headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json");
+      }
+      const res = await raw(path, { ...init, headers });
+      const text = await res.text();
+      return (text ? JSON.parse(text) : undefined) as T;
     },
 
     async getConfig() {

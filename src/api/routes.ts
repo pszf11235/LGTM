@@ -49,9 +49,11 @@ import {
   saveMeta,
 } from "@/store/reviews";
 import type { MetaUpdate } from "@/store/reviews";
-import { loadWatchList, removeFromWatchList } from "@/store/watch-list";
+import { loadWatchList, removeFromWatchList, saveWatchList } from "@/store/watch-list";
 import { DEFAULTS, loadConfig, updateConfig } from "@/store/config";
 import type { Config } from "@/store/config";
+import type { FindingCard, FindingCounts, PRRow } from "./contract";
+export type { FindingCard, FindingCounts, PRRow } from "./contract";
 import { addRepoWithBackfill, mergeableStatus } from "@/daemon/backfill";
 import type { BackfillEntry } from "@/daemon/backfill";
 import type { DaemonEvent, EventBus } from "@/daemon/events";
@@ -104,6 +106,21 @@ export interface ApiDeps {
   lastCycle?: () => PollCycleResult | null;
   /** Whether a GitHub token resolved, never the token itself. */
   githubToken?: () => string | null;
+  /** Last reading of whether the review CLI is signed in. */
+  providerAuth?: () => { state: string; method: string | null };
+  /** False when qualifying PRs wait in triage instead of being reviewed. */
+  autoReview?: () => boolean;
+  /** Opens a terminal running the CLI's sign-in flow. Absent means the route says so. */
+  /**
+   * The CLI sign-in flow. Two calls rather than one, because the CLI prints a
+   * URL and then waits on stdin for the code the callback page shows.
+   */
+  login?: {
+    start(): Promise<{ status: string; url: string | null; command: string; error: string | null }>;
+    submit(code: string): Promise<{ status: string; error: string | null }>;
+    cancel(): void;
+    readonly waiting: boolean;
+  };
 
   /** ms since epoch, when the daemon started. Defaults to construction time. */
   startedAt?: number;
@@ -244,18 +261,6 @@ function repoKey(owner: string, repo: string): string {
 
 const SEVERITIES: readonly Severity[] = ["critical", "high", "medium", "low"];
 
-export interface FindingCounts {
-  total: number;
-  open: number;
-  held: number;
-  posted: number;
-  discarded: number;
-  /** open + held: everything still in front of the Gate (see `pendingFindings` in @/store/reviews). */
-  pending: number;
-  /** Pending findings by severity, which is what the inbox badge counts. */
-  pendingBySeverity: Record<Severity, number>;
-}
-
 function emptyCounts(): FindingCounts {
   return {
     total: 0,
@@ -277,44 +282,6 @@ function countFindings(findings: Finding[], into: FindingCounts): void {
       into.pendingBySeverity[finding.severity] += 1;
     }
   }
-}
-
-export interface PRRow {
-  ref: PRRef;
-  /** `owner/repo#42`, the same rendering the CLI and the logs use. */
-  key: string;
-  url: string;
-  title: string;
-  author: string;
-  state: PRState;
-  classification: PRMeta["classification"];
-  draft: boolean;
-  headSha: string;
-  lastReviewedSha: string | null;
-  failedAttempts: number;
-  rounds: number;
-  pendingReviewId: number | null;
-  closedAt: string | null;
-  updatedAt: string;
-
-  // ── Triage metadata ───────────────────────────────────────────────────
-  //
-  // Flat, and under exactly the names the browser reads (`PRListItem` in
-  // src/ui/api.ts). Null travels as null. The row means "not fetched" or
-  // "GitHub is still computing it", and the browser renders a dash or
-  // "Computing…"; filling a null in with a zero here would turn "unknown"
-  // into a measured "no changes" on its way across the wire.
-  createdAt: string | null;
-  additions: number | null;
-  deletions: number | null;
-  changedFiles: number | null;
-  mergeable: boolean | null;
-  checkStatus: CheckState | null;
-  /** Derived, never stored: an auto-class draft held until it leaves draft state (R2.3). */
-  reviewsWhenReady: boolean;
-  /** False once its repo leaves the watch list. Its files stay on disk (R9.5). */
-  watched: boolean;
-  findings: FindingCounts;
 }
 
 /**
@@ -445,6 +412,8 @@ const status: RouteHandler = async ({ deps }) => {
     binaries: deps.binaries?.status() ?? [],
     // Presence only. The token itself never leaves the daemon (R7.2).
     github: { tokenPresent: deps.githubToken ? deps.githubToken() !== null : false },
+    provider: deps.providerAuth ? deps.providerAuth() : { state: "unknown", method: null },
+    autoReview: deps.autoReview ? deps.autoReview() : true,
     counts: {
       watchedRepos: repos.length,
       triage: active.filter((row) => row.state === "triage").length,
@@ -703,27 +672,6 @@ const decision: RouteHandler = async ({ req, params, deps }) => {
 
 // ─── GET /api/prs/:owner/:repo/:number/findings ─────────────────────────────
 
-export interface FindingCard {
-  /** The canonical key, `r2:reviewer:f1`. The only handle the PATCH route accepts. */
-  key: string;
-  id: string;
-  round: number;
-  agent: string;
-  severity: Severity;
-  file: string;
-  line: number;
-  comment: string;
-  suggestion: string | null;
-  state: Finding["state"];
-  heldReason: string | null;
-  /** About ten lines around the finding, sliced from its own round's snapshot. */
-  hunk: SlicedHunk | null;
-  /** Why there is no hunk, so the card can say so instead of rendering an empty box. */
-  hunkFallback: "no-snapshot" | "line-not-in-diff" | null;
-  /** GitHub, at the SHA this round reviewed. What the card links to when it has no hunk (R5.1, R5.3). */
-  githubUrl: string;
-}
-
 /**
  * A finding's hunk comes from the diff snapshot of *its own round*, not from
  * the PR's latest one.
@@ -929,6 +877,81 @@ const patchFinding: RouteHandler = async ({ req, params, deps }) => {
 
 // ─── /api/watchlist ─────────────────────────────────────────────────────────
 
+/**
+ * Set one repo's auto-review override. A body of `{autoReview: null}` clears
+ * it, which returns the repo to following the daemon default rather than
+ * pinning it to whatever that default happens to be today.
+ */
+const patchWatchlistRepo: RouteHandler = async ({ req, deps }) => {
+  const rec = await readJsonBody(req);
+  if (!rec) return fail(400, "bad-body", "expected a JSON object");
+
+  const owner = typeof rec.owner === "string" ? rec.owner : "";
+  const repo = typeof rec.repo === "string" ? rec.repo : "";
+  if (!owner || !repo) return fail(400, "bad-repo", "owner and repo are required");
+
+  const value = rec.autoReview;
+  if (value !== null && typeof value !== "boolean") {
+    return fail(400, "bad-auto-review", "autoReview must be true, false or null");
+  }
+
+  const entries = await loadWatchList(deps.lgtmDir);
+  const found = entries.find((e) => e.owner === owner && e.repo === repo);
+  if (!found) return fail(404, "not-watched", `${owner}/${repo} is not on the watch list`);
+
+  await saveWatchList(
+    entries.map((e) =>
+      e.owner === owner && e.repo === repo
+        ? { ...e, ...(value === null ? { autoReview: undefined } : { autoReview: value }) }
+        : e
+    ),
+    deps.lgtmDir
+  );
+
+  deps.events?.emit({ type: "cycle-finished", repoKey: repoKey(owner, repo) });
+  return json({ owner, repo, autoReview: value });
+};
+
+/**
+ * Begin signing in. The CLI opens the browser itself and prints the authorize
+ * URL, which travels back so the UI can offer it when the browser did not
+ * open. The CLI is then left waiting for the code, which arrives at the route
+ * below.
+ */
+const postProviderLogin: RouteHandler = async ({ deps }) => {
+  if (!deps.login) return fail(503, "no-login", "this daemon cannot sign you in");
+
+  const outcome = await deps.login.start();
+  return json(outcome, outcome.status === "waiting-for-code" ? 200 : 502);
+};
+
+/**
+ * Hand the callback page's code to the waiting CLI.
+ *
+ * The code is one-time and goes straight to the CLI's stdin. The credential it
+ * exchanges for is written by the CLI into its own store; nothing here reads
+ * or keeps it.
+ */
+const postProviderLoginCode: RouteHandler = async ({ req, deps }) => {
+  if (!deps.login) return fail(503, "no-login", "this daemon cannot sign you in");
+
+  const body = await readJsonBody(req);
+  if (!body) return fail(400, "bad-body", "expected a JSON object");
+
+  const code = typeof body.code === "string" ? body.code : "";
+  if (!code.trim()) return fail(400, "bad-code", "code is required");
+
+  const outcome = await deps.login.submit(code);
+  return json(outcome, outcome.status === "signed-in" ? 200 : 502);
+};
+
+/** Abandon a flow the user walked away from, so it stops holding a process. */
+const deleteProviderLogin: RouteHandler = async ({ deps }) => {
+  if (!deps.login) return fail(503, "no-login", "this daemon cannot sign you in");
+  deps.login.cancel();
+  return json({ cancelled: true });
+};
+
 const listWatchlist: RouteHandler = async ({ deps }) => {
   const entries = await loadWatchList(deps.lgtmDir);
 
@@ -941,6 +964,8 @@ const listWatchlist: RouteHandler = async ({ deps }) => {
       lastPolledAt: entry.lastPolledAt ?? null,
       // Presence only; the validator itself is the adapter's business.
       conditional: entry.etag !== undefined,
+      // null means "follow the daemon default", which is not the same as off.
+      autoReview: entry.autoReview ?? null,
     })),
   });
 };
@@ -1245,6 +1270,33 @@ export function apiRoutes(): RouteDef[] {
     ...postRoutes(),
 
     {
+      method: "POST",
+      path: "/api/provider/login",
+      name: "provider.login",
+      bearer: true,
+      mutating: true,
+      queryToken: false,
+      handler: postProviderLogin,
+    },
+    {
+      method: "POST",
+      path: "/api/provider/login/code",
+      name: "provider.login.code",
+      bearer: true,
+      mutating: true,
+      queryToken: false,
+      handler: postProviderLoginCode,
+    },
+    {
+      method: "DELETE",
+      path: "/api/provider/login",
+      name: "provider.login.cancel",
+      bearer: true,
+      mutating: true,
+      queryToken: false,
+      handler: deleteProviderLogin,
+    },
+    {
       method: "GET",
       path: "/api/watchlist",
       name: "watchlist.list",
@@ -1261,6 +1313,15 @@ export function apiRoutes(): RouteDef[] {
       mutating: true,
       queryToken: false,
       handler: addWatchlist,
+    },
+    {
+      method: "PATCH",
+      path: "/api/watchlist",
+      name: "watchlist.patch",
+      bearer: true,
+      mutating: true,
+      queryToken: false,
+      handler: patchWatchlistRepo,
     },
     {
       method: "DELETE",

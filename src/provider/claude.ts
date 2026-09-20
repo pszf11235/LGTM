@@ -14,6 +14,14 @@
  * model unless told otherwise, which cost twice as much for the same review,
  * so --model is never omitted here.
  *
+ * One failure mode gets special handling here rather than in the parser
+ * alone. A CLI whose session has expired answers a review with a normal
+ * envelope and an apology inside it, so every layer above reads success until
+ * the findings come up empty. `detectAuthFailure` names that case, and this
+ * file is where it stops being "output we could not parse" and becomes a
+ * failure kind the daemon can act on. See `checkProviderAuth` in auth.ts for
+ * the cheaper half, asked before the Round instead of after it.
+ *
  * The working directory still matters for a different reason. Print-mode
  * sessions persist under ~/.claude/projects/<cwd-slug>/, keyed by where the
  * CLI ran, and `claude --resume <session-id>` only finds one from the same
@@ -22,8 +30,21 @@
  */
 
 import { formatFindingKey } from "@/core";
-import { extractFindings, extractSessionMeta, validateFindings, type SessionMeta } from "./parse";
-import type { AgentConfig, Provider, PriorFinding, ReviewInput, ReviewOutcome } from "./index";
+import {
+  detectAuthFailure,
+  extractFindings,
+  extractSessionMeta,
+  validateFindings,
+  type SessionMeta,
+} from "./parse";
+import type {
+  AgentConfig,
+  Provider,
+  PriorFinding,
+  ProviderFailureKind,
+  ReviewInput,
+  ReviewOutcome,
+} from "./index";
 
 /**
  * The model a Round runs on when the Agent file does not pin one.
@@ -172,10 +193,17 @@ export async function run(
   }
 }
 
-/** Turn a spawn outcome into output or an error string. */
-function fromSpawn(outcome: SpawnOutcome, timeoutMinutes: number): { output: string; error: string | null } {
+/** Turn a spawn outcome into output, or an error and the kind of error it is. */
+function fromSpawn(
+  outcome: SpawnOutcome,
+  timeoutMinutes: number
+): { output: string; error: string | null; failure: ProviderFailureKind | null } {
   if (outcome.timedOut) {
-    return { output: outcome.stdout, error: `claude timed out after ${timeoutMinutes}m` };
+    return {
+      output: outcome.stdout,
+      error: `claude timed out after ${timeoutMinutes}m`,
+      failure: "timeout",
+    };
   }
 
   // A non-zero exit with usable stdout still gets parsed. The CLI can exit
@@ -183,10 +211,30 @@ function fromSpawn(outcome: SpawnOutcome, timeoutMinutes: number): { output: str
   if (outcome.exitCode !== 0 && !outcome.stdout.trim()) {
     const detail =
       outcome.stderr.trim().split("\n").slice(0, 3).join(" ") || `exit ${outcome.exitCode}`;
-    return { output: "", error: `claude failed: ${detail}` };
+
+    // A CLI that dies complaining about its own login is the same dead end as
+    // one that answers politely without a session, and stderr is where it
+    // says so.
+    const auth = detectAuthFailure(outcome.stderr);
+    if (auth) return { output: "", error: notAuthenticated(auth), failure: "auth" };
+
+    return { output: "", error: `claude failed: ${detail}`, failure: "crashed" };
   }
 
-  return { output: outcome.stdout, error: null };
+  return { output: outcome.stdout, error: null, failure: null };
+}
+
+/**
+ * The error a failed Round records when the Provider is logged out, in the
+ * Provider's own words.
+ *
+ * Quoting the CLI rather than paraphrasing it is the point. This string is
+ * what the round's transcript leads with and what the daemon's error event
+ * carries, so it has to be enough on its own: the diagnosis this whole change
+ * exists for was previously available only by opening a raw dump.
+ */
+function notAuthenticated(message: string): string {
+  return `claude is not authenticated: ${message}`;
 }
 
 // ─── The Provider ───────────────────────────────────────────────────────────
@@ -203,15 +251,16 @@ async function review(input: ReviewInput): Promise<ReviewOutcome> {
     findings: ReviewOutcome["findings"],
     raw: string,
     error: string | null,
-    dropped = 0
+    extra: { dropped?: number; failure?: ProviderFailureKind } = {}
   ): ReviewOutcome => ({
     provider: "claude-cli",
     status: error === null ? "ok" : "failed",
     findings,
     raw,
     error,
+    failure: error === null ? null : (extra.failure ?? "crashed"),
     durationMs: Date.now() - startedAt,
-    dropped,
+    dropped: extra.dropped ?? 0,
     sessionId: session.sessionId,
     costUsd: session.costUsd,
     turns: session.turns,
@@ -238,18 +287,25 @@ async function review(input: ReviewInput): Promise<ReviewOutcome> {
     // Partial output after a timeout is kept as raw, so the failed Round has
     // something to dump next to it. It is not parsed: a truncated answer that
     // happened to parse would be recorded as a complete review.
-    const { output, error } = fromSpawn(spawned, timeoutMinutes);
-    if (error) return outcome([], output, error);
+    const { output, error, failure } = fromSpawn(spawned, timeoutMinutes);
+    if (error) return outcome([], output, error, { failure: failure ?? "crashed" });
 
     const extracted = extractFindings(output);
-    if (extracted === null) return outcome([], output, "could not parse provider output");
+    if (extracted === null) {
+      // Asked only of output that yielded no findings. A review that parsed is
+      // a review, whatever it had to say about the auth code it read.
+      const auth = detectAuthFailure(output);
+      if (auth) return outcome([], output, notAuthenticated(auth), { failure: "auth" });
+
+      return outcome([], output, "could not parse provider output", { failure: "unparseable" });
+    }
 
     const { findings, dropped } = validateFindings(extracted, input.agent.severityFloor);
-    return outcome(findings, output, null, dropped);
+    return outcome(findings, output, null, { dropped });
   } catch (err) {
     // A missing binary lands here as ENOENT. The daemon re-probes its paths
     // on this and retries the PR on the next cycle.
-    return outcome([], "", (err as Error).message);
+    return outcome([], "", (err as Error).message, { failure: "unavailable" });
   }
 }
 

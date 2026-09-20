@@ -70,6 +70,8 @@ import { createEventBus, type DaemonEvent, type EventBus } from "./events";
 import { createNotifier, setUiPort, type SpawnFn } from "./notify";
 import { createReviewQueue, type QueueSnapshot, type ReviewQueue } from "./queue";
 import { createStoreWatch, type StoreWatch } from "./store-watch";
+import { createLoginSession, type LoginSession } from "./login";
+import { checkProviderAuth, type ProviderAuthResult } from "@/provider/auth";
 import {
   createClaudeUsageProbe,
   createQuotaGate,
@@ -138,6 +140,12 @@ export interface BindContext {
   lastCycle: () => PollCycleResult | null;
   /** Whether a GitHub token resolved. Never the token itself. */
   githubToken: () => string | null;
+  /** Last reading of whether the review CLI is signed in. */
+  providerAuth: () => { state: string; method: string | null };
+  /** False when qualifying PRs wait in triage instead of being reviewed. */
+  autoReview: () => boolean;
+  /** The CLI sign-in flow, which spans two requests: start, then the code. */
+  login: LoginSession;
 }
 
 /**
@@ -237,6 +245,11 @@ export interface DaemonOptions {
   binaries?: BinaryResolver;
   /** Defaults to the shared chain in @/forge/github/auth. */
   resolveToken?: (ghPath: string | null) => string | null;
+  /**
+   * The CLI sign-in probe. Injectable so boot tests do not spawn a real
+   * binary, which made them slow and dependent on whoever was logged in.
+   */
+  checkAuth?: (binPath: string | null) => Promise<ProviderAuthResult>;
   /** Defaults to the GitHub adapter over the resolved `gh` path. */
   forge?: ForgeAdapter;
   /** Defaults to `claude -p /usage` through the resolved `claude` path. */
@@ -396,6 +409,7 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
 
   // 4. The GitHub token, through the path the probe just resolved.
   const resolveToken = options.resolveToken ?? resolveGitHubToken;
+  const checkAuth = options.checkAuth ?? checkProviderAuth;
   const ghPath = binaries.resolve("gh");
   const githubTokenPresent = resolveToken(ghPath) !== null;
   if (!githubTokenPresent) {
@@ -495,7 +509,23 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
       now: isoNow,
       log,
     }),
-    canDispatch: async () => (await quota.requestDispatch()).allowed,
+    canDispatch: async () => {
+      // Ask the cheap question first. A logged-out CLI answers a review with a
+      // normal-looking envelope and an apology inside it, so a Round spent
+      // while logged out is a Round wasted and a confusing failure on the PR.
+      // `claude auth status --json` costs no tokens and answers in about two
+      // tenths of a second, so it is worth asking before every dispatch.
+      const auth = await checkAuth(binaries.resolve("claude"));
+      recordAuth(auth);
+      if (auth.state === "unauthenticated") {
+        // Once per distinct cause, per R8: a dead session must not notify on
+        // every dispatch attempt for as long as it stays dead.
+        emit({ type: "error", cause: "provider auth: not signed in" });
+        log("queue: holding, the Claude CLI is not signed in. Run `claude auth login`");
+        return false;
+      }
+      return (await quota.requestDispatch()).allowed;
+    },
     concurrency: config.concurrency,
     now: msNow,
     setTimer: options.setTimer,
@@ -509,8 +539,35 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
   });
   queueRef.queue = queue;
 
+  // Last auth reading, for /api/status. Refreshed by the dispatch gate rather
+  // than on its own timer: the answer only matters when work is waiting.
+  let lastAuth: ProviderAuthResult = { state: "unknown", method: null, error: "not probed yet" };
+
+  /**
+   * Record a probe, and announce it when the answer changed.
+   *
+   * Signing in from the UI used to refresh only the page that did it. Every
+   * other view kept saying reviews were on hold until the daemon restarted,
+   * because the state moved and nothing said so.
+   */
+  function recordAuth(result: ProviderAuthResult): ProviderAuthResult {
+    const changed = result.state !== lastAuth.state;
+    lastAuth = result;
+    if (changed) emit({ type: "provider-auth-changed", state: result.state });
+    return result;
+  }
+
   // 8. The scheduler over the poll cycle.
-  const cycleDeps: CycleDeps = { lgtmDir, forge, queue, events, etags, now: isoNow, log };
+  const cycleDeps: CycleDeps = {
+    lgtmDir,
+    forge,
+    queue,
+    events,
+    etags,
+    autoReview: config.auto_review,
+    now: isoNow,
+    log,
+  };
   const cycle = options.cycle ?? runCycle;
   let lastCycle: PollCycleResult | null = null;
 
@@ -532,6 +589,22 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
   });
 
   // 9. The port, and daemon.json once the socket is real.
+  // The sign-in flow, which outlives a single request: the CLI waits on stdin
+  // between printing its URL and being handed the code.
+  const login: LoginSession = createLoginSession({
+    binPath: binaries.resolve("claude"),
+    spawn: (cmd) =>
+      Bun.spawn({ cmd, stdin: "pipe", stdout: "pipe", stderr: "pipe" }) as unknown as ReturnType<
+        Parameters<typeof createLoginSession>[0]["spawn"]
+      >,
+    isSignedIn: async () => {
+      const result = await checkAuth(binaries.resolve("claude"));
+      recordAuth(result);
+      return result.state === "authenticated";
+    },
+    log,
+  });
+
   const bindContext: BindContext = {
     lgtmDir,
     token,
@@ -544,6 +617,9 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     binaries,
     forge,
     lastCycle: () => lastCycle,
+    providerAuth: () => ({ state: lastAuth.state, method: lastAuth.method }),
+    autoReview: () => config.auto_review,
+    login,
     // The real token, not a presence flag. `/api/status` only ever asks whether
     // this is non-null, but the post flow uses the same function as the bearer
     // it sends to GitHub, so handing back a placeholder made every post a 401.
@@ -595,6 +671,7 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     handlers.length = 0;
   }
 
+
   // Declared before `shutdown` closes over it. Signal handlers are attached
   // below but before the watcher starts, so a signal arriving in that window
   // must find a binding rather than a temporal dead zone.
@@ -605,6 +682,7 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     try {
       detachSignals();
       storeWatch?.stop();
+      login.cancel();
       // The scheduler first, so no cycle starts while the rest comes apart.
       // Its stop() settles once the running cycle has.
       await scheduler.stop();
@@ -649,6 +727,16 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
   // daemon's own writes from a person's, which costs a redundant refetch.
   storeWatch = createStoreWatch({ dir: lgtmDir, bus: events, log });
   storeWatch.start();
+
+  // Ask once at boot as well as before each dispatch. The gate only probes
+  // when there is work, so an idle daemon would report "unknown" indefinitely
+  // and the settings page would have nothing to tell anyone.
+  void checkAuth(binaries.resolve("claude")).then((result) => {
+    recordAuth(result);
+    if (result.state === "unauthenticated") {
+      log("boot: the Claude CLI is not signed in. Run `claude auth login`");
+    }
+  });
   quota.start(() => {
     // In-flight Rounds count. A queue whose entries are all running still
     // needs a fresh reading before the next one is let through.

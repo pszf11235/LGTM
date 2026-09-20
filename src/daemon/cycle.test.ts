@@ -33,7 +33,7 @@ import {
   saveRound,
   sessionsDir,
 } from "@/store/reviews";
-import { addToWatchList, loadWatchList, updateETag } from "@/store/watch-list";
+import { addToWatchList, loadWatchList, saveWatchList, updateETag } from "@/store/watch-list";
 import type { DaemonEvent } from "./events";
 import type { QueueEntry } from "./queue";
 import {
@@ -1589,5 +1589,136 @@ describe("dispatchReview", () => {
     await dispatch(entryFor());
 
     expect((await loadMeta(store, ref()))?.state).toBe("reviewed");
+  });
+});
+
+// ─── Manual mode ────────────────────────────────────────────────────────────
+
+describe("runCycle: auto review off", () => {
+  test("a PR that qualifies waits in triage instead of being queued", async () => {
+    await watch();
+    const queue = fakeQueue();
+
+    await runCycle(
+      deps({
+        queue,
+        autoReview: false,
+        forge: fakeForge({ listOpenPRs: async () => [summary({ requestedReviewers: [LOGIN] })] }),
+      })
+    );
+
+    const meta = await loadMeta(store, ref());
+    expect(meta?.state).toBe("triage");
+    // The classification is still recorded, so the row can say the PR would
+    // have qualified and one button still reviews it.
+    expect(meta?.classification).toBe("requested");
+    expect(queue.enqueued).toEqual([]);
+  });
+
+  test("the same PR is queued when auto review is on", async () => {
+    // The control. Without it the test above would pass for any reason at all.
+    await watch();
+    const queue = fakeQueue();
+
+    await runCycle(
+      deps({
+        queue,
+        autoReview: true,
+        forge: fakeForge({ listOpenPRs: async () => [summary({ requestedReviewers: [LOGIN] })] }),
+      })
+    );
+
+    expect(queue.enqueued).toHaveLength(1);
+  });
+
+  test("review-anyway still reviews, because it is the button", async () => {
+    await watch();
+    await saveMeta(store, ref(), { state: "queued", classification: "manual", headSha: "sha1" });
+    const queue = fakeQueue();
+
+    await runCycle(
+      deps({
+        queue,
+        autoReview: false,
+        forge: fakeForge({ listOpenPRs: async () => [summary({ headSha: "sha2" })] }),
+      })
+    );
+
+    expect(queue.enqueued).toHaveLength(1);
+  });
+});
+
+describe("runCycle: a repo's own auto-review setting", () => {
+  /** Watch a repo and pin its override, which `addToWatchList` does not take. */
+  async function watchWithOverride(autoReview: boolean): Promise<void> {
+    await watch();
+    const entries = await loadWatchList(store);
+    await saveWatchList(
+      entries.map((e) => ({ ...e, autoReview })),
+      store
+    );
+  }
+
+  test("a repo set to manual holds, even with the daemon on", async () => {
+    await watchWithOverride(false);
+    const queue = fakeQueue();
+
+    await runCycle(
+      deps({
+        queue,
+        autoReview: true,
+        forge: fakeForge({ listOpenPRs: async () => [summary({ requestedReviewers: [LOGIN] })] }),
+      })
+    );
+
+    expect((await loadMeta(store, ref()))?.state).toBe("triage");
+    expect(queue.enqueued).toEqual([]);
+  });
+
+  test("a repo set to auto reviews, even with the daemon off", async () => {
+    // The other direction. Without this the override could be read as a
+    // one-way "off switch" rather than as the repo deciding for itself.
+    await watchWithOverride(true);
+    const queue = fakeQueue();
+
+    await runCycle(
+      deps({
+        queue,
+        autoReview: false,
+        forge: fakeForge({ listOpenPRs: async () => [summary({ requestedReviewers: [LOGIN] })] }),
+      })
+    );
+
+    expect(queue.enqueued).toHaveLength(1);
+  });
+
+  test("a repo that never chose follows the daemon", async () => {
+    await watch();
+    const queue = fakeQueue();
+
+    await runCycle(
+      deps({
+        queue,
+        autoReview: false,
+        forge: fakeForge({ listOpenPRs: async () => [summary({ requestedReviewers: [LOGIN] })] }),
+      })
+    );
+
+    expect(queue.enqueued).toEqual([]);
+  });
+
+  test("the override survives a save, so a poll does not erase it", async () => {
+    // recordPoll rewrites watch.md every cycle. An override dropped on write
+    // would look like it worked once and then quietly stopped.
+    await watchWithOverride(false);
+
+    await runCycle(
+      deps({
+        queue: fakeQueue(),
+        forge: fakeForge({ listOpenPRs: async () => [summary()] }),
+      })
+    );
+
+    expect((await loadWatchList(store))[0]?.autoReview).toBe(false);
   });
 });

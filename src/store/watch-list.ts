@@ -17,6 +17,12 @@ export interface WatchEntry {
   addedAt: string; // ISO timestamp
   lastPolledAt?: string; // ISO timestamp
   etag?: string;
+  /**
+   * Per-repo override for auto review. Undefined means "follow the global
+   * setting", which is different from an explicit false, so a repo that has
+   * never been set does not pin itself to whatever the default was that day.
+   */
+  autoReview?: boolean;
 }
 
 /**
@@ -42,6 +48,7 @@ export async function loadWatchList(lgtmDir?: string): Promise<WatchEntry[]> {
       addedAt: parseOptionalString(entry.addedAt) || new Date().toISOString(),
       lastPolledAt: parseOptionalString(entry.lastPolledAt),
       etag: parseOptionalString(entry.etag),
+      autoReview: typeof entry.autoReview === "boolean" ? entry.autoReview : undefined,
     }));
 }
 
@@ -60,6 +67,9 @@ export async function saveWatchList(entries: WatchEntry[], lgtmDir?: string): Pr
       addedAt: e.addedAt,
       ...(e.lastPolledAt && { lastPolledAt: e.lastPolledAt }),
       ...(e.etag && { etag: e.etag }),
+      // Written only when set, so "never chosen" stays distinguishable from
+      // "chosen to follow the default".
+      ...(typeof e.autoReview === "boolean" && { autoReview: e.autoReview }),
     })),
   };
 

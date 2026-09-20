@@ -82,6 +82,7 @@ import {
   runReview,
   type AgentConfig,
   type PriorFinding,
+  type ProviderFailureKind,
   type ReviewInput,
   type ReviewOutcome,
 } from "@/provider";
@@ -125,6 +126,8 @@ export interface EtagCache {
 
 export interface CycleDeps {
   lgtmDir: string;
+  /** False puts qualifying PRs in triage instead of the queue. Defaults to on. */
+  autoReview?: boolean;
   forge: ForgeAdapter;
   queue: CycleQueue;
   events?: EventSink;
@@ -339,7 +342,9 @@ async function pollRepo(
   for (const summary of listed) {
     const ref: PRRef = { owner: entry.owner, repo: entry.repo, number: summary.number };
     try {
-      const handled = await handleOpenPR(deps, ref, summary, viewer, now);
+      // The repo's own setting wins; undefined follows the daemon's default.
+      const autoReview = entry.autoReview ?? deps.autoReview !== false;
+      const handled = await handleOpenPR(deps, ref, summary, viewer, now, autoReview);
       count(outcome, handled.action);
       if (handled.reconciled) outcome.reconciled += 1;
     } catch (error) {
@@ -419,7 +424,8 @@ async function handleOpenPR(
   ref: PRRef,
   summary: PRSummary,
   viewer: string,
-  now: string
+  now: string,
+  autoReview: boolean
 ): Promise<Handled> {
   const meta = await loadMeta(deps.lgtmDir, ref);
   const classification = classificationFor(meta, summary, viewer);
@@ -428,7 +434,8 @@ async function handleOpenPR(
     decide(meta, { pr: summary, viewer, now }),
     meta,
     summary,
-    classification
+    classification,
+    autoReview
   );
 
   const patch: MetaUpdate = { ...decision.patch };
@@ -593,8 +600,24 @@ function withDraftAndClassRules(
   decision: Decision,
   meta: PRMeta | null,
   summary: PRSummary,
-  classification: Classification
+  classification: Classification,
+  autoReview: boolean
 ): { decision: Decision; dequeue: boolean } {
+  // (c) Manual mode. With auto review off, a PR that qualifies waits in triage
+  // with its classification recorded, so the row still says it would have
+  // qualified and one button still reviews it. `manual` is excluded for the
+  // same reason it is excluded from the draft hold: it IS the button.
+  if (!autoReview && classification !== "manual" && decision.action === "queue") {
+    return {
+      decision: {
+        action: "triage",
+        reason: "auto review is off, waiting for a human",
+        patch: { ...decision.patch, state: "triage" },
+      },
+      dequeue: true,
+    };
+  }
+
   // (b) R2.3: a draft is never auto-reviewed. Covers both the PR that reverts
   // to draft while it waits and the one that reverts and pushes a commit in
   // the same interval, which `decide` reads as new commits on a queued PR and
@@ -767,8 +790,13 @@ export type DispatchStatus = "reviewed" | "failed" | "skipped";
 
 export interface DispatchResult {
   status: DispatchStatus;
-  /** Why nothing ran, when the status is `skipped`. */
+  /** Why nothing ran, when the status is `skipped`, or what failed when it did. */
   reason?: string;
+  /**
+   * What kind of failure `reason` describes, as the Provider classified it.
+   * Absent on a Round that ran, and on a failure the Provider did not name.
+   */
+  failure?: ProviderFailureKind;
   round?: number;
   findings?: number;
 }
@@ -995,23 +1023,44 @@ async function runRound(
     return { status: "reviewed", round: roundNumber, findings: outcome.findings.length };
   }
 
+  // An expired login is not an attempt this PR used up.
+  //
+  // `failedAttempts` is a retry budget, and a budget only means anything
+  // against failures a retry could clear. A logged-out Provider fails every
+  // Round identically until a human logs in, so counting those would spend
+  // all three attempts within an hour and leave the PR at the cap, refusing
+  // to review a SHA nobody ever reviewed, long after the session came back.
+  // That is the case this cost eight Rounds across four PRs before anyone
+  // opened a .raw.txt and saw why.
+  const authFailure = outcome.failure === "auth";
+
   // R3.5: a failed Round never marks the PR reviewed, and `lastReviewedSha`
   // stays where it was so the next cycle sees this SHA as still un-reviewed
   // and retries it up to the cap.
   await saveMeta(deps.lgtmDir, ref, {
     state: "failed",
     rounds: roundNumber,
-    failedAttempts: meta.failedAttempts + 1,
+    failedAttempts: authFailure ? meta.failedAttempts : meta.failedAttempts + 1,
   });
   emit(deps, { type: "pr-changed", ref });
 
   const reason = outcome.error ?? "the provider failed";
-  deps.log?.(`review: ${label} round ${roundNumber} failed: ${reason}`);
+  deps.log?.(
+    `review: ${label} round ${roundNumber} failed: ${reason}` +
+      // Said out loud, because a retry counter that silently does not move is
+      // the kind of thing someone later reads as a bug.
+      (authFailure ? " (not counted against the retry cap; log in and it will run)" : "")
+  );
   // The cause carries the reason and not the PR, so one broken CLI notifies
   // once rather than once per watched PR (R8.2).
   emit(deps, { type: "error", cause: `review: ${reason}` });
 
-  return { status: "failed", reason, round: roundNumber };
+  return {
+    status: "failed",
+    reason,
+    ...(outcome.failure ? { failure: outcome.failure } : {}),
+    round: roundNumber,
+  };
 }
 
 /**

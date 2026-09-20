@@ -19,10 +19,8 @@ import {
   buildPendingReviewRequest,
   checkLines,
   commentableLines,
-  deleteDraftReview,
   formatCommentBody,
   formatReviewSummary,
-  postPendingReview,
   type PendingReviewInput,
   type PostableFinding,
 } from "./draft-review";
@@ -342,133 +340,7 @@ const ok = (body: unknown) =>
     headers: { "content-type": "application/json" },
   });
 
-describe("postPendingReview", () => {
-  test("sends no event field on the wire", async () => {
-    // The single most important assertion in this file. Everything else about a
-    // draft review follows from this.
-    const { calls } = await withFetch(
-      () => ok({ id: 999, state: "PENDING" }),
-      () => postPendingReview(postInput())
-    );
 
-    const sent = JSON.parse(String(calls[0]!.init.body));
-    expect("event" in sent).toBe(false);
-    expect(Object.keys(sent).sort()).toEqual(["body", "comments"]);
-  });
-
-  test("returns the review id, which is what links findings to the draft", async () => {
-    const { result } = await withFetch(
-      () =>
-        ok({
-          id: 2847362,
-          state: "PENDING",
-          html_url: "https://github.com/acme/app/pull/42#pullrequestreview-2847362",
-        }),
-      () => postPendingReview(postInput())
-    );
-
-    expect(result!.reviewId).toBe(2847362);
-    expect(result!.commentCount).toBe(1);
-    expect(result!.url).toContain("pullrequestreview-2847362");
-  });
-
-  test("throws when GitHub returns a state other than PENDING", async () => {
-    // If this ever happens the comments are already public, which is the exact
-    // accident this whole design exists to avoid. It must not pass silently.
-    const { error } = await withFetch(
-      () => ok({ id: 1, state: "COMMENTED" }),
-      () => postPendingReview(postInput())
-    );
-
-    expect(error).toBeDefined();
-    expect(error!.message).toContain("expected a PENDING review");
-    expect(error!.message).toContain("already be visible");
-  });
-
-  test("throws on a response with no state field", async () => {
-    // The old codebase accepted this, reasoning that absence is not evidence of
-    // publication. True, but the job of this module is to prove the review is
-    // unpublished, and an unrecognisable response proves nothing. v1 fails loud
-    // instead (design.md: "throws unless the response state is PENDING").
-    const { error } = await withFetch(
-      () => ok({ id: 7 }),
-      () => postPendingReview(postInput())
-    );
-
-    expect(error!.message).toContain("expected a PENDING review");
-    expect(error!.message).toContain("no state");
-  });
-
-  test("accepts the state in any casing GitHub might send it", async () => {
-    const { result, error } = await withFetch(
-      () => ok({ id: 7, state: "pending" }),
-      () => postPendingReview(postInput())
-    );
-
-    expect(error).toBeUndefined();
-    expect(result!.reviewId).toBe(7);
-  });
-
-  test("surfaces GitHub's own error text on failure", async () => {
-    const { error } = await withFetch(
-      () => new Response(JSON.stringify({ message: "Validation Failed" }), { status: 422 }),
-      () => postPendingReview(postInput())
-    );
-
-    expect(error!.message).toContain("422");
-    expect(error!.message).toContain("Validation Failed");
-  });
-
-  test("throws when the response carries no id, rather than storing a bad one", () => {
-    return withFetch(
-      () => ok({ state: "PENDING" }),
-      () => postPendingReview(postInput())
-    ).then(({ error }) => {
-      expect(error!.message).toContain("no id");
-    });
-  });
-
-  test("refuses to create an empty review", async () => {
-    const { error, calls } = await withFetch(
-      () => ok({ id: 1, state: "PENDING" }),
-      () => postPendingReview(postInput({ review: { body: "nothing", comments: [] } }))
-    );
-
-    expect(error!.message).toContain("no comments");
-    // And makes no request at all.
-    expect(calls.length).toBe(0);
-  });
-});
-
-describe("deleteDraftReview", () => {
-  test("tolerates a 404, since the goal is that the draft is gone", async () => {
-    const { error } = await withFetch(
-      () => new Response("", { status: 404 }),
-      () => deleteDraftReview({ ref: REF, reviewId: 5, token: "t" })
-    );
-
-    expect(error).toBeUndefined();
-  });
-
-  test("reports a real failure", async () => {
-    const { error } = await withFetch(
-      () => new Response("gone wrong", { status: 500 }),
-      () => deleteDraftReview({ ref: REF, reviewId: 5, token: "t" })
-    );
-
-    expect(error!.message).toContain("500");
-  });
-
-  test("addresses the review by id under the PR's reviews endpoint", async () => {
-    const { calls } = await withFetch(
-      () => new Response("", { status: 204 }),
-      () => deleteDraftReview({ ref: REF, reviewId: 5, token: "t" })
-    );
-
-    expect(calls[0]!.url).toBe("https://api.github.com/repos/acme/app/pulls/42/reviews/5");
-    expect(calls[0]!.init.method).toBe("DELETE");
-  });
-});
 
 // ─── The absence, enforced ──────────────────────────────────────────────────
 //
@@ -549,8 +421,6 @@ const EXERCISE: Record<string, () => unknown> = {
   commentableLines: () => commentableLines(DIFF),
   checkLines: () => checkLines([postable(), postable({ id: "f2", line: 900 })], DIFF),
   buildPendingReviewRequest: () => buildPendingReviewRequest(postInput()),
-  postPendingReview: () => postPendingReview(postInput()),
-  deleteDraftReview: () => deleteDraftReview({ ref: REF, reviewId: 5, token: "t" }),
 };
 
 describe("the no-publish invariant", () => {
@@ -604,15 +474,19 @@ describe("the no-publish invariant", () => {
     );
 
     expect(error).toBeUndefined();
-    // If the stub never ran, the assertion below would be vacuous.
-    expect(calls.length).toBeGreaterThan(0);
+    // This module builds requests and no longer sends any, so zero calls is
+    // the correct answer rather than a vacuous one: nothing here can reach
+    // GitHub at all. The wire-level version of this guard lives beside the
+    // adapter, which is the one module that does the sending.
+    expect(calls.length).toBe(0);
     expect(calls.flatMap(publishingFaults)).toEqual([]);
   });
 
   test("nothing any test in this file provoked would have published a review", () => {
     // Wider than the exercises above: this covers the odd inputs the earlier
-    // tests use, including the empty review and the failure responses.
-    expect(allCalls.length).toBeGreaterThan(0);
+    // tests use, including the empty review. Still expected to be empty,
+    // because the module stopped owning a client when the post flow moved to
+    // the adapter; the assertion stays so that adding one back fails here.
     expect(allCalls.flatMap(publishingFaults)).toEqual([]);
   });
 });

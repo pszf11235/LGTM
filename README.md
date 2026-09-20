@@ -28,13 +28,13 @@ bun run build.ts
 That writes `dist/lgtm`. The commands you'd run day to day:
 
 ```bash
-lgtm up                     # run the daemon in the foreground
+lgtm up                     # run the daemon, and open the UI
 lgtm install                # register it with launchd so it survives reboots
-lgtm open                   # open the web UI, already authenticated
+lgtm open                   # open it again later, or from another terminal
 lgtm watch add owner/repo   # start watching a repository
 ```
 
-`lgtm open` finds the running daemon and launches your browser with a bearer token in the URL fragment; the page moves it to local storage and strips it from the address bar on load. Adding a repository, from the Repos view or with `watch add`, triggers a backfill: you see its currently open PRs with the auto-class ones pre-selected, and nothing auto-queues until you confirm the list. `lgtm status` reports daemon liveness, the last cycle, queue depth, and quota state, and exits non-zero when nothing is running.
+`lgtm up` opens the UI itself when you run it from a terminal, and stays quiet when launchd starts it at login, since a browser tab on every boot is nobody's idea of helpful. `--no-open` suppresses it. `lgtm open` does the same thing on demand: it finds the running daemon and launches your browser with a bearer token in the URL fragment; the page moves it to local storage and strips it from the address bar on load. Adding a repository, from the Repos view or with `watch add`, triggers a backfill: you see its currently open PRs with the auto-class ones pre-selected, and nothing auto-queues until you confirm the list. `lgtm status` reports daemon liveness, the last cycle, queue depth, and quota state, and exits non-zero when nothing is running.
 
 GitHub auth has to resolve before a watched repo does anything: `GITHUB_TOKEN` or `GH_TOKEN`, then `gh auth token`, then a saved credential file (see [What it needs](#what-it-needs)). See [Status](#status) for what this build has actually been run against.
 

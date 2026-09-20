@@ -299,7 +299,7 @@ export interface ForgeAdapter {
   /** Unified diff, current head. */
   getDiff(ref: PRRef): Promise<string>;
   getCheckStatus(ref: PRRef, sha: string): Promise<CheckStatus>;
-  createDraftReview(ref: PRRef, review: DraftReview): Promise<{ id: number }>;
+  createDraftReview(ref: PRRef, review: DraftReview): Promise<{ id: number; url: string | null }>;
   deleteDraftReview(ref: PRRef, id: number): Promise<void>;
   getReview(ref: PRRef, id: number): Promise<"pending" | "submitted" | "gone">;
   authenticatedUser(): Promise<string>;

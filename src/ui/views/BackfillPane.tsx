@@ -81,43 +81,16 @@ export interface AddWatchlistResponse {
 // directly rather than through those methods; only the token comes from the
 // shared client.
 
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getDefaultApiClient().getToken();
-
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  const text = await res.text();
-
-  if (!res.ok) {
-    let message = text;
-    try {
-      const parsed = JSON.parse(text) as { message?: unknown };
-      if (typeof parsed.message === "string") message = parsed.message;
-    } catch {
-      // Not JSON. Fall back to whatever the body carried.
-    }
-    throw new Error(message || `${init?.method ?? "GET"} ${path} failed (${res.status})`);
-  }
-
-  return (text ? JSON.parse(text) : undefined) as T;
-}
 
 async function fetchBackfillFromApi(repo: RepoRef): Promise<AddWatchlistResponse> {
-  return apiRequest<AddWatchlistResponse>("/api/watchlist", {
+  return getDefaultApiClient().request<AddWatchlistResponse>("/api/watchlist", {
     method: "POST",
     body: JSON.stringify({ owner: repo.owner, repo: repo.repo }),
   });
 }
 
 async function postDecisionViaApi(ref: PRRef, action: ConfirmAction): Promise<void> {
-  await apiRequest<unknown>(`/api/prs/${ref.owner}/${ref.repo}/${ref.number}/decision`, {
+  await getDefaultApiClient().request<unknown>(`/api/prs/${ref.owner}/${ref.repo}/${ref.number}/decision`, {
     method: "POST",
     body: JSON.stringify({ action }),
   });

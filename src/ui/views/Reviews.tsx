@@ -773,6 +773,44 @@ const CONNECTION_LABEL: Record<ConnectionStatus, { label: string; tone: string }
   closed: { label: "Offline", tone: "text-destructive" },
 };
 
+/**
+ * The two states that stop reviews happening and would otherwise only appear
+ * in the daemon's log. A signed-out CLI answers every review with an apology
+ * inside a normal-looking envelope, so it has to be said out loud. Auto review
+ * being off is deliberate rather than broken, and reads that way.
+ */
+export function DaemonNotices({ status }: { status: StatusResponse | null }) {
+  if (!status) return null;
+  const notices: Array<{ key: string; tone: string; text: string }> = [];
+
+  if (status.providerAuth === "unauthenticated") {
+    notices.push({
+      key: "auth",
+      tone: "border-destructive/40 bg-destructive/5 text-destructive",
+      text: "The Claude CLI is not signed in, so reviews are on hold. Run `claude auth login` in a terminal.",
+    });
+  }
+  if (!status.autoReview) {
+    notices.push({
+      key: "manual",
+      tone: "border-border bg-muted/40 text-muted-foreground",
+      text: "Auto review is off. Qualifying PRs wait in triage until you review them.",
+    });
+  }
+
+  if (notices.length === 0) return null;
+
+  return (
+    <div className="space-y-2" data-testid="daemon-notices">
+      {notices.map((n) => (
+        <p key={n.key} className={`rounded-md border px-3 py-2 text-sm ${n.tone}`}>
+          {n.text}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function ConnectionBadge({ status }: { status: ConnectionStatus }) {
   const { label, tone } = CONNECTION_LABEL[status];
   return (
@@ -874,6 +912,8 @@ export function Reviews({ onOpenPR, actions }: ReviewsProps) {
         <h1 className="text-lg font-semibold">Reviews</h1>
         <ConnectionBadge status={connection} />
       </div>
+
+      <DaemonNotices status={statusQuery.data} />
 
       <div className="space-y-3">
         <StatusFilterBar status={status} counts={countsList.data} onChange={setStatus} />

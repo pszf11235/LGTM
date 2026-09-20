@@ -39,6 +39,8 @@ interface StatusResponse {
   quota: QuotaState | null;
   binaries: BinaryStatus[];
   github: { tokenPresent: boolean };
+  provider?: { state: "authenticated" | "unauthenticated" | "unknown"; method: string | null };
+  autoReview?: boolean;
 }
 
 interface ConfigResponse {
@@ -51,33 +53,6 @@ interface ConfigResponse {
 // methods do not match those routes' actual response shapes as of this
 // writing (src/api/routes.ts's `/api/status`, `/api/config`), so this view
 // fetches directly and only borrows the token.
-async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getDefaultApiClient().getToken();
-
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
-
-  const text = await res.text();
-
-  if (!res.ok) {
-    let message = text;
-    try {
-      const parsed = JSON.parse(text) as { message?: unknown };
-      if (typeof parsed.message === "string") message = parsed.message;
-    } catch {
-      // Not JSON. Fall back to whatever the body carried.
-    }
-    throw new Error(message || `${init?.method ?? "GET"} ${path} failed (${res.status})`);
-  }
-
-  return (text ? JSON.parse(text) : undefined) as T;
-}
 
 // ─── Display helpers ────────────────────────────────────────────────────────
 
@@ -140,6 +115,121 @@ function toInt(value: string, fallback: number): number {
 
 // ─── Editable config draft ──────────────────────────────────────────────────
 
+/**
+ * Whether the review CLI is signed in, and the flow that fixes it.
+ *
+ * Two steps, because that is what the CLI does. It opens the browser and
+ * prints an authorize URL, then waits for the code the callback page shows.
+ * The daemon holds it open in between, so the code goes into the field below
+ * rather than into a terminal nobody opened.
+ *
+ * The code is one-time and travels to the daemon on loopback. What it is
+ * exchanged for is written by the CLI into its own store; this page never sees
+ * a credential and never keeps one.
+ */
+export function ProviderAuthRow({
+  status,
+  login,
+  onStart,
+  onSubmitCode,
+  onCancel,
+}: {
+  status: { provider?: { state: string; method: string | null } };
+  login: LoginUiState;
+  onStart: () => void;
+  onSubmitCode: (code: string) => void;
+  onCancel: () => void;
+}) {
+  const state = status.provider?.state ?? "unknown";
+  const label =
+    state === "authenticated"
+      ? `Signed in${status.provider?.method ? ` with ${status.provider.method}` : ""}`
+      : state === "unauthenticated"
+        ? "Not signed in, so reviews are on hold"
+        : "Sign-in state unknown";
+
+  return (
+    <div className="space-y-3 border-t pt-3" data-testid="provider-auth">
+      <div className="flex items-center justify-between gap-2 text-sm">
+        <span className="font-medium">Claude CLI account</span>
+        <span className="flex items-center gap-2">
+          <span className={state === "unauthenticated" ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
+            {label}
+          </span>
+          <Badge tone={state === "authenticated" ? "good" : state === "unauthenticated" ? "bad" : "warn"}>
+            {state}
+          </Badge>
+        </span>
+      </div>
+
+      {state !== "authenticated" && login.phase === "idle" && (
+        <div className="space-y-1">
+          <Button type="button" size="sm" variant="outline" onClick={onStart}>
+            Sign in
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Opens your browser, then asks for the code the page gives you back.
+          </p>
+        </div>
+      )}
+
+      {login.phase === "starting" && <p className="text-xs text-muted-foreground">Opening your browser…</p>}
+
+      {login.phase === "waiting" && (
+        <div className="space-y-2" data-testid="login-code-step">
+          <p className="text-xs text-muted-foreground">
+            Finish signing in, then paste the code the page shows you.
+            {login.url && (
+              <>
+                {" "}
+                <a href={login.url} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                  Open the page again
+                </a>
+                {" if the browser did not."}
+              </>
+            )}
+          </p>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const field = new FormData(e.currentTarget).get("code");
+              if (typeof field === "string") onSubmitCode(field);
+            }}
+          >
+            <Input
+              name="code"
+              aria-label="Sign-in code"
+              placeholder="Paste the code here"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={login.busy}
+            />
+            <Button type="submit" size="sm" disabled={login.busy}>
+              {login.busy ? "Signing in…" : "Finish"}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" disabled={login.busy} onClick={onCancel}>
+              Cancel
+            </Button>
+          </form>
+        </div>
+      )}
+
+      {login.error && <p className="text-xs text-destructive">{login.error}</p>}
+      {login.note && <p className="text-xs text-muted-foreground">{login.note}</p>}
+    </div>
+  );
+}
+
+/** What the sign-in flow is doing, so the row can render one step at a time. */
+export interface LoginUiState {
+  phase: "idle" | "starting" | "waiting";
+  url: string | null;
+  busy: boolean;
+  error: string | null;
+  note: string | null;
+}
+
 interface ConfigDraft {
   intervalMinutes: string;
   pauseAbovePct: string;
@@ -164,6 +254,80 @@ function draftFromConfig(config: Config): ConfigDraft {
 
 export function Settings() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [login, setLogin] = useState<LoginUiState>({
+    phase: "idle",
+    url: null,
+    busy: false,
+    error: null,
+    note: null,
+  });
+
+  async function startLogin() {
+    setLogin({ phase: "starting", url: null, busy: true, error: null, note: null });
+    try {
+      const res = await getDefaultApiClient().request<{
+        status: string;
+        url: string | null;
+        command: string;
+        error: string | null;
+      }>("/api/provider/login", { method: "POST" });
+
+      if (res.status !== "waiting-for-code") {
+        setLogin({
+          phase: "idle",
+          url: null,
+          busy: false,
+          error: res.error,
+          note: `You can also run this yourself: ${res.command}`,
+        });
+        return;
+      }
+      setLogin({ phase: "waiting", url: res.url, busy: false, error: null, note: null });
+    } catch (err) {
+      setLogin({
+        phase: "idle",
+        url: null,
+        busy: false,
+        error: err instanceof Error ? err.message : String(err),
+        note: null,
+      });
+    }
+  }
+
+  async function submitCode(code: string) {
+    setLogin((prev) => ({ ...prev, busy: true, error: null }));
+    try {
+      const res = await getDefaultApiClient().request<{ status: string; error: string | null }>(
+        "/api/provider/login/code",
+        { method: "POST", body: JSON.stringify({ code }) }
+      );
+
+      if (res.status === "signed-in") {
+        setLogin({ phase: "idle", url: null, busy: false, error: null, note: "Signed in." });
+        // The badge above reads the daemon's own probe, so refresh rather than
+        // asserting success locally.
+        void load();
+        return;
+      }
+      // Still waiting: a mistyped code should cost the paste, not the flow.
+      setLogin((prev) => ({ ...prev, busy: false, error: res.error }));
+    } catch (err) {
+      setLogin((prev) => ({
+        ...prev,
+        busy: false,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }
+
+  async function cancelLogin() {
+    setLogin({ phase: "idle", url: null, busy: false, error: null, note: null });
+    await getDefaultApiClient()
+      .request("/api/provider/login", { method: "DELETE" })
+      .catch(() => {
+        // Already gone, or the daemon went away. Either way the UI is idle.
+      });
+  }
   const [statusError, setStatusError] = useState<string | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
@@ -176,8 +340,8 @@ export function Settings() {
   const load = useCallback(async () => {
     setLoading(true);
     const [statusResult, configResult] = await Promise.allSettled([
-      apiRequest<StatusResponse>("/api/status"),
-      apiRequest<ConfigResponse>("/api/config"),
+      getDefaultApiClient().request<StatusResponse>("/api/status"),
+      getDefaultApiClient().request<ConfigResponse>("/api/config"),
     ]);
 
     if (statusResult.status === "fulfilled") {
@@ -221,7 +385,7 @@ export function Settings() {
     };
 
     try {
-      const response = await apiRequest<ConfigResponse>("/api/config", {
+      const response = await getDefaultApiClient().request<ConfigResponse>("/api/config", {
         method: "PATCH",
         body: JSON.stringify(patch),
       });
@@ -273,6 +437,13 @@ export function Settings() {
                 ))}
               </ul>
             )}
+            {status && <ProviderAuthRow
+                status={status}
+                login={login}
+                onStart={() => void startLogin()}
+                onSubmitCode={(code) => void submitCode(code)}
+                onCancel={() => void cancelLogin()}
+              />}
             {configError && (
               <p className="flex items-center gap-2 text-sm text-destructive">
                 <CircleAlert className="size-4 shrink-0" /> {configError}

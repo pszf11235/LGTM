@@ -14,6 +14,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { createApiHandler } from "./server";
+import { decodeList, decodePRIdentity, decodeRoundFindings, decodeSection } from "./contract";
 import type { ApiDeps } from "./server";
 import { createApiClient } from "@/ui/api";
 import { saveMeta, saveRound } from "@/store/reviews";
@@ -525,5 +526,58 @@ describe("GET .../findings, daemon to browser", () => {
 
     expect(res.findings).toHaveLength(2);
     expect(res.findings.map((f) => f.key)).toEqual(["r1:reviewer:f1", "r2:reviewer:f1"]);
+  });
+});
+
+// ─── The contract module itself ─────────────────────────────────────────────
+
+describe("wire decoding", () => {
+  test("an envelope and a bare array both read as the list", () => {
+    // Reading the envelope as a bare array emptied the inbox once, and the
+    // watch list a second time. Both spellings answer the question.
+    expect(decodeList({ prs: [1, 2] }, "prs")).toEqual([1, 2]);
+    expect(decodeList([1, 2], "prs")).toEqual([1, 2]);
+  });
+
+  test("anything else is an empty list rather than a throw", () => {
+    expect(decodeList(null, "prs")).toEqual([]);
+    expect(decodeList({ prs: "nope" }, "prs")).toEqual([]);
+    expect(decodeList({ other: [1] }, "prs")).toEqual([]);
+  });
+
+  test("findings come back from every round, in order", () => {
+    const payload = {
+      rounds: [
+        { round: 1, findings: [{ key: "r1:reviewer:f1" }] },
+        { round: 2, findings: [{ key: "r2:reviewer:f1" }] },
+      ],
+    };
+    expect(decodeRoundFindings(payload).map((f) => (f as { key: string }).key)).toEqual([
+      "r1:reviewer:f1",
+      "r2:reviewer:f1",
+    ]);
+  });
+
+  test("a flat findings array still reads, for a daemon that predates rounds", () => {
+    expect(decodeRoundFindings({ findings: [{ key: "f1" }] })).toHaveLength(1);
+  });
+
+  test("the reference and the PR's fields merge into one identity", () => {
+    const merged = decodePRIdentity({
+      ref: { owner: "acme", repo: "api", number: 42 },
+      pr: { title: "Add a rate limiter", author: "ada" },
+    });
+    expect(merged.owner).toBe("acme");
+    expect(merged.number).toBe(42);
+    expect(merged.title).toBe("Add a rate limiter");
+  });
+
+  test("a nested section is an object even when it is missing", () => {
+    // The status parser read flat keys off a nested payload and silently used
+    // its defaults, so the health panel invented an interval and an empty
+    // queue. An absent section has to be an object, not undefined.
+    expect(decodeSection({ queue: { queued: 3 } }, "queue")).toEqual({ queued: 3 });
+    expect(decodeSection({}, "queue")).toEqual({});
+    expect(decodeSection(null, "queue")).toEqual({});
   });
 });

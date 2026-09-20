@@ -150,7 +150,7 @@ function fakeForge(over: Partial<ForgeAdapter> = {}): ForgeAdapter {
     createDraftReview: unexpected("createDraftReview") as (
       ref: PRRef,
       review: DraftReview
-    ) => Promise<{ id: number }>,
+    ) => Promise<{ id: number; url: string | null }>,
     deleteDraftReview: unexpected("deleteDraftReview") as (ref: PRRef, id: number) => Promise<void>,
     getReview: unexpected("getReview") as (
       ref: PRRef,
@@ -335,8 +335,12 @@ describe("route table", () => {
       "PATCH /api/prs/:owner/:repo/:number/findings/:key",
       "POST /api/prs/:owner/:repo/:number/validate",
       "POST /api/prs/:owner/:repo/:number/post",
+      "POST /api/provider/login",
+      "POST /api/provider/login/code",
+      "DELETE /api/provider/login",
       "GET /api/watchlist",
       "POST /api/watchlist",
+      "PATCH /api/watchlist",
       "DELETE /api/watchlist",
       "GET /api/config",
       "PATCH /api/config",
