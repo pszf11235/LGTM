@@ -199,6 +199,12 @@ function harness(over: Partial<DaemonOptions> = {}): Harness {
     pid: 4242,
     isPidAlive: () => false,
     binaries: h.binaries,
+    // Never the real binary: a boot test that spawns `claude auth status` is
+    // slow and answers differently depending on who is logged in. Signed in is
+    // the baseline, because the dispatch gate asks about auth before it asks
+    // about quota, and a signed-out default would stop every other test short
+    // of the thing it came to check.
+    checkAuth: async () => ({ state: "authenticated" as const, method: "claude.ai", error: null }),
     resolveToken: (ghPath) => {
       h.ghPaths.push(ghPath);
       return "ghp_fake";
@@ -577,5 +583,41 @@ describe("createDaemon, shutdown", () => {
     const info = await readDaemonInfo(store);
     expect(info?.pid).toBe(first.pid);
     expect(info?.port).toBe(first.port);
+  });
+});
+
+describe("createDaemon, sign-in state", () => {
+  test("announces a change, so every open view refetches", async () => {
+    // Signing in from the UI refreshed the page that did it and left every
+    // other view saying reviews were on hold until the daemon restarted.
+    const h = harness({
+      checkAuth: async () => ({ state: "authenticated", method: "claude.ai", error: null }),
+    });
+    const boot = await createDaemon(h.options);
+    if (boot.status !== "started") throw new Error("expected a started daemon");
+
+    // The boot probe moves it off "unknown", which is a change and is news.
+    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(h.events.filter((e) => e.type === "provider-auth-changed")).toHaveLength(1);
+    await boot.daemon.stop();
+  });
+
+  test("says nothing when the answer is the same as last time", async () => {
+    // A probe runs before every dispatch. Announcing an unchanged state would
+    // make the UI refetch on a timer it did not ask for.
+    const h = harness({
+      checkAuth: async () => ({ state: "unauthenticated", method: null, error: null }),
+    });
+    const boot = await createDaemon(h.options);
+    if (boot.status !== "started") throw new Error("expected a started daemon");
+    await new Promise((r) => setTimeout(r, 5));
+
+    const first = h.events.filter((e) => e.type === "provider-auth-changed").length;
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(h.events.filter((e) => e.type === "provider-auth-changed")).toHaveLength(first);
+    await boot.daemon.stop();
   });
 });

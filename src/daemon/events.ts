@@ -19,6 +19,12 @@ export type DaemonEvent =
   | { type: "pr-changed"; ref: PRRef }
   | { type: "findings-ready"; ref: PRRef }
   | { type: "quota-changed"; mode: "ok" | "throttled" | "fallback" }
+  /**
+   * The review CLI's sign-in state changed. Signing in from the UI refreshed
+   * the page that did it and left every other view saying reviews were on
+   * hold until the daemon restarted, because nothing told them otherwise.
+   */
+  | { type: "provider-auth-changed"; state: "authenticated" | "unauthenticated" | "unknown" }
   | { type: "error"; cause: string };
 
 /** Callback signature for event subscribers. */

@@ -144,7 +144,6 @@ export interface BindContext {
   providerAuth: () => { state: string; method: string | null };
   /** False when qualifying PRs wait in triage instead of being reviewed. */
   autoReview: () => boolean;
-  /** Opens a terminal running the CLI's sign-in flow. */
   /** The CLI sign-in flow, which spans two requests: start, then the code. */
   login: LoginSession;
 }
@@ -246,6 +245,11 @@ export interface DaemonOptions {
   binaries?: BinaryResolver;
   /** Defaults to the shared chain in @/forge/github/auth. */
   resolveToken?: (ghPath: string | null) => string | null;
+  /**
+   * The CLI sign-in probe. Injectable so boot tests do not spawn a real
+   * binary, which made them slow and dependent on whoever was logged in.
+   */
+  checkAuth?: (binPath: string | null) => Promise<ProviderAuthResult>;
   /** Defaults to the GitHub adapter over the resolved `gh` path. */
   forge?: ForgeAdapter;
   /** Defaults to `claude -p /usage` through the resolved `claude` path. */
@@ -405,6 +409,7 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
 
   // 4. The GitHub token, through the path the probe just resolved.
   const resolveToken = options.resolveToken ?? resolveGitHubToken;
+  const checkAuth = options.checkAuth ?? checkProviderAuth;
   const ghPath = binaries.resolve("gh");
   const githubTokenPresent = resolveToken(ghPath) !== null;
   if (!githubTokenPresent) {
@@ -510,8 +515,8 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
       // while logged out is a Round wasted and a confusing failure on the PR.
       // `claude auth status --json` costs no tokens and answers in about two
       // tenths of a second, so it is worth asking before every dispatch.
-      const auth = await checkProviderAuth(binaries.resolve("claude"));
-      lastAuth = auth;
+      const auth = await checkAuth(binaries.resolve("claude"));
+      recordAuth(auth);
       if (auth.state === "unauthenticated") {
         // Once per distinct cause, per R8: a dead session must not notify on
         // every dispatch attempt for as long as it stays dead.
@@ -537,6 +542,20 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
   // Last auth reading, for /api/status. Refreshed by the dispatch gate rather
   // than on its own timer: the answer only matters when work is waiting.
   let lastAuth: ProviderAuthResult = { state: "unknown", method: null, error: "not probed yet" };
+
+  /**
+   * Record a probe, and announce it when the answer changed.
+   *
+   * Signing in from the UI used to refresh only the page that did it. Every
+   * other view kept saying reviews were on hold until the daemon restarted,
+   * because the state moved and nothing said so.
+   */
+  function recordAuth(result: ProviderAuthResult): ProviderAuthResult {
+    const changed = result.state !== lastAuth.state;
+    lastAuth = result;
+    if (changed) emit({ type: "provider-auth-changed", state: result.state });
+    return result;
+  }
 
   // 8. The scheduler over the poll cycle.
   const cycleDeps: CycleDeps = {
@@ -579,8 +598,8 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
         Parameters<typeof createLoginSession>[0]["spawn"]
       >,
     isSignedIn: async () => {
-      const result = await checkProviderAuth(binaries.resolve("claude"));
-      lastAuth = result;
+      const result = await checkAuth(binaries.resolve("claude"));
+      recordAuth(result);
       return result.state === "authenticated";
     },
     log,
@@ -712,8 +731,8 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
   // Ask once at boot as well as before each dispatch. The gate only probes
   // when there is work, so an idle daemon would report "unknown" indefinitely
   // and the settings page would have nothing to tell anyone.
-  void checkProviderAuth(binaries.resolve("claude")).then((result) => {
-    lastAuth = result;
+  void checkAuth(binaries.resolve("claude")).then((result) => {
+    recordAuth(result);
     if (result.state === "unauthenticated") {
       log("boot: the Claude CLI is not signed in. Run `claude auth login`");
     }
