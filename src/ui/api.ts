@@ -202,6 +202,10 @@ export interface StatusResponse {
   quotaPercent: number | null;
   claudePath: string | null;
   ghPath: string | null;
+  /** Whether the review CLI is signed in. "unknown" when the probe could not answer. */
+  providerAuth: "authenticated" | "unauthenticated" | "unknown";
+  /** False when qualifying PRs wait in triage instead of being reviewed. */
+  autoReview: boolean;
 }
 
 export type CheckState = "success" | "failure" | "pending" | "none";
@@ -626,6 +630,10 @@ function toPRFindingsResponse(raw: unknown): PRFindingsResponse {
   return { meta: toPRDetailMeta(meta), findings, rounds };
 }
 
+function providerAuthState(value: unknown): StatusResponse["providerAuth"] {
+  return value === "authenticated" || value === "unauthenticated" ? value : "unknown";
+}
+
 function toStatusResponse(raw: unknown): StatusResponse {
   const rec = asRecord(raw);
   // The daemon nests: scheduler, queue, quota, binaries and counts are each
@@ -661,6 +669,9 @@ function toStatusResponse(raw: unknown): StatusResponse {
     quotaPercent: nullableNum(quota.maxPercent),
     claudePath: pathOf("claude"),
     ghPath: pathOf("gh"),
+    providerAuth: providerAuthState(asRecord(rec.provider).state),
+    // Absent means an older daemon, which only ever reviewed automatically.
+    autoReview: rec.autoReview !== false,
   };
 }
 

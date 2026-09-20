@@ -70,6 +70,7 @@ import { createEventBus, type DaemonEvent, type EventBus } from "./events";
 import { createNotifier, setUiPort, type SpawnFn } from "./notify";
 import { createReviewQueue, type QueueSnapshot, type ReviewQueue } from "./queue";
 import { createStoreWatch, type StoreWatch } from "./store-watch";
+import { checkProviderAuth, type ProviderAuthResult } from "@/provider/auth";
 import {
   createClaudeUsageProbe,
   createQuotaGate,
@@ -138,6 +139,10 @@ export interface BindContext {
   lastCycle: () => PollCycleResult | null;
   /** Whether a GitHub token resolved. Never the token itself. */
   githubToken: () => string | null;
+  /** Last reading of whether the review CLI is signed in. */
+  providerAuth: () => { state: string; method: string | null };
+  /** False when qualifying PRs wait in triage instead of being reviewed. */
+  autoReview: () => boolean;
 }
 
 /**
@@ -495,7 +500,23 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
       now: isoNow,
       log,
     }),
-    canDispatch: async () => (await quota.requestDispatch()).allowed,
+    canDispatch: async () => {
+      // Ask the cheap question first. A logged-out CLI answers a review with a
+      // normal-looking envelope and an apology inside it, so a Round spent
+      // while logged out is a Round wasted and a confusing failure on the PR.
+      // `claude auth status --json` costs no tokens and answers in about two
+      // tenths of a second, so it is worth asking before every dispatch.
+      const auth = await checkProviderAuth(binaries.resolve("claude"));
+      lastAuth = auth;
+      if (auth.state === "unauthenticated") {
+        // Once per distinct cause, per R8: a dead session must not notify on
+        // every dispatch attempt for as long as it stays dead.
+        emit({ type: "error", cause: "provider auth: not signed in" });
+        log("queue: holding, the Claude CLI is not signed in. Run `claude auth login`");
+        return false;
+      }
+      return (await quota.requestDispatch()).allowed;
+    },
     concurrency: config.concurrency,
     now: msNow,
     setTimer: options.setTimer,
@@ -509,8 +530,21 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
   });
   queueRef.queue = queue;
 
+  // Last auth reading, for /api/status. Refreshed by the dispatch gate rather
+  // than on its own timer: the answer only matters when work is waiting.
+  let lastAuth: ProviderAuthResult = { state: "unknown", method: null, error: "not probed yet" };
+
   // 8. The scheduler over the poll cycle.
-  const cycleDeps: CycleDeps = { lgtmDir, forge, queue, events, etags, now: isoNow, log };
+  const cycleDeps: CycleDeps = {
+    lgtmDir,
+    forge,
+    queue,
+    events,
+    etags,
+    autoReview: config.auto_review,
+    now: isoNow,
+    log,
+  };
   const cycle = options.cycle ?? runCycle;
   let lastCycle: PollCycleResult | null = null;
 
@@ -544,6 +578,8 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     binaries,
     forge,
     lastCycle: () => lastCycle,
+    providerAuth: () => ({ state: lastAuth.state, method: lastAuth.method }),
+    autoReview: () => config.auto_review,
     // The real token, not a presence flag. `/api/status` only ever asks whether
     // this is non-null, but the post flow uses the same function as the bearer
     // it sends to GitHub, so handing back a placeholder made every post a 401.

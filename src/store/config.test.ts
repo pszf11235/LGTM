@@ -76,6 +76,7 @@ describe("Config", () => {
       resume_below_pct: 55,
       daily_cap: 25,
       concurrency: 4,
+      auto_review: true,
       claude_path: "/usr/local/bin/claude",
       gh_path: "/usr/local/bin/gh",
     };
@@ -99,6 +100,7 @@ describe("Config", () => {
       resume_below_pct: 58,
       daily_cap: 22,
       concurrency: 3,
+      auto_review: true,
     };
 
     await saveConfig(config);
@@ -116,6 +118,7 @@ describe("Config", () => {
       resume_below_pct: 55,
       daily_cap: 25,
       concurrency: 4,
+      auto_review: true,
     };
 
     await saveConfig(original);
@@ -140,6 +143,7 @@ describe("Config", () => {
       resume_below_pct: [],
       daily_cap: "abc123",
       concurrency: 2,
+      auto_review: true,
     }, "# Config\n");
 
     const config = await loadConfig();
@@ -157,6 +161,7 @@ describe("Config", () => {
       resume_below_pct: 60,
       daily_cap: 20,
       concurrency: 2,
+      auto_review: true,
       claude_path: "/custom/claude",
       gh_path: "/custom/gh",
     };
@@ -178,6 +183,7 @@ describe("Config", () => {
       resume_below_pct: 60,
       daily_cap: 20,
       concurrency: 2,
+      auto_review: true,
       claude_path: "",
       gh_path: "",
     }, "# Config\n");

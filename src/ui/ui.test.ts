@@ -47,6 +47,7 @@ import {
   CLOSED_FILTERS,
   DEFAULT_ROUND_TIMEOUT_MS,
   elapsedMs,
+  DaemonNotices,
   filterToQuery,
   formatDuration,
   quotaReason,
@@ -740,6 +741,8 @@ function baseStatus(overrides: Partial<StatusResponse> = {}): StatusResponse {
     quotaPercent: null,
     claudePath: null,
     ghPath: null,
+    providerAuth: "authenticated",
+    autoReview: true,
     ...overrides,
   };
 }
@@ -1343,5 +1346,43 @@ describe("RoundSession (smoke)", () => {
     expect(html).not.toContain("$0.42");
     expect(html).toContain("1 turn");
     expect(html).not.toContain("1 turns");
+  });
+});
+
+// ─── Daemon notices ─────────────────────────────────────────────────────────
+
+describe("DaemonNotices", () => {
+  test("says the CLI is signed out, because nothing else would", () => {
+    const html = renderToStaticMarkup(
+      createElement(DaemonNotices, { status: baseStatus({ providerAuth: "unauthenticated" }) })
+    );
+    expect(html).toContain("not signed in");
+    expect(html).toContain("claude auth login");
+  });
+
+  test("says auto review is off, and does not call it an error", () => {
+    const html = renderToStaticMarkup(createElement(DaemonNotices, { status: baseStatus({ autoReview: false }) }));
+    expect(html).toContain("Auto review is off");
+    expect(html).not.toContain("destructive");
+  });
+
+  test("shows both at once when both are true", () => {
+    const html = renderToStaticMarkup(
+      createElement(DaemonNotices, { status: baseStatus({ providerAuth: "unauthenticated", autoReview: false }) })
+    );
+    expect(html).toContain("not signed in");
+    expect(html).toContain("Auto review is off");
+  });
+
+  test("stays out of the way when everything is fine", () => {
+    expect(renderToStaticMarkup(createElement(DaemonNotices, { status: baseStatus() }))).toBe("");
+    expect(renderToStaticMarkup(createElement(DaemonNotices, { status: null }))).toBe("");
+  });
+
+  test("an unknown auth probe is not reported as signed out", () => {
+    // The probe failing to answer is not evidence of being logged out, and
+    // crying wolf on a missing binary would train the banner to be ignored.
+    const html = renderToStaticMarkup(createElement(DaemonNotices, { status: baseStatus({ providerAuth: "unknown" }) }));
+    expect(html).toBe("");
   });
 });

@@ -1591,3 +1591,59 @@ describe("dispatchReview", () => {
     expect((await loadMeta(store, ref()))?.state).toBe("reviewed");
   });
 });
+
+// ─── Manual mode ────────────────────────────────────────────────────────────
+
+describe("runCycle: auto review off", () => {
+  test("a PR that qualifies waits in triage instead of being queued", async () => {
+    await watch();
+    const queue = fakeQueue();
+
+    await runCycle(
+      deps({
+        queue,
+        autoReview: false,
+        forge: fakeForge({ listOpenPRs: async () => [summary({ requestedReviewers: [LOGIN] })] }),
+      })
+    );
+
+    const meta = await loadMeta(store, ref());
+    expect(meta?.state).toBe("triage");
+    // The classification is still recorded, so the row can say the PR would
+    // have qualified and one button still reviews it.
+    expect(meta?.classification).toBe("requested");
+    expect(queue.enqueued).toEqual([]);
+  });
+
+  test("the same PR is queued when auto review is on", async () => {
+    // The control. Without it the test above would pass for any reason at all.
+    await watch();
+    const queue = fakeQueue();
+
+    await runCycle(
+      deps({
+        queue,
+        autoReview: true,
+        forge: fakeForge({ listOpenPRs: async () => [summary({ requestedReviewers: [LOGIN] })] }),
+      })
+    );
+
+    expect(queue.enqueued).toHaveLength(1);
+  });
+
+  test("review-anyway still reviews, because it is the button", async () => {
+    await watch();
+    await saveMeta(store, ref(), { state: "queued", classification: "manual", headSha: "sha1" });
+    const queue = fakeQueue();
+
+    await runCycle(
+      deps({
+        queue,
+        autoReview: false,
+        forge: fakeForge({ listOpenPRs: async () => [summary({ headSha: "sha2" })] }),
+      })
+    );
+
+    expect(queue.enqueued).toHaveLength(1);
+  });
+});

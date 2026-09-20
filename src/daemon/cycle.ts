@@ -126,6 +126,8 @@ export interface EtagCache {
 
 export interface CycleDeps {
   lgtmDir: string;
+  /** False puts qualifying PRs in triage instead of the queue. Defaults to on. */
+  autoReview?: boolean;
   forge: ForgeAdapter;
   queue: CycleQueue;
   events?: EventSink;
@@ -429,7 +431,8 @@ async function handleOpenPR(
     decide(meta, { pr: summary, viewer, now }),
     meta,
     summary,
-    classification
+    classification,
+    deps.autoReview !== false
   );
 
   const patch: MetaUpdate = { ...decision.patch };
@@ -594,8 +597,24 @@ function withDraftAndClassRules(
   decision: Decision,
   meta: PRMeta | null,
   summary: PRSummary,
-  classification: Classification
+  classification: Classification,
+  autoReview: boolean
 ): { decision: Decision; dequeue: boolean } {
+  // (c) Manual mode. With auto review off, a PR that qualifies waits in triage
+  // with its classification recorded, so the row still says it would have
+  // qualified and one button still reviews it. `manual` is excluded for the
+  // same reason it is excluded from the draft hold: it IS the button.
+  if (!autoReview && classification !== "manual" && decision.action === "queue") {
+    return {
+      decision: {
+        action: "triage",
+        reason: "auto review is off, waiting for a human",
+        patch: { ...decision.patch, state: "triage" },
+      },
+      dequeue: true,
+    };
+  }
+
   // (b) R2.3: a draft is never auto-reviewed. Covers both the PR that reverts
   // to draft while it waits and the one that reverts and pushes a commit in
   // the same interval, which `decide` reads as new commits on a queued PR and

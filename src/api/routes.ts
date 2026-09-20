@@ -104,6 +104,10 @@ export interface ApiDeps {
   lastCycle?: () => PollCycleResult | null;
   /** Whether a GitHub token resolved, never the token itself. */
   githubToken?: () => string | null;
+  /** Last reading of whether the review CLI is signed in. */
+  providerAuth?: () => { state: string; method: string | null };
+  /** False when qualifying PRs wait in triage instead of being reviewed. */
+  autoReview?: () => boolean;
 
   /** ms since epoch, when the daemon started. Defaults to construction time. */
   startedAt?: number;
@@ -445,6 +449,8 @@ const status: RouteHandler = async ({ deps }) => {
     binaries: deps.binaries?.status() ?? [],
     // Presence only. The token itself never leaves the daemon (R7.2).
     github: { tokenPresent: deps.githubToken ? deps.githubToken() !== null : false },
+    provider: deps.providerAuth ? deps.providerAuth() : { state: "unknown", method: null },
+    autoReview: deps.autoReview ? deps.autoReview() : true,
     counts: {
       watchedRepos: repos.length,
       triage: active.filter((row) => row.state === "triage").length,
