@@ -342,7 +342,9 @@ async function pollRepo(
   for (const summary of listed) {
     const ref: PRRef = { owner: entry.owner, repo: entry.repo, number: summary.number };
     try {
-      const handled = await handleOpenPR(deps, ref, summary, viewer, now);
+      // The repo's own setting wins; undefined follows the daemon's default.
+      const autoReview = entry.autoReview ?? deps.autoReview !== false;
+      const handled = await handleOpenPR(deps, ref, summary, viewer, now, autoReview);
       count(outcome, handled.action);
       if (handled.reconciled) outcome.reconciled += 1;
     } catch (error) {
@@ -422,7 +424,8 @@ async function handleOpenPR(
   ref: PRRef,
   summary: PRSummary,
   viewer: string,
-  now: string
+  now: string,
+  autoReview: boolean
 ): Promise<Handled> {
   const meta = await loadMeta(deps.lgtmDir, ref);
   const classification = classificationFor(meta, summary, viewer);
@@ -432,7 +435,7 @@ async function handleOpenPR(
     meta,
     summary,
     classification,
-    deps.autoReview !== false
+    autoReview
   );
 
   const patch: MetaUpdate = { ...decision.patch };

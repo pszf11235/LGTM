@@ -70,6 +70,7 @@ import { createEventBus, type DaemonEvent, type EventBus } from "./events";
 import { createNotifier, setUiPort, type SpawnFn } from "./notify";
 import { createReviewQueue, type QueueSnapshot, type ReviewQueue } from "./queue";
 import { createStoreWatch, type StoreWatch } from "./store-watch";
+import { startProviderLogin } from "./login";
 import { checkProviderAuth, type ProviderAuthResult } from "@/provider/auth";
 import {
   createClaudeUsageProbe,
@@ -143,6 +144,8 @@ export interface BindContext {
   providerAuth: () => { state: string; method: string | null };
   /** False when qualifying PRs wait in triage instead of being reviewed. */
   autoReview: () => boolean;
+  /** Opens a terminal running the CLI's sign-in flow. */
+  startLogin: () => Promise<{ started: boolean; command: string; error: string | null }>;
 }
 
 /**
@@ -580,6 +583,12 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
     lastCycle: () => lastCycle,
     providerAuth: () => ({ state: lastAuth.state, method: lastAuth.method }),
     autoReview: () => config.auto_review,
+    startLogin: () =>
+      startProviderLogin(binaries.resolve("claude"), async (cmd) => {
+        const proc = Bun.spawn({ cmd, stdout: "pipe", stderr: "pipe" });
+        const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+        return { exitCode, stderr };
+      }),
     // The real token, not a presence flag. `/api/status` only ever asks whether
     // this is non-null, but the post flow uses the same function as the bearer
     // it sends to GitHub, so handing back a placeholder made every post a 401.
@@ -685,6 +694,16 @@ export async function createDaemon(options: DaemonOptions = {}): Promise<BootRes
   // daemon's own writes from a person's, which costs a redundant refetch.
   storeWatch = createStoreWatch({ dir: lgtmDir, bus: events, log });
   storeWatch.start();
+
+  // Ask once at boot as well as before each dispatch. The gate only probes
+  // when there is work, so an idle daemon would report "unknown" indefinitely
+  // and the settings page would have nothing to tell anyone.
+  void checkProviderAuth(binaries.resolve("claude")).then((result) => {
+    lastAuth = result;
+    if (result.state === "unauthenticated") {
+      log("boot: the Claude CLI is not signed in. Run `claude auth login`");
+    }
+  });
   quota.start(() => {
     // In-flight Rounds count. A queue whose entries are all running still
     // needs a fresh reading before the next one is let through.

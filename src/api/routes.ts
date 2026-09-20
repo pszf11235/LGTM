@@ -49,7 +49,7 @@ import {
   saveMeta,
 } from "@/store/reviews";
 import type { MetaUpdate } from "@/store/reviews";
-import { loadWatchList, removeFromWatchList } from "@/store/watch-list";
+import { loadWatchList, removeFromWatchList, saveWatchList } from "@/store/watch-list";
 import { DEFAULTS, loadConfig, updateConfig } from "@/store/config";
 import type { Config } from "@/store/config";
 import { addRepoWithBackfill, mergeableStatus } from "@/daemon/backfill";
@@ -108,6 +108,8 @@ export interface ApiDeps {
   providerAuth?: () => { state: string; method: string | null };
   /** False when qualifying PRs wait in triage instead of being reviewed. */
   autoReview?: () => boolean;
+  /** Opens a terminal running the CLI's sign-in flow. Absent means the route says so. */
+  startLogin?: () => Promise<{ started: boolean; command: string; error: string | null }>;
 
   /** ms since epoch, when the daemon started. Defaults to construction time. */
   startedAt?: number;
@@ -935,6 +937,55 @@ const patchFinding: RouteHandler = async ({ req, params, deps }) => {
 
 // ─── /api/watchlist ─────────────────────────────────────────────────────────
 
+/**
+ * Set one repo's auto-review override. A body of `{autoReview: null}` clears
+ * it, which returns the repo to following the daemon default rather than
+ * pinning it to whatever that default happens to be today.
+ */
+const patchWatchlistRepo: RouteHandler = async ({ req, deps }) => {
+  const rec = await readJsonBody(req);
+  if (!rec) return fail(400, "bad-body", "expected a JSON object");
+
+  const owner = typeof rec.owner === "string" ? rec.owner : "";
+  const repo = typeof rec.repo === "string" ? rec.repo : "";
+  if (!owner || !repo) return fail(400, "bad-repo", "owner and repo are required");
+
+  const value = rec.autoReview;
+  if (value !== null && typeof value !== "boolean") {
+    return fail(400, "bad-auto-review", "autoReview must be true, false or null");
+  }
+
+  const entries = await loadWatchList(deps.lgtmDir);
+  const found = entries.find((e) => e.owner === owner && e.repo === repo);
+  if (!found) return fail(404, "not-watched", `${owner}/${repo} is not on the watch list`);
+
+  await saveWatchList(
+    entries.map((e) =>
+      e.owner === owner && e.repo === repo
+        ? { ...e, ...(value === null ? { autoReview: undefined } : { autoReview: value }) }
+        : e
+    ),
+    deps.lgtmDir
+  );
+
+  deps.events?.emit({ type: "cycle-finished", repoKey: repoKey(owner, repo) });
+  return json({ owner, repo, autoReview: value });
+};
+
+/**
+ * Start the CLI's sign-in flow. The daemon opens a terminal for it, because
+ * the flow needs a browser and somewhere to report into, and a page cannot be
+ * either. The response always carries the command, so a UI can show it when
+ * the window did not open.
+ */
+const postProviderLogin: RouteHandler = async ({ deps }) => {
+  if (!deps.startLogin) {
+    return fail(503, "no-login", "this daemon cannot open a terminal for you");
+  }
+  const outcome = await deps.startLogin();
+  return json(outcome, outcome.started ? 200 : 502);
+};
+
 const listWatchlist: RouteHandler = async ({ deps }) => {
   const entries = await loadWatchList(deps.lgtmDir);
 
@@ -947,6 +998,8 @@ const listWatchlist: RouteHandler = async ({ deps }) => {
       lastPolledAt: entry.lastPolledAt ?? null,
       // Presence only; the validator itself is the adapter's business.
       conditional: entry.etag !== undefined,
+      // null means "follow the daemon default", which is not the same as off.
+      autoReview: entry.autoReview ?? null,
     })),
   });
 };
@@ -1251,6 +1304,15 @@ export function apiRoutes(): RouteDef[] {
     ...postRoutes(),
 
     {
+      method: "POST",
+      path: "/api/provider/login",
+      name: "provider.login",
+      bearer: true,
+      mutating: true,
+      queryToken: false,
+      handler: postProviderLogin,
+    },
+    {
       method: "GET",
       path: "/api/watchlist",
       name: "watchlist.list",
@@ -1267,6 +1329,15 @@ export function apiRoutes(): RouteDef[] {
       mutating: true,
       queryToken: false,
       handler: addWatchlist,
+    },
+    {
+      method: "PATCH",
+      path: "/api/watchlist",
+      name: "watchlist.patch",
+      bearer: true,
+      mutating: true,
+      queryToken: false,
+      handler: patchWatchlistRepo,
     },
     {
       method: "DELETE",

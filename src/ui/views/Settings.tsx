@@ -39,6 +39,8 @@ interface StatusResponse {
   quota: QuotaState | null;
   binaries: BinaryStatus[];
   github: { tokenPresent: boolean };
+  provider?: { state: "authenticated" | "unauthenticated" | "unknown"; method: string | null };
+  autoReview?: boolean;
 }
 
 interface ConfigResponse {
@@ -140,6 +142,62 @@ function toInt(value: string, fallback: number): number {
 
 // ─── Editable config draft ──────────────────────────────────────────────────
 
+/**
+ * Whether the review CLI is signed in, and a way to fix it when it is not.
+ *
+ * The sign-in flow needs a browser and a terminal, and a web page is neither,
+ * so the button asks the daemon to open a terminal and says so before you
+ * press it. When that cannot happen, the command is shown to run by hand,
+ * which is the same answer without the convenience.
+ */
+export function ProviderAuthRow({
+  status,
+  signingIn,
+  note,
+  onSignIn,
+}: {
+  status: { provider?: { state: string; method: string | null } };
+  signingIn: boolean;
+  note: string | null;
+  onSignIn: () => void;
+}) {
+  const state = status.provider?.state ?? "unknown";
+  const label =
+    state === "authenticated"
+      ? `Signed in${status.provider?.method ? ` with ${status.provider.method}` : ""}`
+      : state === "unauthenticated"
+        ? "Not signed in, so reviews are on hold"
+        : "Sign-in state unknown";
+
+  return (
+    <div className="space-y-2 border-t pt-3" data-testid="provider-auth">
+      <div className="flex items-center justify-between gap-2 text-sm">
+        <span className="font-medium">Claude CLI account</span>
+        <span className="flex items-center gap-2">
+          <span className={state === "unauthenticated" ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
+            {label}
+          </span>
+          <Badge tone={state === "authenticated" ? "good" : state === "unauthenticated" ? "bad" : "warn"}>
+            {state}
+          </Badge>
+        </span>
+      </div>
+      {state !== "authenticated" && (
+        <div className="space-y-1">
+          <Button type="button" size="sm" variant="outline" disabled={signingIn} onClick={onSignIn}>
+            {signingIn ? "Opening a terminal…" : "Sign in"}
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Opens a terminal window and runs the sign-in there, because the flow needs a browser and
+            somewhere to report back to.
+          </p>
+        </div>
+      )}
+      {note && <p className="text-xs text-muted-foreground">{note}</p>}
+    </div>
+  );
+}
+
 interface ConfigDraft {
   intervalMinutes: string;
   pauseAbovePct: string;
@@ -164,6 +222,28 @@ function draftFromConfig(config: Config): ConfigDraft {
 
 export function Settings() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
+  const [loginNote, setLoginNote] = useState<string | null>(null);
+
+  async function signIn() {
+    setSigningIn(true);
+    setLoginNote(null);
+    try {
+      const res = await apiRequest<{ started: boolean; command: string; error: string | null }>(
+        "/api/provider/login",
+        { method: "POST" }
+      );
+      setLoginNote(
+        res.started
+          ? "A terminal is open. Finish signing in there, then this page will catch up."
+          : `Could not open a terminal. Run this yourself: ${res.command}`
+      );
+    } catch (err) {
+      setLoginNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSigningIn(false);
+    }
+  }
   const [statusError, setStatusError] = useState<string | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
@@ -273,6 +353,7 @@ export function Settings() {
                 ))}
               </ul>
             )}
+            {status && <ProviderAuthRow status={status} signingIn={signingIn} note={loginNote} onSignIn={signIn} />}
             {configError && (
               <p className="flex items-center gap-2 text-sm text-destructive">
                 <CircleAlert className="size-4 shrink-0" /> {configError}
