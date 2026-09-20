@@ -150,7 +150,7 @@ function fakeForge(over: Partial<ForgeAdapter> = {}): ForgeAdapter {
     createDraftReview: unexpected("createDraftReview") as (
       ref: PRRef,
       review: DraftReview
-    ) => Promise<{ id: number }>,
+    ) => Promise<{ id: number; url: string | null }>,
     deleteDraftReview: unexpected("deleteDraftReview") as (ref: PRRef, id: number) => Promise<void>,
     getReview: unexpected("getReview") as (
       ref: PRRef,

@@ -47,7 +47,6 @@ import {
   checkLines,
   formatCommentBody,
   formatReviewSummary,
-  postPendingReview,
 } from "@/forge/github/draft-review";
 import type {
   PendingReviewInput,
@@ -451,12 +450,16 @@ export async function runPost(
   // that reaches the next line is a draft only its author can see (ADR 0001).
   // Nothing below this point runs on a failure, which is what keeps a
   // half-failed post from marking findings posted.
-  const created = await postPendingReview(input);
+  // Through the adapter, which is the only module allowed to speak to the
+  // forge (ADR 0001). A second HTTP client here is what produced a post that
+  // authenticated with the literal string "present": the adapter carried the
+  // resolved token and this path carried a presence flag.
+  const created = await forge.createDraftReview(ref, review);
 
   // The id first. Interrupted between these two writes, LGTM knows a draft
   // exists and refuses the next post instead of creating a second one; the
   // findings it did not get to mark stay `open` and post again on the retry.
-  await saveMeta(deps.lgtmDir, ref, { pendingReviewId: created.reviewId });
+  await saveMeta(deps.lgtmDir, ref, { pendingReviewId: created.id });
   await markFindingsPosted(deps.lgtmDir, ref, check.postable.map(keyOf));
   if (check.held.length > 0) {
     await markFindingsHeld(deps.lgtmDir, ref, heldEntries(check));
@@ -470,10 +473,10 @@ export async function runPost(
       ref,
       key: formatRef(ref),
       url: meta.url || prUrl(ref),
-      reviewId: created.reviewId,
-      reviewUrl: created.url,
+      reviewId: created.id,
+      reviewUrl: created.url ?? reviewUrlFor(ref),
       body,
-      commentCount: created.commentCount,
+      commentCount: review.comments.length,
       posted: postableVerdicts(check),
       held: heldVerdicts(check),
       recreated,
