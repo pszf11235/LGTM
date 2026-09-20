@@ -12,7 +12,7 @@
 import { Command } from "commander";
 import packageJson from "../package.json" with { type: "json" };
 import { runInstall, runUninstall } from "./cli/install";
-import { runOpen } from "./cli/open";
+import { defaultLaunch, runOpen } from "./cli/open";
 import { runStatus } from "./cli/status";
 import { runWatchAdd, runWatchList, runWatchRemove } from "./cli/watch";
 import { createDaemon, uiEntry } from "./daemon";
@@ -35,7 +35,8 @@ program
 program
   .command("up")
   .description("Run the daemon in the foreground")
-  .action(async () => {
+  .option("--no-open", "Do not open the web UI, even when run from a terminal")
+  .action(async (opts: { open?: boolean }) => {
     // Referencing the embedded UI keeps the html -> Tailwind bundle path
     // reachable from this entrypoint, so build.ts's compile step exercises it.
     void uiEntry;
@@ -53,8 +54,34 @@ program
     }
 
     const daemon = boot.daemon;
-    console.log(`lgtm: watching on http://127.0.0.1:${daemon.port} (pid ${process.pid})`);
-    console.log("Run `lgtm open` in another terminal to reach the UI.");
+    const url = `http://127.0.0.1:${daemon.port}`;
+    console.log(`lgtm: watching on ${url} (pid ${process.pid})`);
+
+    // Open the UI when a person started this, and not when launchd did. The
+    // plist redirects stdout to a log file, so a TTY is the difference
+    // between "someone is watching a terminal" and "this came up at login",
+    // and nobody wants a browser tab on every boot. --open and --no-open say
+    // so explicitly either way.
+    // Commander gives `open: true` unless --no-open was passed, so an explicit
+    // false is the only signal it carries. Everything else falls through to the
+    // TTY check, which is what separates a person running this from launchd
+    // doing it at login. Declaring --open alongside it would make commander
+    // default this to true and open a browser on every boot.
+    const interactive = process.stdout.isTTY === true;
+    const shouldOpen = opts.open === false ? false : interactive;
+
+    if (shouldOpen) {
+      try {
+        await defaultLaunch(`${url}/#t=${daemon.token}`);
+      } catch (error) {
+        // Not reaching the browser is not a reason to stop watching.
+        console.log(
+          `lgtm: could not open a browser (${error instanceof Error ? error.message : String(error)}). Run \`lgtm open\`.`
+        );
+      }
+    } else {
+      console.log("Run `lgtm open` to reach the UI.");
+    }
 
     let stopping = false;
     const shutdown = async (signal: string) => {
