@@ -344,6 +344,79 @@ function firstNumber(
   return null;
 }
 
+// ─── Auth failures ──────────────────────────────────────────────────────────
+
+/**
+ * The phrases a Provider uses when the problem is its login and not the code.
+ *
+ * The first one is the observed case, verbatim from a Round run against an
+ * expired session: "Failed to authenticate: OAuth session expired and could
+ * not be refreshed". The rest are the neighbouring shapes the same CLI prints
+ * when it has no key, no session, or a rejected one.
+ *
+ * Deliberately phrases and not words. "auth" or "token" alone would match a
+ * review about authentication code, and a review misread as an auth failure
+ * is a Round that never gets retried.
+ */
+const AUTH_FAILURE_PATTERNS: RegExp[] = [
+  /failed to authenticate/i,
+  /authentication (?:failed|error|expired|required)/i,
+  /\boauth\b[^.\n]*\b(?:expired|refresh(?:ed)?|invalid|revoked)\b/i,
+  /\b(?:session|credentials?|api key)s? (?:has |have )?expired/i,
+  /could not be refreshed/i,
+  /\bnot (?:logged|signed) in\b/i,
+  /\bclaude (?:auth )?login\b/i,
+  /(?:run|use|try) `?\/login/i,
+  /invalid api key/i,
+];
+
+/**
+ * The Provider's own words when its output is an auth failure, or null when
+ * it is anything else.
+ *
+ * This is the second half of the fix the preflight probe starts. A session
+ * that expires between the probe and the Round still produces a normal-looking
+ * envelope: `is_error: false`, `subtype: "success"`, `num_turns: 0`, and the
+ * auth sentence sitting where the review should be. Nothing in the envelope's
+ * own error flags gives it away, so the sentence is the only evidence there
+ * is, and reading it is what keeps the Round from being filed as a parse
+ * failure and retried three times against a condition no retry can fix.
+ *
+ * `num_turns: 0` is not required. It was true of the observed case, but a
+ * session that dies mid-Round is the same dead end with a turn count above
+ * zero, and the sentence is what both have in common.
+ *
+ * The message comes back rather than a boolean so the failure can be reported
+ * in the Provider's own words. A human reading "claude is not authenticated"
+ * on a failed Round should not have to open a raw dump to learn why.
+ *
+ * Callers must ask this only about output that produced no findings. A review
+ * that parsed is a review, whatever it says about the auth code it read.
+ */
+export function detectAuthFailure(raw: string): string | null {
+  const text = raw.trim();
+  if (!text) return null;
+
+  // Scan the envelope's result text, not the envelope. Everything else on it
+  // (usage, cost, the model name) is noise no phrase should be matched in.
+  const direct = tryParseJson(text);
+  const message = (direct !== undefined ? envelopeText(direct) : null) ?? text;
+
+  for (const line of message.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (AUTH_FAILURE_PATTERNS.some((pattern) => pattern.test(trimmed))) return summarise(trimmed);
+  }
+
+  return null;
+}
+
+/** One readable line: collapsed whitespace, and short enough to log. */
+function summarise(line: string): string {
+  const collapsed = line.replace(/\s+/g, " ").trim();
+  return collapsed.length > 200 ? `${collapsed.slice(0, 197)}...` : collapsed;
+}
+
 // ─── Validation ─────────────────────────────────────────────────────────────
 
 const SEVERITY_ALIASES: Record<string, Severity> = {
